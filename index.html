@@ -222,6 +222,15 @@ tbody tr:hover td{background:#FAFAF8;}
 .effectif-row td{font-size:11px;font-weight:700;border-top:2px solid var(--border)!important;background:var(--bg)!important;text-align:center;}
 .eff-ok{color:#059669;}.eff-warn{color:#F59E0B;}.eff-ko{color:#DC2626;}
 
+
+/* GESTION MAGASINS */
+.magasin-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);}
+.magasin-row:last-child{border-bottom:none;}
+.color-picker{width:36px!important;height:36px!important;padding:2px!important;border-radius:6px!important;cursor:pointer;}
+.magasin-name-input{flex:1;font-size:13px;padding:7px 10px!important;}
+.btn-del{width:30px;height:30px;padding:0;border-radius:6px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.btn-del:hover{background:#FEE2E2;}
+
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:#1A1917;color:#fff;padding:10px 18px;border-radius:25px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 
@@ -455,9 +464,10 @@ tbody tr:hover td{background:#FAFAF8;}
           <button class="btn btn-primary btn-sm mt-10" onclick="saveParams()">✓ Enregistrer</button>
         </div>
         <div class="param-card">
-          <h3>Adresses des magasins</h3>
-          <div id="paramAdresses"></div>
-          <button class="btn btn-primary btn-sm mt-10" onclick="saveAdresses()">✓ Enregistrer</button>
+          <h3>Magasins & Sites</h3>
+          <div id="paramMagasins"></div>
+          <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterMagasin()">+ Ajouter un magasin</button>
+          <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveMagasins()">✓ Enregistrer</button>
         </div>
       </div>
       <div class="param-card" style="margin-top:14px;">
@@ -1458,12 +1468,12 @@ async function saveNewEmp(){
 
 // ── Paramètres ──
 function renderParams(){
-  // Remplir les règles congés si déjà configurées
   const regles = S.params.reglesConges || {};
   const alerteEl = document.getElementById('pDateAlerte');
   const quotaEl = document.getElementById('pQuota');
   if(alerteEl) alerteEl.value = regles.dateAlerte || '';
   if(quotaEl) quotaEl.value = regles.quota || 25;
+  renderParamMagasins();
   let h='';
   Object.entries(SC).forEach(([site,cfg])=>{
     h+=`<div class="site-param-row">
@@ -1498,19 +1508,119 @@ async function saveParams(){
   const r=await api('saveParams',{params:S.params});
   toast(r&&r.ok?'✓ Paramètres enregistrés':'✓ Enregistré localement');
 }
-async function saveAdresses(){
-  if(!S.params.adresses) S.params.adresses={};
-  Object.keys(SC).forEach(site=>{
-    const el=document.getElementById('addr_'+site.replace(/[^a-zA-Z]/g,'_'));
-    if(el) S.params.adresses[site]=el.value;
+// ── GESTION MAGASINS ──
+function renderParamMagasins(){
+  const el = document.getElementById('paramMagasins');
+  if(!el) return;
+  const sites = Object.keys(SC);
+  let h = '';
+  sites.forEach((site,i) => {
+    const cfg = SC[site];
+    const nbEmps = S.employees.filter(e=>e.site===site).length;
+    h += `<div class="magasin-row" id="magRow_${i}">
+      <input type="color" class="color-picker" id="magColor_${i}" value="${cfg.color}" title="Couleur">
+      <input type="text" class="magasin-name-input" id="magName_${i}" value="${site}" placeholder="Nom du magasin">
+      <input type="text" style="flex:1.5;font-size:12px;padding:7px 10px;" id="magAddr_${i}" value="${S.params.adresses?.[site]||''}" placeholder="Adresse...">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap;">${nbEmps} emp.</span>
+      ${nbEmps===0?`<button class="btn-del" onclick="supprimerMagasin(${i})" title="Supprimer">✕</button>`:'<div style="width:30px"></div>'}
+    </div>`;
   });
-  S.employees.forEach(emp=>{
-    const el=document.getElementById('eaddr_'+emp.id);
-    if(el) emp.addr=el.value;
-  });
+  el.innerHTML = h || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun magasin configuré</div>';
+}
+
+function ajouterMagasin(){
+  const nom = prompt('Nom du nouveau magasin ou site :');
+  if(!nom || !nom.trim()) return;
+  const nomTrim = nom.trim();
+  if(SC[nomTrim]){ toast('Ce magasin existe déjà'); return; }
+  // Couleur aléatoire parmi les disponibles
+  const couleurs = ['#06B6D4','#84CC16','#F97316','#A855F7','#14B8A6','#EF4444','#6366F1'];
+  const couleur = couleurs[Object.keys(SC).length % couleurs.length];
+  SC[nomTrim] = { color: couleur, bg: couleur+'22', border: couleur+'66' };
+  if(!S.params.minStaff) S.params.minStaff = {};
+  S.params.minStaff[nomTrim] = 1;
+  if(!S.params.adresses) S.params.adresses = {};
+  S.params.adresses[nomTrim] = '';
   persist();
-  const r=await api('saveParams',{params:S.params,employees:S.employees});
-  toast(r&&r.ok?'✓ Adresses enregistrées':'✓ Enregistré localement');
+  renderParamMagasins();
+  renderChipsSites();
+  buildSelects();
+  toast(`✓ ${nomTrim} ajouté`);
+}
+
+function supprimerMagasin(idx){
+  const site = Object.keys(SC)[idx];
+  const nbEmps = S.employees.filter(e=>e.site===site).length;
+  if(nbEmps > 0){ toast(`Impossible : ${nbEmps} employé(s) rattaché(s) à ${site}`); return; }
+  if(!confirm(`Supprimer le magasin "${site}" ?`)) return;
+  delete SC[site];
+  if(S.params.minStaff) delete S.params.minStaff[site];
+  if(S.params.adresses) delete S.params.adresses[site];
+  if(S.params.rotationSamedis) delete S.params.rotationSamedis[site];
+  // Retirer des filtres actifs
+  S.filtresSites = S.filtresSites.filter(s=>s!==site);
+  if(S.filtresSites.length===0 && Object.keys(SC).length>0) S.filtresSites=[Object.keys(SC)[0]];
+  persist();
+  renderParamMagasins();
+  renderChipsSites();
+  buildSelects();
+  renderWeek();
+  toast(`✓ ${site} supprimé`);
+}
+
+async function saveMagasins(){
+  const sites = Object.keys(SC);
+  const newSC = {};
+  const newAdresses = {};
+  const newMinStaff = S.params.minStaff || {};
+  let hasRename = false;
+
+  sites.forEach((oldSite, i) => {
+    const newNom = document.getElementById('magName_'+i)?.value.trim();
+    const newColor = document.getElementById('magColor_'+i)?.value || SC[oldSite].color;
+    const newAddr = document.getElementById('magAddr_'+i)?.value || '';
+    if(!newNom) return;
+
+    // Recalculer bg et border depuis la couleur choisie
+    newSC[newNom] = {
+      color: newColor,
+      bg: newColor+'18',
+      border: newColor+'55'
+    };
+    newAdresses[newNom] = newAddr;
+    if(newNom !== oldSite) {
+      // Renommer dans les employés et le planning
+      S.employees.forEach(emp => { if(emp.site===oldSite) emp.site=newNom; });
+      Object.keys(S.planning).forEach(key => {
+        if(S.planning[key].site===oldSite) S.planning[key].site=newNom;
+      });
+      if(newMinStaff[oldSite]!==undefined){ newMinStaff[newNom]=newMinStaff[oldSite]; delete newMinStaff[oldSite]; }
+      hasRename = true;
+    }
+    if(newMinStaff[newNom]===undefined) newMinStaff[newNom]=1;
+  });
+
+  // Appliquer
+  Object.keys(SC).forEach(k=>delete SC[k]);
+  Object.assign(SC, newSC);
+  S.params.adresses = newAdresses;
+  S.params.minStaff = newMinStaff;
+  // Mettre à jour filtres si renommage
+  if(hasRename) S.filtresSites = Object.keys(SC).slice(0,1);
+
+  persist();
+  const r = await api('saveParams',{params:S.params, employees:S.employees, sc:SC});
+  buildLegend('mgrLeg');
+  renderChipsSites();
+  buildSelects();
+  renderWeek();
+  renderParamMagasins();
+  renderParamRotation();
+  toast(r&&r.ok?'✓ Magasins enregistrés':'✓ Enregistré localement');
+}
+
+async function saveAdresses(){
+  await saveMagasins();
 }
 function saveScriptUrl(){
   const url=document.getElementById('paramScriptUrl').value.trim();
@@ -1864,128 +1974,4 @@ function renderCongesMgr() {
 async function validerConge(id) {
   const req = S.requests.find(r => r.id == id);
   if (!req) return;
-  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin);
-  // Appliquer joker si warning
-  if (check.warnings.length && !check.errors.length) {
-    if (!S.params.jokers) S.params.jokers = {};
-    S.params.jokers[req.empId] = (S.params.jokers[req.empId] || 0) + 1;
-  }
-  req.status = 'approved';
-  // Marquer dans le planning
-  let cur = new Date(req.dateDebut);
-  while (cur <= new Date(req.dateFin)) {
-    if (JOURS_OUVRES.includes(cur.getDay())) {
-      const emp = S.employees.find(e => e.id === req.empId);
-      S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
-    }
-    cur = addDays(cur, 1);
-  }
-  persist();
-  renderCongesMgr();
-  renderWeek();
-  toast('✓ Congé validé');
-  api('validerConge', {reqId: id, empId: req.empId, dateDebut: req.dateDebut, dateFin: req.dateFin,
-    empEmail: req.empEmail, empName: req.empName, jokers: S.params.jokers});
-}
-
-async function refuserConge(id) {
-  const req = S.requests.find(r => r.id == id);
-  if (!req) return;
-  req.status = 'refused';
-  persist();
-  renderCongesMgr();
-  toast('Congé refusé');
-  api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
-    dateDebut: req.dateDebut, dateFin: req.dateFin});
-}
-
-async function envoyerRelances() {
-  const regles = S.params.reglesConges || {};
-  const empsSansConges = S.employees.filter(e => {
-    const restants = QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id);
-    return restants > 10; // Plus de 10j non posés = relance
-  });
-  if (!empsSansConges.length) { toast('Tous les employés ont posé leurs congés ✓'); return; }
-  toast(`Envoi de ${empsSansConges.length} relance(s)...`);
-  const r = await api('envoyerRelances', {employes: empsSansConges.map(e=>({id:e.id,name:e.name,email:e.email,
-    restants: QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id),
-    jokers: getJokersUtilises(e.id)})), managerEmail: MANAGER_EMAIL||''});
-  toast(r&&r.ok ? `✓ ${empsSansConges.length} relance(s) envoyée(s)` : 'Relances envoyées localement');
-}
-
-// Paramètres règles congés
-function saveReglesConges() {
-  if (!S.params.reglesConges) S.params.reglesConges = {};
-  S.params.reglesConges.dateAlerte = document.getElementById('pDateAlerte')?.value || '';
-  S.params.reglesConges.quota = parseInt(document.getElementById('pQuota')?.value) || 25;
-  persist();
-  api('saveParams', {params: S.params});
-  toast('✓ Paramètres congés enregistrés');
-}
-
-// Rotation samedis
-function renderParamRotation() {
-  const rot = S.params.rotationSamedis || {};
-  let h = '';
-  Object.keys(SC).forEach(site => {
-    h += `<div class="rotation-row">
-      <div style="display:flex;align-items:center;gap:6px;flex:1">
-        <div style="width:10px;height:10px;border-radius:3px;background:${SC[site].color}"></div>
-        <span style="font-size:13px;font-weight:500">${site}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
-        1 samedi off toutes les
-        <input type="number" class="mini-input" id="rot_${site.replace(/[^a-zA-Z]/g,'_')}" value="${rot[site]||2}" min="1" max="8">
-        semaines
-      </div>
-    </div>`;
-  });
-  const el = document.getElementById('paramRotation');
-  if (el) el.innerHTML = h;
-}
-
-function saveRotation() {
-  if (!S.params.rotationSamedis) S.params.rotationSamedis = {};
-  Object.keys(SC).forEach(site => {
-    const el = document.getElementById('rot_'+site.replace(/[^a-zA-Z]/g,'_'));
-    if (el) S.params.rotationSamedis[site] = parseInt(el.value) || 2;
-  });
-  persist();
-  api('saveParams', {params: S.params});
-  toast('✓ Rotation samedis enregistrée');
-}
-
-// Repos fixes par employé
-function renderParamReposFixe() {
-  const repos = S.params.reposFixe || {};
-  const JOURS = ['Aucun','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
-  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
-  S.employees.forEach(emp => {
-    h += `<div class="fg">
-      <label>${emp.name.split(' ')[0]}</label>
-      <select id="rf_${emp.id}" style="font-size:12px;">
-        ${JOURS.map((j,i)=>`<option value="${i}" ${(repos[emp.id]||0)==i?'selected':''}>${j}</option>`).join('')}
-      </select>
-    </div>`;
-  });
-  h += '</div>';
-  const el = document.getElementById('paramReposFixe');
-  if (el) el.innerHTML = h;
-}
-
-function saveReposFixe() {
-  if (!S.params.reposFixe) S.params.reposFixe = {};
-  S.employees.forEach(emp => {
-    const el = document.getElementById('rf_'+emp.id);
-    if (el) S.params.reposFixe[emp.id] = parseInt(el.value) || 0;
-  });
-  persist();
-  api('saveParams', {params: S.params});
-  toast('✓ Jours de repos fixes enregistrés');
-}
-
-// ══ DÉMARRAGE ══
-window.addEventListener('load',()=>{loadAll();});
-</script>
-</body>
-</html>
+  const check = verifierRegleCo
