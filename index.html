@@ -199,6 +199,29 @@ tbody tr:hover td{background:#FAFAF8;}
 .rotation-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
 .rotation-row:last-child{border-bottom:none;}
 
+
+/* FILTRES CHIPS */
+.filter-bar{margin-bottom:12px;}
+.filter-section{margin-bottom:8px;}
+.filter-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;}
+.chips{display:flex;flex-wrap:wrap;gap:5px;}
+.chip{padding:5px 11px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid transparent;transition:all .15s;background:var(--bg);color:var(--muted);}
+.chip:hover{border-color:currentColor;opacity:.85;}
+.chip.active-site{color:#fff!important;border-color:transparent!important;}
+.chip.active-emp{border-width:2px!important;background:#fff!important;}
+.chip-all{background:var(--bg);color:var(--text);border:2px solid var(--border);}
+.chip-all.sel{background:#1A1917;color:#fff;border-color:#1A1917;}
+
+/* ALERTE EFFECTIF */
+.effectif-alert{background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 13px;margin-bottom:10px;font-size:12px;color:#DC2626;display:none;}
+.effectif-alert.show{display:block;}
+.effectif-warn{background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 13px;margin-bottom:10px;font-size:12px;color:#92400E;display:none;}
+.effectif-warn.show{display:block;}
+
+/* LIGNE EFFECTIF DANS TABLE */
+.effectif-row td{font-size:11px;font-weight:700;border-top:2px solid var(--border)!important;background:var(--bg)!important;text-align:center;}
+.eff-ok{color:#059669;}.eff-warn{color:#F59E0B;}.eff-ko{color:#DC2626;}
+
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:#1A1917;color:#fff;padding:10px 18px;border-radius:25px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 
@@ -362,8 +385,23 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
       </div>
       <div id="vSemaine">
+        <!-- FILTRES -->
+        <div class="filter-bar">
+          <div class="filter-section">
+            <div class="filter-label">Magasins</div>
+            <div class="chips" id="chipsSites"></div>
+          </div>
+          <div class="filter-section" id="filterEmpSection" style="display:none;">
+            <div class="filter-label">Employés</div>
+            <div class="chips" id="chipsEmps"></div>
+          </div>
+        </div>
+        <!-- ALERTES EFFECTIF -->
+        <div class="effectif-alert" id="alertEffectif"></div>
+        <div class="effectif-warn" id="warnEffectif"></div>
+        <!-- TABLEAU -->
         <div class="table-wrap"><table><thead id="tH"></thead><tbody id="tB"></tbody></table></div>
-        <div class="muted tc mt-10">Cliquez sur une case pour modifier</div>
+        <div class="muted tc mt-10">Cliquez sur une case pour modifier · Ligne du bas = effectif présent par jour</div>
       </div>
       <div id="vMoisView" style="display:none;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
@@ -598,6 +636,8 @@ const S={
   mods:lsGet('mods',[]),
   eWO:0,mWO:0,mMO:0,
   view:'sem',moisMode:'site',
+  filtresSites:[], // sites actifs (vide = magasin par défaut)
+  filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
   editing:null,editType:null,editingAbs:null,
   params:lsGet('params',{
     minStaff:{'Ham':2,'Longueau':2,'Roye':2,'Breteuil':1,'Entrepôt':1},
@@ -738,7 +778,7 @@ function doLogin(){
   else toast('Code non reconnu');
 }
 function loginMgr(){S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();}
-function logout(){S.user=null;S.role=null;S.eWO=0;document.getElementById('loginCode').value='';showScr('sLogin');}
+function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];document.getElementById('loginCode').value='';showScr('sLogin');}
 document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
 function showScr(id){
@@ -828,7 +868,7 @@ async function sendReq(){
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();
+  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();
   if(document.getElementById('paramScriptUrl'))
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
@@ -872,34 +912,201 @@ function setMoisMode(mode){
   renderMonth();
 }
 
+// ── FILTRES ──
+function initFiltres() {
+  // Par défaut : magasin du premier employé trouvé (ou Ham)
+  if (S.filtresSites.length === 0) {
+    const defSite = S.employees[0]?.site || 'Ham';
+    S.filtresSites = [defSite];
+  }
+  renderChipsSites();
+}
+
+function renderChipsSites() {
+  const sites = Object.keys(SC);
+  let h = `<div class="chip chip-all${S.filtresSites.length===sites.length?' sel':''}" onclick="toggleTousSites()">Tous</div>`;
+  sites.forEach(site => {
+    const c = SC[site];
+    const active = S.filtresSites.includes(site);
+    h += `<div class="chip${active?' active-site':''}"
+      style="${active?`background:${c.color};`:`color:${c.color};border-color:${c.color};`}"
+      onclick="toggleSite('${site}')">${site}</div>`;
+  });
+  document.getElementById('chipsSites').innerHTML = h;
+  renderChipsEmps();
+}
+
+function toggleTousSites() {
+  const sites = Object.keys(SC);
+  if (S.filtresSites.length === sites.length) {
+    S.filtresSites = [S.employees[0]?.site || 'Ham'];
+  } else {
+    S.filtresSites = [...sites];
+  }
+  S.filtresEmps = [];
+  renderChipsSites();
+  renderWeek();
+}
+
+function toggleSite(site) {
+  if (S.filtresSites.includes(site)) {
+    if (S.filtresSites.length > 1) S.filtresSites = S.filtresSites.filter(s => s !== site);
+  } else {
+    S.filtresSites.push(site);
+  }
+  S.filtresEmps = [];
+  renderChipsSites();
+  renderWeek();
+}
+
+function renderChipsEmps() {
+  const empSection = document.getElementById('filterEmpSection');
+  const empsVisibles = S.employees.filter(e => S.filtresSites.includes(e.site));
+  if (empsVisibles.length <= 1) { empSection.style.display='none'; return; }
+  empSection.style.display = 'block';
+  let h = `<div class="chip chip-all${S.filtresEmps.length===0?' sel':''}" onclick="resetFiltresEmps()">Tous</div>`;
+  empsVisibles.forEach(emp => {
+    const c = SC[emp.site] || {color:'#888'};
+    const active = S.filtresEmps.includes(emp.id);
+    h += `<div class="chip${active?' active-emp':''}"
+      style="color:${c.color};${active?`border-color:${c.color};`:''}"
+      onclick="toggleEmp('${emp.id}')">${emp.name.split(' ')[0]}</div>`;
+  });
+  document.getElementById('chipsEmps').innerHTML = h;
+}
+
+function toggleEmp(empId) {
+  if (S.filtresEmps.includes(empId)) {
+    S.filtresEmps = S.filtresEmps.filter(id => id !== empId);
+  } else {
+    S.filtresEmps.push(empId);
+  }
+  renderChipsEmps();
+  renderWeek();
+}
+
+function resetFiltresEmps() {
+  S.filtresEmps = [];
+  renderChipsEmps();
+  renderWeek();
+}
+
+function getEmpsFiltres() {
+  let emps = S.employees.filter(e => S.filtresSites.includes(e.site));
+  if (S.filtresEmps.length > 0) emps = emps.filter(e => S.filtresEmps.includes(e.id));
+  return emps;
+}
+
+// ── ALERTES EFFECTIF ──
+function checkEffectifAlerts(mon) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const alertes = [];
+  const warnings = [];
+
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(mon, i);
+    if (d.getDay() === 0) continue; // dimanche skip
+    const dateStr = fmt(d);
+    Object.keys(SC).forEach(site => {
+      const minStaff = S.params.minStaff?.[site] || 1;
+      const presents = S.employees.filter(e => {
+        if (e.site !== site) return false;
+        const sh = S.planning[`${e.id}_${dateStr}`];
+        return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie';
+      }).length;
+      const total = S.employees.filter(e => e.site === site).length;
+      if (total > 0) {
+        if (presents < minStaff) {
+          alertes.push(`${JOURS_C[i]} ${d.getDate()}/${d.getMonth()+1} — ${site} : ${presents}/${total} présent(s), minimum requis : ${minStaff}`);
+        } else if (presents === minStaff) {
+          warnings.push(`${JOURS_C[i]} ${d.getDate()}/${d.getMonth()+1} — ${site} : effectif au minimum (${presents}/${minStaff})`);
+        }
+      }
+    });
+  }
+
+  const alertEl = document.getElementById('alertEffectif');
+  const warnEl = document.getElementById('warnEffectif');
+  if (alertes.length) {
+    alertEl.innerHTML = '⚠️ <strong>Effectif insuffisant :</strong><br>' + alertes.join('<br>');
+    alertEl.classList.add('show');
+  } else { alertEl.classList.remove('show'); }
+  if (warnings.length) {
+    warnEl.innerHTML = '⚠️ <strong>Effectif au minimum :</strong><br>' + warnings.join('<br>');
+    warnEl.classList.add('show');
+  } else { warnEl.classList.remove('show'); }
+}
+
 function renderWeek(){
   const today=new Date();today.setHours(0,0,0,0);
   const mon=addDays(getMon(today),S.mWO*7);
   document.getElementById('mWLbl').textContent=`${fmtFR(mon,{day:'numeric',month:'short'})} – ${fmtFR(addDays(mon,6),{day:'numeric',month:'short',year:'numeric'})}`;
+
+  // Initialiser les filtres si premier chargement
+  if(S.filtresSites.length===0) initFiltres();
+  else renderChipsSites();
+
+  // Vérifier alertes effectif sur toute la semaine
+  checkEffectifAlerts(mon);
+
+  const emps = getEmpsFiltres();
+
   let th=`<tr><th>Employé</th>`;
   for(let i=0;i<7;i++){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
-    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+    const isW=d.getDay()===0||d.getDay()===6;
+    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
+
   let tb='';
-  S.employees.forEach(emp=>{
-    tb+=`<tr><td><div class="emp-cell">
-      <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
-      <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${emp.name.split(' ')[0]}</div>
-      <div style="font-size:10px;color:var(--muted)">${emp.site}</div></div>
-    </div></td>`;
+  // Grouper par site si plusieurs sites visibles
+  const sitesVisible = [...new Set(emps.map(e => e.site))];
+  const multiSite = sitesVisible.length > 1;
+
+  sitesVisible.forEach(site => {
+    const empsDeCSite = emps.filter(e => e.site === site);
+    if (multiSite) {
+      // Ligne séparatrice de site
+      const c = SC[site] || {color:'#888'};
+      tb += `<tr><td colspan="8" style="background:${c.color}14;border-left:3px solid ${c.color};padding:5px 10px;font-size:11px;font-weight:700;color:${c.color};">${site}</td></tr>`;
+    }
+    empsDeCSite.forEach(emp=>{
+      tb+=`<tr><td><div class="emp-cell">
+        <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
+        <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${emp.name.split(' ')[0]}</div>
+        <div style="font-size:10px;color:var(--muted)">${multiSite?emp.site:TYPES.find(t=>t.key===emp.slot)?.info||emp.slot}</div></div>
+      </div></td>`;
+      for(let i=0;i<7;i++){
+        const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+        const isW=d.getDay()===0||d.getDay()===6;
+        const sh=S.planning[`${emp.id}_${fmt(d)}`];
+        const type=sh?.type||'off';const empSite=sh?.site||emp.site;
+        const cell=type==='off'
+          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`
+          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
+      }
+      tb+='</tr>';
+    });
+
+    // Ligne effectif par site
+    const minStaff = S.params.minStaff?.[site] || 1;
+    tb += `<tr class="effectif-row"><td style="font-size:10px;color:var(--muted);font-weight:600;padding-left:12px;">Présents ${site}</td>`;
     for(let i=0;i<7;i++){
-      const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
-      const sh=S.planning[`${emp.id}_${fmt(d)}`];
-      const type=sh?.type||'off';const site=sh?.site||emp.site;
-      const cell=type==='off'
-        ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`
-        :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site).color};border-color:${getColor(type,site).color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
-      tb+=`<td style="${isT?'background:#F0F7FF;':''}">${cell}</td>`;
+      const d=addDays(mon,i);
+      const presents=S.employees.filter(e=>{
+        if(e.site!==site)return false;
+        const sh=S.planning[`${e.id}_${fmt(d)}`];
+        return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie';
+      }).length;
+      const total=S.employees.filter(e=>e.site===site).length;
+      const cls=presents<minStaff?'eff-ko':presents===minStaff?'eff-warn':'eff-ok';
+      tb+=`<td class="${cls}">${d.getDay()===0?'—':presents+'/'+'<span style="opacity:.5">'+total+'</span>'}</td>`;
     }
     tb+='</tr>';
   });
+
   document.getElementById('tB').innerHTML=tb;
 }
 
@@ -1086,6 +1293,10 @@ async function saveShift(){
   let det=t?t.info:'';if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   S.mods.push({empId,dl,det,seen:false});
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
+  // Vérifier si la modif crée un problème d'effectif
+  const today2=new Date();today2.setHours(0,0,0,0);
+  const mon2=addDays(getMon(today2),S.mWO*7);
+  checkEffectifAlerts(mon2);
   toast('Enregistrement...');
   // Sync avec Sheet
   const r=await api('updateShift',{
