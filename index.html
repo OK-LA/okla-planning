@@ -720,11 +720,24 @@ async function loadAll(){
     if(r.planning)   {S.planning=r.planning;    lsSet('planning',r.planning);}
     if(r.requests)   {S.requests=r.requests;    lsSet('requests',r.requests);}
     if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
-    if(r.params)     {S.params=r.params;        lsSet('params',r.params);}
+    if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
+    // Initialiser planning vide si pas de données
+    if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
+    // Générer planning par défaut pour les employés si vide
+    if(S.employees.length>0 && Object.keys(S.planning).length===0){
+      const today=new Date();today.setHours(0,0,0,0);
+      S.employees.forEach(emp=>{
+        for(let d=-28;d<=84;d++){
+          const dt=addDays(today,d);
+          const key=emp.id+'_'+fmt(dt);
+          if(!S.planning[key]) S.planning[key]={type:dt.getDay()===0?'off':(emp.slot||'magasin'),site:emp.site,note:''};
+        }
+      });
+      lsSet('planning',S.planning);
+    }
     setLoadingText('Données chargées ✓');
     setTimeout(()=>{hideLoading();showScr('sLogin');},400);
   } else {
-    // Utiliser le cache local si dispo
     if(S.employees.length>0){
       setLoadingText('Mode hors ligne — données locales');
       setTimeout(()=>{hideLoading();showScr('sLogin');setSyncing(false,true);},800);
@@ -1974,4 +1987,128 @@ function renderCongesMgr() {
 async function validerConge(id) {
   const req = S.requests.find(r => r.id == id);
   if (!req) return;
-  const check = verifierRegleCo
+  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin);
+  // Appliquer joker si warning
+  if (check.warnings.length && !check.errors.length) {
+    if (!S.params.jokers) S.params.jokers = {};
+    S.params.jokers[req.empId] = (S.params.jokers[req.empId] || 0) + 1;
+  }
+  req.status = 'approved';
+  // Marquer dans le planning
+  let cur = new Date(req.dateDebut);
+  while (cur <= new Date(req.dateFin)) {
+    if (JOURS_OUVRES.includes(cur.getDay())) {
+      const emp = S.employees.find(e => e.id === req.empId);
+      S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
+    }
+    cur = addDays(cur, 1);
+  }
+  persist();
+  renderCongesMgr();
+  renderWeek();
+  toast('✓ Congé validé');
+  api('validerConge', {reqId: id, empId: req.empId, dateDebut: req.dateDebut, dateFin: req.dateFin,
+    empEmail: req.empEmail, empName: req.empName, jokers: S.params.jokers});
+}
+
+async function refuserConge(id) {
+  const req = S.requests.find(r => r.id == id);
+  if (!req) return;
+  req.status = 'refused';
+  persist();
+  renderCongesMgr();
+  toast('Congé refusé');
+  api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
+    dateDebut: req.dateDebut, dateFin: req.dateFin});
+}
+
+async function envoyerRelances() {
+  const regles = S.params.reglesConges || {};
+  const empsSansConges = S.employees.filter(e => {
+    const restants = QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id);
+    return restants > 10; // Plus de 10j non posés = relance
+  });
+  if (!empsSansConges.length) { toast('Tous les employés ont posé leurs congés ✓'); return; }
+  toast(`Envoi de ${empsSansConges.length} relance(s)...`);
+  const r = await api('envoyerRelances', {employes: empsSansConges.map(e=>({id:e.id,name:e.name,email:e.email,
+    restants: QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id),
+    jokers: getJokersUtilises(e.id)})), managerEmail: MANAGER_EMAIL||''});
+  toast(r&&r.ok ? `✓ ${empsSansConges.length} relance(s) envoyée(s)` : 'Relances envoyées localement');
+}
+
+// Paramètres règles congés
+function saveReglesConges() {
+  if (!S.params.reglesConges) S.params.reglesConges = {};
+  S.params.reglesConges.dateAlerte = document.getElementById('pDateAlerte')?.value || '';
+  S.params.reglesConges.quota = parseInt(document.getElementById('pQuota')?.value) || 25;
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Paramètres congés enregistrés');
+}
+
+// Rotation samedis
+function renderParamRotation() {
+  const rot = S.params.rotationSamedis || {};
+  let h = '';
+  Object.keys(SC).forEach(site => {
+    h += `<div class="rotation-row">
+      <div style="display:flex;align-items:center;gap:6px;flex:1">
+        <div style="width:10px;height:10px;border-radius:3px;background:${SC[site].color}"></div>
+        <span style="font-size:13px;font-weight:500">${site}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
+        1 samedi off toutes les
+        <input type="number" class="mini-input" id="rot_${site.replace(/[^a-zA-Z]/g,'_')}" value="${rot[site]||2}" min="1" max="8">
+        semaines
+      </div>
+    </div>`;
+  });
+  const el = document.getElementById('paramRotation');
+  if (el) el.innerHTML = h;
+}
+
+function saveRotation() {
+  if (!S.params.rotationSamedis) S.params.rotationSamedis = {};
+  Object.keys(SC).forEach(site => {
+    const el = document.getElementById('rot_'+site.replace(/[^a-zA-Z]/g,'_'));
+    if (el) S.params.rotationSamedis[site] = parseInt(el.value) || 2;
+  });
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Rotation samedis enregistrée');
+}
+
+// Repos fixes par employé
+function renderParamReposFixe() {
+  const repos = S.params.reposFixe || {};
+  const JOURS = ['Aucun','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  S.employees.forEach(emp => {
+    h += `<div class="fg">
+      <label>${emp.name.split(' ')[0]}</label>
+      <select id="rf_${emp.id}" style="font-size:12px;">
+        ${JOURS.map((j,i)=>`<option value="${i}" ${(repos[emp.id]||0)==i?'selected':''}>${j}</option>`).join('')}
+      </select>
+    </div>`;
+  });
+  h += '</div>';
+  const el = document.getElementById('paramReposFixe');
+  if (el) el.innerHTML = h;
+}
+
+function saveReposFixe() {
+  if (!S.params.reposFixe) S.params.reposFixe = {};
+  S.employees.forEach(emp => {
+    const el = document.getElementById('rf_'+emp.id);
+    if (el) S.params.reposFixe[emp.id] = parseInt(el.value) || 0;
+  });
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Jours de repos fixes enregistrés');
+}
+
+// ══ DÉMARRAGE ══
+window.addEventListener('load',()=>{loadAll();});
+</script>
+</body>
+</html>
