@@ -1173,7 +1173,7 @@ function renderMonthSite(ref,today){
       <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)</span>
     </div>
     <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
-    <div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l'effectif minimum · Cliquez sur une case pour modifier</div>`;
+    <div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l&#39;effectif minimum · Cliquez sur une case pour modifier</div>`;
 }
 
 function renderMonthEmp(ref,today){
@@ -1618,7 +1618,7 @@ function getDelaiRequis(dateDebut, dateFin) {
   // 1 semaine ou plus → 60 jours
   if (nbJours >= 5) return { jours: 60, regle: '1 semaine ou + : 2 mois de préavis', depasseLimite: false };
   // Autre → 14 jours par défaut
-  return { jours: 14, regle: 'Moins d'une semaine : 2 semaines de préavis', depasseLimite: false };
+  return { jours: 14, regle: 'Moins d\'une semaine : 2 semaines de préavis', depasseLimite: false };
 }
 
 // ── PRIORITÉ VACANCES SCOLAIRES ──
