@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>OK-LA Planning</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+:root{
+  --bg:#F5F4F0;--surface:#fff;--border:#E2E0D9;--text:#1A1917;--muted:#8A887F;
+  --r:10px;--sh:0 1px 3px rgba(0,0,0,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;}
+
+.header{background:#fff;border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:var(--sh);}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.5px;}.logo em{font-style:normal;color:#3B82F6;}
+.badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+.badge-mgr{background:#1A1917;color:#fff;}.badge-emp{background:#3B82F6;color:#fff;}
+
+.screen{display:none;}.screen.active{display:block;}
+.content{max-width:1020px;margin:0 auto;padding:18px 14px;}
+
+.fg{margin-bottom:13px;}
+label{font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px;}
+input,select,textarea{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;background:var(--bg);color:var(--text);outline:none;transition:border-color .15s;}
+input:focus,select:focus,textarea:focus{border-color:#3B82F6;background:#fff;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:inherit;}
+.btn-primary{background:#1A1917;color:#fff;}.btn-primary:hover{background:#333;}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}.btn-ghost:hover{background:var(--border);}
+.btn-sm{padding:6px 11px;font-size:12px;}
+.btn-save{background:#1A1917;color:#fff;}
+.btn-ok{background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;}
+.btn-no{background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;}
+.btn-blue{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;}
+.btn-full{width:100%;}
+.divider{text-align:center;color:var(--muted);font-size:12px;margin:14px 0;position:relative;}
+.divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);}
+.divider span{background:#fff;padding:0 10px;position:relative;}
+
+.tabs{display:flex;gap:3px;background:var(--border);padding:3px;border-radius:9px;margin-bottom:18px;}
+.tab{flex:1;text-align:center;padding:7px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:inherit;transition:all .15s;}
+.tab.active{background:#fff;color:var(--text);box-shadow:var(--sh);}
+.tab-content{display:none;}.tab-content.active{display:block;}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:16px;}
+.stat{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:11px;text-align:center;}
+.stat-val{font-size:20px;font-weight:700;}.stat-lbl{font-size:10px;color:var(--muted);margin-top:2px;}
+
+.legend{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center;}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:var(--muted);}
+.ldot{width:11px;height:11px;border-radius:3px;}
+
+.view-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+.week-label{font-weight:600;font-size:13px;flex:1;text-align:center;white-space:nowrap;}
+.vtoggle{display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;}
+.vbtn{padding:5px 13px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit;color:var(--muted);transition:all .15s;}
+.vbtn.active{background:#fff;color:var(--text);box-shadow:var(--sh);}
+
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--border);background:#fff;}
+table{width:100%;border-collapse:collapse;min-width:580px;}
+thead th{padding:8px 5px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:2px solid var(--border);background:var(--bg);text-align:center;}
+thead th:first-child{text-align:left;padding-left:12px;}
+tbody td{padding:4px 5px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle;}
+tbody td:first-child{text-align:left;padding-left:12px;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover td{background:#FAFAF8;}
+.emp-cell{display:flex;align-items:center;gap:7px;}
+.avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10px;flex-shrink:0;}
+
+.sb{width:100%;height:28px;border-radius:5px;cursor:pointer;transition:all .12s;border:1.5px solid transparent;display:flex;align-items:center;justify-content:center;}
+.sb:hover{filter:brightness(.86);transform:scale(1.07);}
+.sb.empty{background:transparent;border:1.5px dashed #D1D5DB;}
+.sb.empty:hover{border-color:#9CA3AF;background:#F9FAFB;}
+.sb.vip::after{content:'★';font-size:10px;color:rgba(255,255,255,.9);}
+
+/* VUE MOIS PAR SITE */
+.site-month-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--border);background:#fff;}
+.site-month-table{border-collapse:collapse;width:100%;}
+.site-month-table th{padding:6px 4px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:2px solid var(--border);background:var(--bg);text-align:center;white-space:nowrap;}
+.site-month-table th.emp-th{text-align:center;min-width:60px;}
+.site-month-table th.date-th{text-align:left;padding-left:10px;position:sticky;left:0;background:var(--bg);z-index:2;min-width:80px;}
+.site-month-table td{padding:3px 3px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center;vertical-align:middle;}
+.site-month-table td.date-td{text-align:left;padding:5px 10px;border-right:2px solid var(--border);position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;}
+.site-month-table tr:last-child td{border-bottom:none;}
+.site-month-table td.we{background:#FAFAF8;}
+.site-month-table th.we{background:#F3F2EF;}
+.mblock{width:34px;height:22px;border-radius:4px;margin:0 auto;cursor:pointer;transition:all .1s;}
+.mblock:hover{transform:scale(1.12);filter:brightness(.88);}
+.mblock.empty{background:transparent;border:1px dashed #D1D5DB;}
+.mblock.empty:hover{border-color:#9CA3AF;}
+.staff-row td{font-size:10px;font-weight:700;border-top:2px solid var(--border)!important;background:var(--bg)!important;}
+.staff-ok{color:#059669;}.staff-warn{color:#DC2626;}
+
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.cal-head{text-align:center;font-size:11px;font-weight:600;color:var(--muted);padding:4px 0;}
+.cal-day{aspect-ratio:1/1;border-radius:6px;border:1px solid var(--border);background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .12s;min-height:38px;overflow:hidden;}
+.cal-day:hover{border-color:#9CA3AF;}
+.cal-day.other{background:var(--bg);opacity:.45;cursor:default;}
+.cal-day.today-cal{border-color:#1A1917!important;border-width:2px;}
+.cnum{font-size:12px;font-weight:600;line-height:1;margin-bottom:3px;}
+.cbar{width:68%;height:7px;border-radius:3px;}
+
+.emp-hero{display:flex;align-items:center;gap:12px;padding:14px;background:#fff;border-radius:var(--r);border:1px solid var(--border);margin-bottom:14px;}
+.av{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;}
+.day-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-radius:8px;border:1px solid var(--border);margin-bottom:5px;}
+.day-row.today-row{border-color:#1A1917;border-width:2px;}
+.dlbl{min-width:34px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;}
+.dnum{font-size:20px;font-weight:700;min-width:28px;line-height:1;}
+.dbar{flex:1;height:24px;border-radius:5px;}
+.dbar.off{background:var(--bg);border:1px dashed var(--border);}
+.site-pill{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;}
+
+.abs-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;}
+.abs-head{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.abs-badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;}
+.abs-badge.maladie{background:#FEF2F2;color:#DC2626;}
+.abs-badge.autre{background:#FFF7ED;color:#C2410C;}
+.sugge-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+.sugge-item:last-child{border-bottom:none;}
+.sugge-rank{width:22px;height:22px;border-radius:50%;background:var(--bg);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sugge-rank.top{background:#1A1917;color:#fff;}
+.sugge-info{flex:1;}
+.sugge-name{font-weight:600;font-size:13px;}
+.sugge-meta{font-size:11px;color:var(--muted);margin-top:1px;}
+
+.params-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:600px){.params-grid{grid-template-columns:1fr;}}
+.param-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:16px;}
+.param-card h3{font-size:13px;font-weight:700;margin-bottom:12px;}
+.site-param-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.site-param-row:last-child{border-bottom:none;}
+.mini-input{width:60px!important;text-align:center;padding:6px 8px!important;font-size:13px!important;}
+
+.dem-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:13px 15px;margin-bottom:9px;}
+
+/* LOADING */
+.loading-screen{position:fixed;inset:0;background:#fff;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:#3B82F6;border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-text{font-size:14px;color:var(--muted);font-weight:500;}
+
+/* SYNC INDICATOR */
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#10B981;display:inline-block;margin-right:5px;}
+.sync-dot.syncing{background:#F59E0B;animation:pulse 1s infinite;}
+.sync-dot.error{background:#DC2626;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.sync-bar{display:flex;align-items:center;font-size:11px;color:var(--muted);gap:4px;}
+
+/* SETUP SCREEN */
+.setup-card{background:#fff;border-radius:14px;border:1px solid var(--border);padding:28px 24px;box-shadow:var(--sh);max-width:520px;margin:40px auto;}
+.setup-step{display:flex;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border);}
+.setup-step:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.setup-num{width:28px;height:28px;border-radius:50%;background:#3B82F6;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.setup-content{flex:1;}
+.setup-title{font-weight:600;font-size:14px;margin-bottom:4px;}
+.setup-desc{font-size:12px;color:var(--muted);line-height:1.6;}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:200;display:none;align-items:flex-end;}
+.modal-overlay.open{display:flex;}
+@media(min-width:600px){.modal-overlay{align-items:center;padding:20px;}}
+.modal{background:#fff;border-radius:14px 14px 0 0;width:100%;max-height:92vh;overflow-y:auto;padding:20px 16px;animation:slideUp .2s ease;}
+@media(min-width:600px){.modal{border-radius:14px;max-width:460px;margin:auto;}}
+@keyframes slideUp{from{transform:translateY(18px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:14px;}
+.modal-actions{display:flex;gap:8px;margin-top:16px;}
+.modal-actions .btn{flex:1;}
+
+.type-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:12px;}
+.type-opt{padding:9px 7px;border-radius:8px;border:2px solid var(--border);cursor:pointer;text-align:center;font-size:12px;font-weight:600;transition:all .15s;color:var(--muted);}
+.type-opt:hover{border-color:#9CA3AF;}
+.type-opt.sel{color:#fff!important;}
+
+.notif-box{background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;color:#0369A1;line-height:1.6;}
+.notif-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;color:#0284C7;}
+
+.remp-section{background:var(--bg);border-radius:8px;padding:12px;margin-bottom:10px;}
+.remp-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px;}
+
+.alert-mod{background:#FFFBEB;border:1px solid #FDE68A;color:#92400E;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:#1A1917;color:#fff;padding:10px 18px;border-radius:25px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);}
+.toast.show{transform:translateX(-50%) translateY(0);}
+
+.mt-10{margin-top:10px;}.mt-14{margin-top:14px;}.tc{text-align:center;}.muted{color:var(--muted);font-size:12px;}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-screen" id="loadingScreen">
+  <div style="font-weight:800;font-size:22px;letter-spacing:-.5px;">OK<em style="font-style:normal;color:#3B82F6">-</em>LA</div>
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Chargement du planning...</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="header" style="display:none;" id="mainHeader">
+  <div style="font-weight:800;font-size:17px;letter-spacing:-.5px;">OK<em style="font-style:normal;color:#3B82F6">-</em>LA <span style="font-weight:400;color:var(--muted);font-size:13px">Planning</span></div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div class="sync-bar"><div class="sync-dot" id="syncDot"></div><span id="syncTxt">Connecté</span></div>
+    <div id="hdrBadge"></div>
+  </div>
+</div>
+
+<!-- SETUP (si pas de SCRIPT_URL configuré) -->
+<div class="screen" id="sSetup">
+  <div style="max-width:540px;margin:0 auto;padding:20px 16px;">
+    <div class="setup-card">
+      <div style="font-size:18px;font-weight:700;margin-bottom:4px;">Configuration requise</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:24px;">Connectez l'application à Google Sheets en 3 étapes</div>
+      <div class="setup-step">
+        <div class="setup-num">1</div>
+        <div class="setup-content">
+          <div class="setup-title">Créer le Google Sheet</div>
+          <div class="setup-desc">Ouvrez Google Sheets, créez un classeur "OK-LA Planning" avec 4 onglets : Employés, Planning, Demandes, Absences</div>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">2</div>
+        <div class="setup-content">
+          <div class="setup-title">Déployer le script Apps Script</div>
+          <div class="setup-desc">Dans le Sheet : Extensions → Apps Script → collez le code fourni → Déployer → Application Web → copiez l'URL</div>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">3</div>
+        <div class="setup-content">
+          <div class="setup-title">Entrez l'URL du script ici</div>
+          <div class="setup-desc">L'URL ressemble à : https://script.google.com/macros/s/XXXXX/exec</div>
+        </div>
+      </div>
+      <div class="fg" style="margin-top:20px;">
+        <label>URL du script Google Apps Script</label>
+        <input type="url" id="setupUrl" placeholder="https://script.google.com/macros/s/.../exec">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="saveSetup()">Connecter et démarrer →</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div class="screen" id="sLogin">
+  <div style="max-width:360px;margin:50px auto;padding:0 16px;">
+    <div style="background:#fff;border-radius:14px;border:1px solid var(--border);padding:32px 28px;box-shadow:var(--sh);">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Mon planning</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:22px;">Entrez votre code d'accès</div>
+      <div class="fg"><label>Code d'accès</label>
+        <input type="text" id="loginCode" placeholder="MAR01" autocomplete="off"
+          style="text-transform:uppercase;font-size:22px;letter-spacing:4px;text-align:center;" maxlength="8">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doLogin()">Voir mon planning →</button>
+      <div class="divider"><span>Gestionnaire ?</span></div>
+      <button class="btn btn-ghost btn-full" onclick="loginMgr()">Accès gestionnaire</button>
+    </div>
+  </div>
+</div>
+
+<!-- EMPLOYÉ -->
+<div class="screen" id="sEmp">
+  <div class="content">
+    <div class="emp-hero" id="empHero"></div>
+    <div id="empAlert"></div>
+    <div class="view-bar">
+      <button class="btn btn-ghost btn-sm" onclick="eW(-1)">←</button>
+      <div class="week-label" id="eWLbl"></div>
+      <button class="btn btn-ghost btn-sm" onclick="eW(1)">→</button>
+    </div>
+    <div id="empDays"></div>
+    <div class="legend mt-10" id="empLeg"></div>
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
+      <div style="font-weight:700;margin-bottom:12px;">Faire une demande</div>
+      <div class="fg"><label>Type</label>
+        <select id="rType"><option>Demande de congé</option><option>Arrêt maladie</option><option>Échange de planning</option><option>Rendez-vous médical</option><option>Autre</option></select>
+      </div>
+      <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
+      <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
+      <button class="btn btn-primary btn-full" onclick="sendReq()">Envoyer la demande</button>
+    </div>
+    <div class="tc mt-14"><button class="btn btn-ghost btn-sm" onclick="logout()">Déconnexion</button></div>
+  </div>
+</div>
+
+<!-- GESTIONNAIRE -->
+<div class="screen" id="sMgr">
+  <div class="content">
+    <div style="font-size:17px;font-weight:700;">Planning OK-LA</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:2px;margin-bottom:16px;" id="mgrSub"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-val" id="sE">—</div><div class="stat-lbl">Employés</div></div>
+      <div class="stat"><div class="stat-val" id="sM">0</div><div class="stat-lbl">Modifs</div></div>
+      <div class="stat"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
+      <div class="stat"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('planning')">Planning</button>
+      <button class="tab" onclick="switchTab('remplace')">Remplacements</button>
+      <button class="tab" onclick="switchTab('employes')">Employés</button>
+      <button class="tab" onclick="switchTab('params')">Paramètres</button>
+    </div>
+
+    <div class="tab-content active" id="tab-planning">
+      <div class="legend" id="mgrLeg"></div>
+      <div class="view-bar">
+        <button class="btn btn-ghost btn-sm" onclick="mNavPrev()">←</button>
+        <div class="week-label" id="mWLbl"></div>
+        <button class="btn btn-ghost btn-sm" onclick="mNavNext()">→</button>
+        <div class="vtoggle">
+          <button class="vbtn active" id="vSemBtn" onclick="setView('sem')">Semaine</button>
+          <button class="vbtn" id="vMoisBtn" onclick="setView('mois')">Mois</button>
+        </div>
+      </div>
+      <div id="vSemaine">
+        <div class="table-wrap"><table><thead id="tH"></thead><tbody id="tB"></tbody></table></div>
+        <div class="muted tc mt-10">Cliquez sur une case pour modifier</div>
+      </div>
+      <div id="vMoisView" style="display:none;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+          <div style="display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;">
+            <button class="vbtn active" id="mSiteBtn" onclick="setMoisMode('site')">Par magasin</button>
+            <button class="vbtn" id="mEmpBtn" onclick="setMoisMode('emp')">Par employé</button>
+          </div>
+          <select id="moSiteSel" onchange="renderMonth()" style="max-width:180px;"></select>
+          <select id="moEmpSel" onchange="renderMonth()" style="max-width:220px;display:none;"></select>
+        </div>
+        <div id="moisSiteView"></div>
+        <div id="moisEmpView" style="display:none;">
+          <div class="cal-grid" id="calHead" style="margin-bottom:3px;"></div>
+          <div class="cal-grid" id="calBody"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-remplace">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div style="font-weight:600;font-size:14px;">Absences & remplacements</div>
+        <button class="btn btn-sm" style="background:#FFF7ED;color:#C2410C;border:1px solid #FED7AA;" onclick="openAbsModal()">+ Signaler une absence</button>
+      </div>
+      <div id="absListMgr"></div>
+    </div>
+
+    <div class="tab-content" id="tab-employes">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <button class="btn btn-primary btn-sm" onclick="openAddEmp()">+ Ajouter</button>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;" id="empListMgr"></div>
+    </div>
+
+    <div class="tab-content" id="tab-params">
+      <div class="params-grid">
+        <div class="param-card">
+          <h3>Effectif minimum par magasin</h3>
+          <div id="paramSites"></div>
+          <button class="btn btn-primary btn-sm mt-10" onclick="saveParams()">✓ Enregistrer</button>
+        </div>
+        <div class="param-card">
+          <h3>Adresses des magasins</h3>
+          <div id="paramAdresses"></div>
+          <button class="btn btn-primary btn-sm mt-10" onclick="saveAdresses()">✓ Enregistrer</button>
+        </div>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
+        <h3>Domicile des employés</h3>
+        <div id="paramEmpAdresses"></div>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
+        <h3>⚙️ Configuration technique</h3>
+        <div class="fg"><label>URL du script Google Apps Script</label>
+          <input type="url" id="paramScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveScriptUrl()">✓ Mettre à jour l'URL</button>
+      </div>
+    </div>
+
+    <div class="tc mt-14"><button class="btn btn-ghost btn-sm" onclick="logout()">Déconnexion</button></div>
+  </div>
+</div>
+
+<!-- MODAL SHIFT -->
+<div class="modal-overlay" id="mShift">
+  <div class="modal">
+    <div class="modal-title" id="mShTitle"></div>
+    <label>Type de journée</label>
+    <div class="type-grid" id="typeGrid"></div>
+    <div class="fg"><label>Note interne</label><input type="text" id="mNote" placeholder="Remplacement, formation..."></div>
+    <div class="notif-box"><div class="notif-label">📧 Email</div><div id="notifTxt"></div></div>
+    <div class="fg" style="margin-top:6px;">
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="doEmail" checked style="width:auto;"> Envoyer un email à l'employé
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mShift')">Annuler</button>
+      <button class="btn btn-save" onclick="saveShift()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ABSENCE -->
+<div class="modal-overlay" id="mAbs">
+  <div class="modal">
+    <div class="modal-title">Signaler une absence</div>
+    <div class="fg"><label>Employé absent</label><select id="absEmpSel"></select></div>
+    <div class="fg"><label>Date</label><input type="date" id="absDate"></div>
+    <div class="fg"><label>Motif</label>
+      <select id="absMot"><option value="maladie">Arrêt maladie</option><option value="absent">Absence imprévue</option><option value="autre">Autre</option></select>
+    </div>
+    <div class="fg"><label>Note</label><input type="text" id="absNote" placeholder="Précisions..."></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mAbs')">Annuler</button>
+      <button class="btn btn-save" onclick="saveAbsence()">Trouver un remplaçant →</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL REMPLAÇANTS -->
+<div class="modal-overlay" id="mRemp">
+  <div class="modal">
+    <div class="modal-title" id="mRempTitle"></div>
+    <div class="remp-section"><div class="remp-title">Remplaçants suggérés</div><div id="rempSugge"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Contactez manuellement, puis validez ci-dessous.</div>
+    <div class="fg"><label>Remplaçant retenu</label><select id="rempChoisi"></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mRemp')">Fermer</button>
+      <button class="btn btn-save" onclick="validerRemp()">✓ Valider</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ADD EMP -->
+<div class="modal-overlay" id="mEmp">
+  <div class="modal">
+    <div class="modal-title">Ajouter un employé</div>
+    <div class="fg"><label>Prénom et Nom</label><input type="text" id="aeName" placeholder="Marie Martin"></div>
+    <div class="fg"><label>Email</label><input type="email" id="aeEmail" placeholder="marie@ok-la.fr"></div>
+    <div class="fg"><label>Téléphone</label><input type="tel" id="aeTel" placeholder="06 12 34 56 78"></div>
+    <div class="fg"><label>Adresse domicile</label><input type="text" id="aeAddr" placeholder="12 rue de la Paix, 80400 Ham"></div>
+    <div class="fg"><label>Magasin principal</label>
+      <select id="aeSite"><option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option></select>
+    </div>
+    <div class="fg"><label>Créneau habituel</label>
+      <select id="aeSlot">
+        <option value="magasin">Magasin — 10h–12h / 14h–19h</option>
+        <option value="entrepotA">Entrepôt A — 9h–12h / 13h30–17h30</option>
+        <option value="entrepotB">Entrepôt B — 10h–12h / 13h30–18h30</option>
+      </select>
+    </div>
+    <div class="fg"><label>Code d'accès</label><input type="text" id="aeCode" readonly style="background:var(--bg);letter-spacing:2px;color:var(--muted);"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mEmp')">Annuler</button>
+      <button class="btn btn-save" onclick="saveNewEmp()">✓ Ajouter</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══ CONFIG ══
+const SC={
+  'Ham':      {color:'#3B82F6',bg:'#EFF6FF',border:'#BFDBFE'},
+  'Longueau': {color:'#10B981',bg:'#ECFDF5',border:'#A7F3D0'},
+  'Roye':     {color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
+  'Breteuil': {color:'#EC4899',bg:'#FDF2F8',border:'#FBCFE8'},
+  'Entrepôt': {color:'#8B5CF6',bg:'#F5F3FF',border:'#DDD6FE'},
+};
+const AVC=['#DBEAFE','#D1FAE5','#FEF3C7','#FCE7F3','#EDE9FE','#FFE4E6','#FEF9C3','#E0E7FF','#ECFDF5'];
+const TYPES=[
+  {key:'magasin',   label:'Magasin',      info:'10h–12h / 14h–19h'},
+  {key:'entrepotA', label:'Entrepôt A',   info:'9h–12h / 13h30–17h30'},
+  {key:'entrepotB', label:'Entrepôt B',   info:'10h–12h / 13h30–18h30'},
+  {key:'vip',       label:'★ VIP',        info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
+  {key:'conge',     label:'Congé',         info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
+  {key:'maladie',   label:'Maladie',       info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
+  {key:'off',       label:'Repos',         info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
+];
+const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const MGR={code:'ADMIN',name:'Gestionnaire'};
+
+function getColor(type,site){
+  if(['magasin','entrepotA','entrepotB'].includes(type)) return SC[site]||SC['Ham'];
+  const t=TYPES.find(x=>x.key===type);
+  return t?{color:t.color,bg:t.bg,border:t.border}:{color:'#ccc',bg:'#f5f5f5',border:'#ddd'};
+}
+
+// ══ PERSISTANCE LOCALE (localStorage) ══
+// Utilisé comme cache entre les appels au Sheet
+function lsGet(k,def){try{const v=localStorage.getItem('okla_'+k);return v!==null?JSON.parse(v):def;}catch{return def;}}
+function lsSet(k,v){try{localStorage.setItem('okla_'+k,JSON.stringify(v));}catch{}}
+
+// ══ STATE ══
+const S={
+  user:null,role:null,
+  employees:lsGet('employees',[]),
+  planning:lsGet('planning',{}),
+  requests:lsGet('requests',[]),
+  absences:lsGet('absences',[]),
+  mods:lsGet('mods',[]),
+  eWO:0,mWO:0,mMO:0,
+  view:'sem',moisMode:'site',
+  editing:null,editType:null,editingAbs:null,
+  params:lsGet('params',{
+    minStaff:{'Ham':2,'Longueau':2,'Roye':2,'Breteuil':1,'Entrepôt':1},
+    adresses:{'Ham':'','Longueau':'','Roye':'','Breteuil':'','Entrepôt':''}
+  }),
+  scriptUrl:lsGet('scriptUrl',''),
+  syncing:false,
+};
+
+function persist(){
+  lsSet('employees',S.employees);
+  lsSet('planning',S.planning);
+  lsSet('requests',S.requests);
+  lsSet('absences',S.absences);
+  lsSet('mods',S.mods);
+  lsSet('params',S.params);
+}
+
+// ══ API GOOGLE SHEETS ══
+async function api(action,data={}){
+  if(!S.scriptUrl) return {ok:false,error:'no_url'};
+  setSyncing(true);
+  try{
+    const url=new URL(S.scriptUrl);
+    url.searchParams.set('action',action);
+    // Pour les GET
+    if(['getAll','getPlanning'].includes(action)){
+      Object.entries(data).forEach(([k,v])=>url.searchParams.set(k,v));
+      const r=await fetch(url.toString());
+      const j=await r.json();
+      setSyncing(false);
+      return j;
+    }
+    // Pour les POST
+    const r=await fetch(S.scriptUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action,...data})
+    });
+    const j=await r.json();
+    setSyncing(false);
+    return j;
+  }catch(e){
+    setSyncing(false,true);
+    console.error('API error',e);
+    return {ok:false,error:e.message};
+  }
+}
+
+function setSyncing(on,err=false){
+  S.syncing=on;
+  const dot=document.getElementById('syncDot');
+  const txt=document.getElementById('syncTxt');
+  if(!dot) return;
+  dot.className='sync-dot'+(on?' syncing':err?' error':'');
+  txt.textContent=on?'Synchronisation...':(err?'Hors ligne':'Connecté');
+}
+
+// Charger toutes les données depuis le Sheet
+async function loadAll(){
+  if(!S.scriptUrl){
+    hideLoading();
+    showScr('sSetup');
+    return;
+  }
+  setLoadingText('Connexion à Google Sheets...');
+  const r=await api('getAll');
+  if(r&&r.ok){
+    if(r.employees)  {S.employees=r.employees;  lsSet('employees',r.employees);}
+    if(r.planning)   {S.planning=r.planning;    lsSet('planning',r.planning);}
+    if(r.requests)   {S.requests=r.requests;    lsSet('requests',r.requests);}
+    if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
+    if(r.params)     {S.params=r.params;        lsSet('params',r.params);}
+    setLoadingText('Données chargées ✓');
+    setTimeout(()=>{hideLoading();showScr('sLogin');},400);
+  } else {
+    // Utiliser le cache local si dispo
+    if(S.employees.length>0){
+      setLoadingText('Mode hors ligne — données locales');
+      setTimeout(()=>{hideLoading();showScr('sLogin');setSyncing(false,true);},800);
+    } else {
+      setLoadingText('Impossible de se connecter');
+      setTimeout(()=>{hideLoading();showScr('sSetup');},1000);
+    }
+  }
+}
+
+function setLoadingText(t){const el=document.getElementById('loadingText');if(el)el.textContent=t;}
+function hideLoading(){
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('mainHeader').style.display='flex';
+}
+
+// ══ UTILS ══
+function fmt(d){return d.toISOString().split('T')[0];}
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function getMon(d){const x=new Date(d);const day=x.getDay();x.setDate(x.getDate()-day+(day===0?-6:1));x.setHours(0,0,0,0);return x;}
+function fmtFR(d,o){return d.toLocaleDateString('fr-FR',o);}
+function ini(n){return n.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();}
+function avc(id){return AVC[parseInt(id.replace(/\D/g,''))%AVC.length];}
+function sPill(site){const s=SC[site]||{color:'#888',bg:'#f0f0f0'};return `<span class="site-pill" style="background:${s.bg};color:${s.color}">${site}</span>`;}
+function toast(m,d=3000){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),d);}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+
+function buildLegend(id){
+  const el=document.getElementById(id);if(!el)return;
+  let h=Object.entries(SC).map(([n,c])=>`<div class="legend-item"><div class="ldot" style="background:${c.color}"></div>${n}</div>`).join('');
+  h+=`<div class="legend-item"><div class="ldot" style="background:#EF4444"></div>VIP</div>`;
+  h+=`<div class="legend-item"><div class="ldot" style="background:#E5E7EB;border:1px solid #ccc"></div>Repos</div>`;
+  el.innerHTML=h;
+}
+function updStats(){
+  document.getElementById('sE').textContent=S.employees.length;
+  document.getElementById('sM').textContent=S.mods.length;
+  document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending').length;
+  document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
+}
+
+// ══ SETUP ══
+function saveSetup(){
+  const url=document.getElementById('setupUrl').value.trim();
+  if(!url||!url.includes('script.google.com')){toast('URL invalide');return;}
+  S.scriptUrl=url;lsSet('scriptUrl',url);
+  document.getElementById('loadingScreen').style.display='flex';
+  document.getElementById('mainHeader').style.display='none';
+  showScr('sLogin');
+  loadAll();
+}
+
+// ══ LOGIN ══
+function doLogin(){
+  const code=document.getElementById('loginCode').value.trim().toUpperCase();
+  const emp=S.employees.find(e=>e.code===code);
+  if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
+  else if(S.employees.length===0){toast('Aucun employé — connectez d\'abord Google Sheets');}
+  else toast('Code non reconnu');
+}
+function loginMgr(){S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();}
+function logout(){S.user=null;S.role=null;S.eWO=0;document.getElementById('loginCode').value='';showScr('sLogin');}
+document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+
+function showScr(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const b=document.getElementById('hdrBadge');if(!b)return;
+  if(id==='sMgr') b.innerHTML='<span class="badge badge-mgr">Gestionnaire</span>';
+  else if(id==='sEmp') b.innerHTML=`<span class="badge badge-emp">${S.user?.name?.split(' ')[0]||''}</span>`;
+  else b.innerHTML='';
+}
+
+// ══ VUE EMPLOYÉ ══
+function renderEmp(){
+  const emp=S.user;
+  document.getElementById('empHero').innerHTML=`
+    <div class="av" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:15px">${emp.name}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${sPill(emp.site)} &nbsp;Code : <strong>${emp.code}</strong></div>
+    </div>`;
+  const myMods=S.mods.filter(m=>m.empId===emp.id&&!m.seen);
+  document.getElementById('empAlert').innerHTML=myMods.length
+    ?`<div class="alert-mod">⚠️ <strong>Planning modifié :</strong> ${myMods.map(m=>`${m.dl} : ${m.det}`).join(' · ')}</div>`:'';
+  myMods.forEach(m=>m.seen=true);
+  buildLegend('empLeg');
+  document.getElementById('rDate').value=fmt(new Date());
+  renderEmpWeek();
+}
+function eW(d){S.eWO+=d;renderEmpWeek();}
+function renderEmpWeek(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const mon=addDays(getMon(today),S.eWO*7);
+  document.getElementById('eWLbl').textContent=`Sem. ${fmtFR(mon,{day:'numeric',month:'long'})} – ${fmtFR(addDays(mon,6),{day:'numeric',month:'long'})}`;
+  const emp=S.user;let h='';
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+    const sh=S.planning[`${emp.id}_${fmt(d)}`];
+    const type=sh?.type||'off';const site=sh?.site||emp.site;
+    const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};"></div>`;
+    h+=`<div class="day-row${isT?' today-row':''}">
+      <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}
+    </div>`;
+  }
+  document.getElementById('empDays').innerHTML=h;
+}
+async function sendReq(){
+  const emp=S.user;
+  const date=document.getElementById('rDate').value;
+  if(!date){toast('Sélectionnez une date');return;}
+  const req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+    type:document.getElementById('rType').value,date,
+    note:document.getElementById('rNote').value,status:'pending'};
+  S.requests.push(req);persist();updStats();
+  document.getElementById('rNote').value='';
+  toast('Envoi en cours...');
+  const r=await api('saveRequest',req);
+  toast(r&&r.ok?'✓ Demande envoyée':'✓ Demande enregistrée (sync en attente)');
+}
+
+// ══ GESTIONNAIRE ══
+function renderMgr(){
+  document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  updStats();buildLegend('mgrLeg');
+  buildSelects();renderWeek();renderEmpList();renderAbsList();renderParams();
+  if(document.getElementById('paramScriptUrl'))
+    document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
+}
+function switchTab(n){
+  ['planning','remplace','employes','params'].forEach((x,i)=>{
+    document.querySelectorAll('.tab')[i].classList.toggle('active',x===n);
+    document.getElementById('tab-'+x).classList.toggle('active',x===n);
+  });
+}
+
+// ── Planning ──
+function mNavPrev(){if(S.view==='sem'){S.mWO--;renderWeek();}else{S.mMO--;renderMonth();}}
+function mNavNext(){if(S.view==='sem'){S.mWO++;renderWeek();}else{S.mMO++;renderMonth();}}
+function setView(v){
+  S.view=v;
+  document.getElementById('vSemBtn').classList.toggle('active',v==='sem');
+  document.getElementById('vMoisBtn').classList.toggle('active',v==='mois');
+  document.getElementById('vSemaine').style.display=v==='sem'?'block':'none';
+  document.getElementById('vMoisView').style.display=v==='mois'?'block':'none';
+  if(v==='sem'){document.getElementById('mWLbl').style.display='';renderWeek();}
+  else{
+    S.moisMode='site';
+    document.getElementById('mSiteBtn').classList.add('active');
+    document.getElementById('mEmpBtn').classList.remove('active');
+    document.getElementById('moSiteSel').style.display='';
+    document.getElementById('moEmpSel').style.display='none';
+    document.getElementById('moisSiteView').style.display='block';
+    document.getElementById('moisEmpView').style.display='none';
+    document.getElementById('mWLbl').style.display='none';
+    renderMonth();
+  }
+}
+function setMoisMode(mode){
+  S.moisMode=mode;
+  document.getElementById('mSiteBtn').classList.toggle('active',mode==='site');
+  document.getElementById('mEmpBtn').classList.toggle('active',mode==='emp');
+  document.getElementById('moSiteSel').style.display=mode==='site'?'':'none';
+  document.getElementById('moEmpSel').style.display=mode==='emp'?'':'none';
+  document.getElementById('moisSiteView').style.display=mode==='site'?'block':'none';
+  document.getElementById('moisEmpView').style.display=mode==='emp'?'block':'none';
+  renderMonth();
+}
+
+function renderWeek(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const mon=addDays(getMon(today),S.mWO*7);
+  document.getElementById('mWLbl').textContent=`${fmtFR(mon,{day:'numeric',month:'short'})} – ${fmtFR(addDays(mon,6),{day:'numeric',month:'short',year:'numeric'})}`;
+  let th=`<tr><th>Employé</th>`;
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+  }
+  document.getElementById('tH').innerHTML=th+'</tr>';
+  let tb='';
+  S.employees.forEach(emp=>{
+    tb+=`<tr><td><div class="emp-cell">
+      <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
+      <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${emp.name.split(' ')[0]}</div>
+      <div style="font-size:10px;color:var(--muted)">${emp.site}</div></div>
+    </div></td>`;
+    for(let i=0;i<7;i++){
+      const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+      const sh=S.planning[`${emp.id}_${fmt(d)}`];
+      const type=sh?.type||'off';const site=sh?.site||emp.site;
+      const cell=type==='off'
+        ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`
+        :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site).color};border-color:${getColor(type,site).color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      tb+=`<td style="${isT?'background:#F0F7FF;':''}">${cell}</td>`;
+    }
+    tb+='</tr>';
+  });
+  document.getElementById('tB').innerHTML=tb;
+}
+
+function buildSelects(){
+  document.getElementById('moEmpSel').innerHTML=S.employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('moSiteSel').innerHTML=Object.keys(SC).map(s=>`<option value="${s}">${s}</option>`).join('');
+}
+
+function renderMonth(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const ref=new Date(today.getFullYear(),today.getMonth()+S.mMO,1);
+  document.getElementById('mWLbl').textContent=fmtFR(ref,{month:'long',year:'numeric'});
+  if(S.moisMode==='site') renderMonthSite(ref,today);
+  else renderMonthEmp(ref,today);
+}
+
+function renderMonthSite(ref,today){
+  const site=document.getElementById('moSiteSel').value;
+  const sColor=SC[site]||SC['Ham'];
+  const emps=S.employees.filter(e=>e.site===site);
+  const minStaff=S.params.minStaff[site]||1;
+  const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
+  const days=[];
+  for(let d=1;d<=daysInMonth;d++) days.push(new Date(ref.getFullYear(),ref.getMonth(),d));
+  const DOW=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+
+  let th=`<thead><tr><th class="date-th">Date</th>`;
+  emps.forEach(emp=>{
+    th+=`<th class="emp-th${emp.name.split(' ')[0].length>6?' ':''}">`+
+      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
+      `<div style="font-size:10px;white-space:nowrap;">${emp.name.split(' ')[0]}</div></th>`;
+  });
+  th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
+
+  let tb=`<tbody>`;
+  days.forEach(d=>{
+    const isT=fmt(d)===fmt(today);
+    const isW=d.getDay()===0||d.getDay()===6;
+    const weCls=isW?' we':'';
+    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
+      `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
+      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span></td>`;
+    let count=0;
+    emps.forEach(emp=>{
+      const sh=S.planning[`${emp.id}_${fmt(d)}`];
+      const type=sh?.type||'off';const site2=sh?.site||emp.site;
+      let cell='';
+      if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
+      tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
+    });
+    const cls=count>=minStaff?'staff-ok':'staff-warn';
+    tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
+  });
+  // Ligne total
+  tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td>`;
+  emps.forEach(()=>tb+=`<td></td>`);
+  tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
+
+  document.getElementById('moisSiteView').innerHTML=`
+    <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
+      <span style="font-size:12px;font-weight:600;">${site}</span>
+      <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)</span>
+    </div>
+    <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
+    <div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l'effectif minimum · Cliquez sur une case pour modifier</div>`;
+}
+
+function renderMonthEmp(ref,today){
+  const empId=document.getElementById('moEmpSel').value;
+  const emp=S.employees.find(e=>e.id===empId);if(!emp)return;
+  document.getElementById('calHead').innerHTML=JOURS_C.map(j=>`<div class="cal-head">${j}</div>`).join('');
+  const first=new Date(ref.getFullYear(),ref.getMonth(),1);
+  const startDow=first.getDay()===0?6:first.getDay()-1;
+  const gridStart=addDays(first,-startDow);
+  const last=new Date(ref.getFullYear(),ref.getMonth()+1,0);
+  const endDow=last.getDay()===0?6:last.getDay()-1;
+  const gridEnd=addDays(last,6-endDow);
+  let h='';let cur=new Date(gridStart);
+  while(cur<=gridEnd){
+    const thisM=cur.getMonth()===ref.getMonth();const isT=fmt(cur)===fmt(today);
+    const sh=S.planning[`${emp.id}_${fmt(cur)}`];
+    const type=sh?.type||'off';const site=sh?.site||emp.site;
+    let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
+    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
+      <div class="cnum">${cur.getDate()}</div>${bar}</div>`;
+    cur=addDays(cur,1);
+  }
+  document.getElementById('calBody').innerHTML=h;
+}
+
+// ── Modal shift ──
+function openShiftMod(empId,dateStr){
+  S.editing={empId,dateStr};
+  const emp=S.employees.find(e=>e.id===empId);if(!emp)return;
+  const sh=S.planning[`${empId}_${dateStr}`];
+  S.editType=sh?.type||emp.slot;
+  document.getElementById('mShTitle').textContent=`${emp.name} — ${fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'})}`;
+  document.getElementById('mNote').value=sh?.note||'';
+  document.getElementById('doEmail').checked=true;
+  renderTypeGrid(emp);updNotif();openModal('mShift');
+}
+function renderTypeGrid(emp){
+  document.getElementById('typeGrid').innerHTML=TYPES.map(t=>{
+    const isW=['magasin','entrepotA','entrepotB'].includes(t.key);
+    const c=isW?(SC[emp.site]||SC['Ham']):{color:t.color,bg:t.bg,border:t.border};
+    const sel=S.editType===t.key;
+    return `<div class="type-opt${sel?' sel':''}"
+      style="${sel?`background:${c.color};border-color:${c.color};`:'border-color:var(--border);'}"
+      onclick="selType('${t.key}')">
+      <div>${t.label}</div><div style="font-size:10px;font-weight:400;margin-top:2px;opacity:.75">${t.info}</div>
+    </div>`;
+  }).join('');
+}
+function selType(key){S.editType=key;const emp=S.employees.find(e=>e.id===S.editing.empId);renderTypeGrid(emp);updNotif();}
+function updNotif(){
+  if(!S.editing)return;
+  const emp=S.employees.find(e=>e.id===S.editing.empId);if(!emp)return;
+  const t=TYPES.find(x=>x.key===S.editType);
+  const dl=fmtFR(new Date(S.editing.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
+  let det=t?t.info:'';
+  if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
+  document.getElementById('notifTxt').textContent=`Bonjour ${emp.name.split(' ')[0]}, votre planning du ${dl} a été modifié : ${det}.`;
+}
+async function saveShift(){
+  const {empId,dateStr}=S.editing;
+  const emp=S.employees.find(e=>e.id===empId);
+  const note=document.getElementById('mNote').value;
+  const sendMail=document.getElementById('doEmail').checked;
+  const shift={type:S.editType,site:emp.site,note};
+  // Mise à jour locale immédiate
+  S.planning[`${empId}_${dateStr}`]=shift;
+  const t=TYPES.find(x=>x.key===S.editType);
+  const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
+  let det=t?t.info:'';if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
+  S.mods.push({empId,dl,det,seen:false});
+  persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
+  toast('Enregistrement...');
+  // Sync avec Sheet
+  const r=await api('updateShift',{
+    empId,dateStr,type:S.editType,site:emp.site,note,
+    sendEmail:sendMail,empEmail:emp.email,empName:emp.name,
+    targetSite:emp.site
+  });
+  toast(r&&r.ok?(sendMail?`✓ Modifié · Email envoyé à ${emp.name.split(' ')[0]}`:'✓ Planning enregistré'):'✓ Sauvegardé localement');
+}
+
+// ── Absences ──
+function openAbsModal(){
+  document.getElementById('absEmpSel').innerHTML=S.employees.map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
+  document.getElementById('absDate').value=fmt(new Date());
+  document.getElementById('absNote').value='';
+  openModal('mAbs');
+}
+async function saveAbsence(){
+  const empId=document.getElementById('absEmpSel').value;
+  const dateStr=document.getElementById('absDate').value;
+  const motif=document.getElementById('absMot').value;
+  const note=document.getElementById('absNote').value;
+  if(!dateStr){toast('Sélectionnez une date');return;}
+  const emp=S.employees.find(e=>e.id===empId);
+  S.planning[`${empId}_${dateStr}`]={type:motif==='maladie'?'maladie':'off',site:emp.site,note:`Absent: ${note||motif}`};
+  S.mods.push({empId,dl:fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'}),det:'Absence',seen:false});
+  const absId=Date.now();
+  const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null};
+  S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
+  api('saveAbsence',abs);
+  openRempModal(absId);
+}
+
+const DIST={
+  'Ham':      {'Ham':0,'Longueau':35,'Roye':20,'Breteuil':45,'Entrepôt':2},
+  'Longueau': {'Ham':35,'Longueau':0,'Roye':40,'Breteuil':50,'Entrepôt':36},
+  'Roye':     {'Ham':20,'Longueau':40,'Roye':0,'Breteuil':30,'Entrepôt':21},
+  'Breteuil': {'Ham':45,'Longueau':50,'Roye':30,'Breteuil':0,'Entrepôt':44},
+  'Entrepôt': {'Ham':2,'Longueau':36,'Roye':21,'Breteuil':44,'Entrepôt':0},
+};
+function estimDist(addr,targetSite){
+  const a=(addr||'').toLowerCase();
+  const map={ham:{Ham:5,Longueau:38,Roye:22,Breteuil:46,'Entrepôt':3},amiens:{Ham:36,Longueau:4,Roye:42,Breteuil:52,'Entrepôt':37},longueau:{Ham:36,Longueau:3,Roye:41,Breteuil:51,'Entrepôt':37},roye:{Ham:21,Longueau:41,Roye:4,Breteuil:31,'Entrepôt':22},breteuil:{Ham:46,Longueau:51,Roye:31,Breteuil:3,'Entrepôt':45}};
+  for(const[ville,dists]of Object.entries(map)){if(a.includes(ville))return dists[targetSite]||50;}
+  return 40;
+}
+function findReplacements(absentId,dateStr,targetSite){
+  return S.employees.filter(emp=>{
+    if(emp.id===absentId)return false;
+    const sh=S.planning[`${emp.id}_${dateStr}`];
+    return !sh||sh.type==='off';
+  }).map(emp=>{
+    const minStaff=S.params.minStaff[emp.site]||1;
+    const staffOnDay=S.employees.filter(e=>{
+      if(e.id===emp.id)return false;
+      const s=S.planning[`${e.id}_${dateStr}`];
+      return s&&s.type!=='off'&&s.site===emp.site;
+    }).length;
+    return{emp,dist:estimDist(emp.addr,targetSite),canLeave:staffOnDay>=minStaff,staffOnDay,minStaff};
+  }).sort((a,b)=>a.canLeave!==b.canLeave?(a.canLeave?-1:1):a.dist-b.dist);
+}
+
+function openRempModal(absId){
+  S.editingAbs=absId;
+  const abs=S.absences.find(a=>a.id===absId);if(!abs)return;
+  const dl=fmtFR(new Date(abs.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
+  document.getElementById('mRempTitle').textContent=`Remplaçant — ${abs.empName} (${dl})`;
+  const cands=findReplacements(abs.empId,abs.dateStr,abs.empSite);
+  let sh=cands.length?'':'<div style="text-align:center;padding:14px;color:var(--muted);font-size:13px;">Aucun remplaçant disponible ce jour.</div>';
+  cands.slice(0,5).forEach((c,i)=>{
+    const warn=!c.canLeave?`<span style="color:#F59E0B;font-size:10px;"> ⚠️ effectif min (${c.staffOnDay}/${c.minStaff})</span>`:'';
+    sh+=`<div class="sugge-item">
+      <div class="sugge-rank${i===0?' top':''}">${i+1}</div>
+      <div class="sugge-info">
+        <div class="sugge-name">${c.emp.name} <span style="font-size:11px;font-weight:400;color:var(--muted)">${c.emp.site}</span></div>
+        <div class="sugge-meta">📍 ~${c.dist}km · 📞 ${c.emp.tel||'—'}${warn}</div>
+      </div>
+      ${c.canLeave?'<span style="color:#059669;font-size:11px;font-weight:600;">✓ Dispo</span>':'<span style="color:#F59E0B;font-size:11px;font-weight:600;">⚠️</span>'}
+    </div>`;
+  });
+  document.getElementById('rempSugge').innerHTML=sh;
+  const opts=cands.length?cands:S.employees.filter(e=>e.id!==abs.empId).map(e=>({emp:e}));
+  document.getElementById('rempChoisi').innerHTML=`<option value="">— Sélectionner —</option>`+opts.map(c=>`<option value="${c.emp.id}">${c.emp.name} (${c.emp.site})</option>`).join('');
+  openModal('mRemp');
+}
+async function validerRemp(){
+  const abs=S.absences.find(a=>a.id===S.editingAbs);if(!abs)return;
+  const rempId=document.getElementById('rempChoisi').value;if(!rempId){toast('Sélectionnez un remplaçant');return;}
+  const remp=S.employees.find(e=>e.id===rempId);if(!remp)return;
+  S.planning[`${rempId}_${abs.dateStr}`]={type:'magasin',site:abs.empSite,note:`Remplacement ${abs.empName}`};
+  abs.resolved=true;abs.rempId=rempId;abs.rempName=remp.name;
+  S.mods.push({empId:rempId,dl:fmtFR(new Date(abs.dateStr+'T12:00'),{day:'numeric',month:'long'}),det:`Remplacement à ${abs.empSite}`,seen:false});
+  persist();updStats();closeModal('mRemp');renderWeek();if(S.view==='mois')renderMonth();renderAbsList();
+  toast(`✓ ${remp.name} affecté(e)`);
+  api('validerRemplacement',{absId:abs.id,rempId,rempName:remp.name,rempEmail:remp.email,
+    dateStr:abs.dateStr,site:abs.empSite,absName:abs.empName});
+}
+
+function renderAbsList(){
+  const list=S.absences;
+  let h=list.length?'':'<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">Aucune absence signalée</div>';
+  list.forEach(abs=>{
+    const dl=fmtFR(new Date(abs.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
+    h+=`<div class="abs-card">
+      <div class="abs-head">
+        <div>
+          <div style="font-weight:700;font-size:13px">${abs.empName} <span class="abs-badge ${abs.motif==='maladie'?'maladie':'autre'}">${abs.motif==='maladie'?'Maladie':'Absence'}</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">📅 ${dl} · ${sPill(abs.empSite)}</div>
+          ${abs.note?`<div style="font-size:12px;margin-top:4px;color:var(--muted)">${abs.note}</div>`:''}
+        </div>
+        <div>${abs.resolved
+          ?`<span style="font-size:12px;font-weight:600;color:#059669;">✓ ${abs.rempName}</span>`
+          :`<button class="btn btn-sm btn-blue" onclick="openRempModal(${abs.id})">Trouver remplaçant</button>`}
+        </div>
+      </div>
+    </div>`;
+  });
+  document.getElementById('absListMgr').innerHTML=h;
+}
+
+// ── Employés ──
+function renderEmpList(){
+  document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};">
+      <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:13px">${emp.name}</div>
+        <div style="font-size:11px;color:var(--muted)">${emp.email||'—'} · ${emp.tel||'—'} · Code : <strong>${emp.code}</strong></div>
+        <div style="font-size:11px;color:var(--muted)">📍 ${emp.addr||'Non renseigné'}</div>
+      </div>
+      ${sPill(emp.site)}
+    </div>`).join('');
+}
+function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
+document.getElementById('aeName').addEventListener('input',function(){
+  const p=this.value.trim().split(' ');
+  if(p.length>=2){const c=(p[0].substring(0,3)+p[1].substring(0,2)).toUpperCase().replace(/[^A-Z]/g,'');
+    document.getElementById('aeCode').value=c+String(S.employees.length+1).padStart(2,'0');}
+});
+async function saveNewEmp(){
+  const name=document.getElementById('aeName').value.trim();
+  const email=document.getElementById('aeEmail').value.trim();
+  if(!name||!email){toast('Remplissez nom et email');return;}
+  const site=document.getElementById('aeSite').value;
+  const slot=document.getElementById('aeSlot').value;
+  const emp={id:'E'+String(S.employees.length+1).padStart(2,'0'),
+    code:document.getElementById('aeCode').value,name,email,
+    tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,site,slot};
+  S.employees.push(emp);
+  // Initialiser le planning sur 3 mois
+  const today=new Date();today.setHours(0,0,0,0);
+  for(let d=-28;d<=84;d++){const dt=addDays(today,d);S.planning[`${emp.id}_${fmt(dt)}`]={type:dt.getDay()===0?'off':slot,site,note:''};}
+  persist();updStats();closeModal('mEmp');renderEmpList();buildSelects();renderWeek();
+  toast('Enregistrement...');
+  const r=await api('saveEmployee',emp);
+  toast(r&&r.ok?`✓ ${name} ajouté(e) — Code : ${emp.code}`:`✓ ${name} ajouté(e) localement`);
+}
+
+// ── Paramètres ──
+function renderParams(){
+  let h='';
+  Object.entries(SC).forEach(([site,cfg])=>{
+    h+=`<div class="site-param-row">
+      <div style="width:10px;height:10px;border-radius:3px;background:${cfg.color};flex-shrink:0;"></div>
+      <div style="flex:1;font-size:13px;font-weight:500;">${site}</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);">
+        Min <input type="number" class="mini-input" id="pm_${site.replace(/[^a-zA-Z]/g,'_')}" value="${S.params.minStaff[site]||1}" min="0" max="20">
+      </div>
+    </div>`;
+  });
+  document.getElementById('paramSites').innerHTML=h;
+  let ha='';
+  Object.keys(SC).forEach(site=>{
+    ha+=`<div class="fg"><label>${site}</label>
+      <input type="text" id="addr_${site.replace(/[^a-zA-Z]/g,'_')}" value="${S.params.adresses?.[site]||''}"></div>`;
+  });
+  document.getElementById('paramAdresses').innerHTML=ha;
+  let he='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  S.employees.forEach(emp=>{
+    he+=`<div class="fg"><label>${emp.name}</label>
+      <input type="text" id="eaddr_${emp.id}" value="${emp.addr||''}" style="font-size:12px;"></div>`;
+  });
+  he+='</div>';
+  document.getElementById('paramEmpAdresses').innerHTML=he;
+}
+async function saveParams(){
+  Object.keys(SC).forEach(site=>{
+    const el=document.getElementById('pm_'+site.replace(/[^a-zA-Z]/g,'_'));
+    if(el) S.params.minStaff[site]=parseInt(el.value)||1;
+  });
+  persist();
+  const r=await api('saveParams',{params:S.params});
+  toast(r&&r.ok?'✓ Paramètres enregistrés':'✓ Enregistré localement');
+}
+async function saveAdresses(){
+  if(!S.params.adresses) S.params.adresses={};
+  Object.keys(SC).forEach(site=>{
+    const el=document.getElementById('addr_'+site.replace(/[^a-zA-Z]/g,'_'));
+    if(el) S.params.adresses[site]=el.value;
+  });
+  S.employees.forEach(emp=>{
+    const el=document.getElementById('eaddr_'+emp.id);
+    if(el) emp.addr=el.value;
+  });
+  persist();
+  const r=await api('saveParams',{params:S.params,employees:S.employees});
+  toast(r&&r.ok?'✓ Adresses enregistrées':'✓ Enregistré localement');
+}
+function saveScriptUrl(){
+  const url=document.getElementById('paramScriptUrl').value.trim();
+  if(!url){toast('URL vide');return;}
+  S.scriptUrl=url;lsSet('scriptUrl',url);
+  toast('✓ URL mise à jour — rechargement...');
+  setTimeout(()=>location.reload(),1200);
+}
+
+// ══ DÉMARRAGE ══
+window.addEventListener('load',()=>{loadAll();});
+</script>
+</body>
+</html>
