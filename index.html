@@ -179,6 +179,26 @@ tbody tr:hover td{background:#FAFAF8;}
 
 .alert-mod{background:#FFFBEB;border:1px solid #FDE68A;color:#92400E;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;}
 
+
+/* CONGÉS */
+.quota-bar-wrap{background:var(--border);border-radius:20px;height:8px;margin:6px 0 2px;}
+.quota-bar{height:8px;border-radius:20px;transition:width .4s;}
+.quota-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px;}
+.quota-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.quota-stat{background:var(--bg);border-radius:8px;padding:10px;text-align:center;}
+.quota-val{font-size:20px;font-weight:700;}
+.quota-lbl{font-size:10px;color:var(--muted);margin-top:2px;}
+.joker-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin:0 2px;}
+.joker-used{background:#DC2626;}.joker-avail{background:#D1D5DB;}
+.conge-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.conge-item:last-child{border-bottom:none;}
+.conge-status{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;}
+.cs-pending{background:#FFF7ED;color:#C2410C;}.cs-ok{background:#ECFDF5;color:#059669;}.cs-refused{background:#FEF2F2;color:#DC2626;}
+.alert-block{background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;color:#DC2626;}
+.alert-warn2{background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;color:#92400E;}
+.rotation-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.rotation-row:last-child{border-bottom:none;}
+
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:#1A1917;color:#fff;padding:10px 18px;border-radius:25px;font-size:13px;font-weight:500;z-index:999;transition:transform .3s;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 
@@ -269,12 +289,41 @@ tbody tr:hover td{background:#FAFAF8;}
     </div>
     <div id="empDays"></div>
     <div class="legend mt-10" id="empLeg"></div>
+    <!-- COMPTEUR CONGÉS EMPLOYÉ -->
+    <div class="quota-card mt-10" id="empQuotaCard">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🏖️ Mes congés payés</div>
+      <div class="quota-grid" id="empQuotaGrid"></div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Jokers utilisés</div>
+      <div id="empJokers"></div>
+      <div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mes demandes</div>
+      <div id="empCongesList"></div>
+    </div>
+
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
       <div style="font-weight:700;margin-bottom:12px;">Faire une demande</div>
       <div class="fg"><label>Type</label>
-        <select id="rType"><option>Demande de congé</option><option>Arrêt maladie</option><option>Échange de planning</option><option>Rendez-vous médical</option><option>Autre</option></select>
+        <select id="rType" onchange="toggleCongeFields()">
+          <option value="conge">Demande de congé payé</option>
+          <option value="enfant_malade">Enfant malade (- de 16 ans)</option>
+          <option value="maladie">Arrêt maladie</option>
+          <option value="echange">Échange avec un collègue</option>
+          <option value="medical">Rendez-vous médical</option>
+          <option value="autre">Autre</option>
+        </select>
       </div>
-      <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
+      <div id="enfantMaladeInfo" style="display:none;background:#FFF7ED;border:1px solid #FED7AA;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#C2410C;">
+        <strong>Enfant malade</strong> — Certificat médical obligatoire à transmettre à Gwen.<br>
+        Quota : 3 j/an (1 enfant) ou 5 j/an (enfant &lt; 1 an ou 3 enfants+).<br>
+        Indemnisation : 2 jours maximum par an.
+      </div>
+      <div id="congeFields">
+        <div class="fg"><label>Date de début</label><input type="date" id="rDateDebut"></div>
+        <div class="fg"><label>Date de fin</label><input type="date" id="rDateFin"></div>
+        <div id="congeCheck" style="margin-bottom:10px;"></div>
+      </div>
+      <div id="autreFields" style="display:none;">
+        <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
+      </div>
       <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
       <button class="btn btn-primary btn-full" onclick="sendReq()">Envoyer la demande</button>
     </div>
@@ -295,6 +344,7 @@ tbody tr:hover td{background:#FAFAF8;}
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
+      <button class="tab" onclick="switchTab('conges')">Congés</button>
       <button class="tab" onclick="switchTab('remplace')">Remplacements</button>
       <button class="tab" onclick="switchTab('employes')">Employés</button>
       <button class="tab" onclick="switchTab('params')">Paramètres</button>
@@ -332,6 +382,18 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
     </div>
 
+    <div class="tab-content" id="tab-conges">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div style="font-weight:600;font-size:14px;">Congés payés — Suivi</div>
+        <button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;" onclick="envoyerRelances()">📧 Envoyer les relances</button>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">RÈGLES EN VIGUEUR</div>
+        <div style="font-size:13px;display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="congesRegles"></div>
+      </div>
+      <div id="congesListeMgr"></div>
+    </div>
+
     <div class="tab-content" id="tab-remplace">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <div style="font-weight:600;font-size:14px;">Absences & remplacements</div>
@@ -365,6 +427,37 @@ tbody tr:hover td{background:#FAFAF8;}
         <div id="paramEmpAdresses"></div>
       </div>
       <div class="param-card" style="margin-top:14px;">
+        <h3>🏖️ Règles congés payés</h3>
+        <div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;line-height:1.8;color:var(--muted);">
+          Les règles sont définies dans votre document interne :<br>
+          • 1 seul salarié en congé par magasin<br>
+          • 1 journée : 2 semaines de préavis<br>
+          • 1 semaine : 2 mois de préavis<br>
+          • Juin→Sept : demande avant le 30/03<br>
+          • Décembre : demande avant le 30/09<br>
+          • Vacances scolaires : priorité aux parents<br>
+          • Fériés chômés : 1/01 · 1/05 · 15/08 · 25/12
+        </div>
+        <div class="fg"><label>Date d'alerte solde non utilisé (JJ/MM)</label>
+          <input type="text" id="pDateAlerte" placeholder="Ex : 01/04"></div>
+        <div class="fg"><label>Quota annuel par employé (jours ouvrés)</label>
+          <input type="number" id="pQuota" value="25" min="1" max="50"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveReglesConges()">✓ Enregistrer</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>📅 Rotation des samedis par magasin</h3>
+        <div id="paramRotation"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveRotation()">✓ Enregistrer la rotation</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>🗓️ Jour de repos fixe par employé</h3>
+        <div id="paramReposFixe"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveReposFixe()">✓ Enregistrer</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
         <h3>⚙️ Configuration technique</h3>
         <div class="fg"><label>URL du script Google Apps Script</label>
           <input type="url" id="paramScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
@@ -390,9 +483,14 @@ tbody tr:hover td{background:#FAFAF8;}
         <input type="checkbox" id="doEmail" checked style="width:auto;"> Envoyer un email à l'employé
       </label>
     </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-full" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:8px;" onclick="saveShiftWeek()">
+        ⟳ Appliquer à toute la semaine visible
+      </button>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mShift')">Annuler</button>
-      <button class="btn btn-save" onclick="saveShift()">✓ Enregistrer</button>
+      <button class="btn btn-save" onclick="saveShift()">✓ Enregistrer ce jour</button>
     </div>
   </div>
 </div>
@@ -447,6 +545,9 @@ tbody tr:hover td{background:#FAFAF8;}
       </select>
     </div>
     <div class="fg"><label>Code d'accès</label><input type="text" id="aeCode" readonly style="background:var(--bg);letter-spacing:2px;color:var(--muted);"></div>
+    <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
+      <input type="checkbox" id="aeChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
+    </label></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mEmp')">Annuler</button>
       <button class="btn btn-save" onclick="saveNewEmp()">✓ Ajouter</button>
@@ -664,7 +765,10 @@ function renderEmp(){
   myMods.forEach(m=>m.seen=true);
   buildLegend('empLeg');
   document.getElementById('rDate').value=fmt(new Date());
+  toggleCongeFields();
+  initCongeListeners();
   renderEmpWeek();
+  renderEmpQuota();
 }
 function eW(d){S.eWO+=d;renderEmpWeek();}
 function renderEmpWeek(){
@@ -685,28 +789,51 @@ function renderEmpWeek(){
 }
 async function sendReq(){
   const emp=S.user;
-  const date=document.getElementById('rDate').value;
-  if(!date){toast('Sélectionnez une date');return;}
-  const req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
-    type:document.getElementById('rType').value,date,
-    note:document.getElementById('rNote').value,status:'pending'};
+  const type=document.getElementById('rType').value;
+  const note=document.getElementById('rNote').value;
+  let req;
+
+  if(type==='conge'){
+    const dateDebut=document.getElementById('rDateDebut')?.value;
+    const dateFin=document.getElementById('rDateFin')?.value;
+    if(!dateDebut||!dateFin){toast('Sélectionnez les dates');return;}
+    if(dateFin<dateDebut){toast('La date de fin doit être après le début');return;}
+    // Vérifications règles
+    const check=verifierRegleConges(emp.id,dateDebut,dateFin);
+    if(check.errors.length){toast(check.errors[0].replace(/❌ /,''));return;}
+    // Consommer un joker si warning
+    if(check.warnings.length){
+      if(!S.params.jokers) S.params.jokers={};
+      S.params.jokers[emp.id]=(S.params.jokers[emp.id]||0)+1;
+      persist();
+    }
+    const nb=countJoursOuvres(dateDebut,dateFin);
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'conge',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
+  } else {
+    const date=document.getElementById('rDate')?.value||fmt(new Date());
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type,date,dateDebut:date,dateFin:date,note,status:'pending'};
+  }
+
   S.requests.push(req);persist();updStats();
   document.getElementById('rNote').value='';
+  renderEmpQuota();
   toast('Envoi en cours...');
   const r=await api('saveRequest',req);
-  toast(r&&r.ok?'✓ Demande envoyée':'✓ Demande enregistrée (sync en attente)');
+  toast(r&&r.ok?'✓ Demande envoyée':'✓ Demande enregistrée');
 }
 
 // ══ GESTIONNAIRE ══
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();renderWeek();renderEmpList();renderAbsList();renderParams();
+  buildSelects();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();
   if(document.getElementById('paramScriptUrl'))
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
-  ['planning','remplace','employes','params'].forEach((x,i)=>{
+  ['planning','conges','remplace','employes','params'].forEach((x,i)=>{
     document.querySelectorAll('.tab')[i].classList.toggle('active',x===n);
     document.getElementById('tab-'+x).classList.toggle('active',x===n);
   });
@@ -898,6 +1025,54 @@ function updNotif(){
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   document.getElementById('notifTxt').textContent=`Bonjour ${emp.name.split(' ')[0]}, votre planning du ${dl} a été modifié : ${det}.`;
 }
+async function saveShiftWeek(){
+  const {empId,dateStr}=S.editing;
+  const emp=S.employees.find(e=>e.id===empId);
+  const note=document.getElementById('mNote').value;
+  const sendMail=document.getElementById('doEmail').checked;
+  const today=new Date();today.setHours(0,0,0,0);
+  const mon=addDays(getMon(today),S.mWO*7);
+  // Appliquer sur les 7 jours de la semaine visible sauf dimanche (off)
+  const promises=[];
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i);
+    const dow=d.getDay();
+    // Dimanche reste repos sauf si VIP choisi
+    if(dow===0 && S.editType!=='vip') continue;
+    const key=`${empId}_${fmt(d)}`;
+    S.planning[key]={type:S.editType,site:emp.site,note};
+  }
+  persist();
+  closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
+  toast('Envoi...');
+  // Sync chaque jour modifié
+  let count=0;
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i);
+    const dow=d.getDay();
+    if(dow===0 && S.editType!=='vip') continue;
+    const r=await api('updateShift',{
+      empId,dateStr:fmt(d),type:S.editType,site:emp.site,note,
+      sendEmail:false,empEmail:emp.email,empName:emp.name
+    });
+    count++;
+  }
+  // Un seul email récap si option cochée
+  if(sendMail && emp.email){
+    const today2=new Date();today2.setHours(0,0,0,0);
+    const mon2=addDays(getMon(today2),S.mWO*7);
+    const dl=`du ${fmtFR(mon2,{day:'numeric',month:'long'})} au ${fmtFR(addDays(mon2,6),{day:'numeric',month:'long'})}`;
+    const t=TYPES.find(x=>x.key===S.editType);
+    const det=t?t.info:'';
+    api('updateShift',{
+      empId,dateStr:fmt(mon),type:S.editType,site:emp.site,note,
+      sendEmail:true,empEmail:emp.email,empName:emp.name,
+      overrideDetail:`Semaine ${dl} : ${emp.site} — ${det}`
+    });
+  }
+  toast(`✓ Semaine entière mise à jour (${count} jours)`);
+}
+
 async function saveShift(){
   const {empId,dateStr}=S.editing;
   const emp=S.employees.find(e=>e.id===empId);
@@ -1058,7 +1233,8 @@ async function saveNewEmp(){
   const slot=document.getElementById('aeSlot').value;
   const emp={id:'E'+String(S.employees.length+1).padStart(2,'0'),
     code:document.getElementById('aeCode').value,name,email,
-    tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,site,slot};
+    tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
+    site,slot,hasChildren:document.getElementById('aeChildren').checked};
   S.employees.push(emp);
   // Initialiser le planning sur 3 mois
   const today=new Date();today.setHours(0,0,0,0);
@@ -1071,6 +1247,12 @@ async function saveNewEmp(){
 
 // ── Paramètres ──
 function renderParams(){
+  // Remplir les règles congés si déjà configurées
+  const regles = S.params.reglesConges || {};
+  const alerteEl = document.getElementById('pDateAlerte');
+  const quotaEl = document.getElementById('pQuota');
+  if(alerteEl) alerteEl.value = regles.dateAlerte || '';
+  if(quotaEl) quotaEl.value = regles.quota || 25;
   let h='';
   Object.entries(SC).forEach(([site,cfg])=>{
     h+=`<div class="site-param-row">
@@ -1125,6 +1307,470 @@ function saveScriptUrl(){
   S.scriptUrl=url;lsSet('scriptUrl',url);
   toast('✓ URL mise à jour — rechargement...');
   setTimeout(()=>location.reload(),1200);
+}
+
+// ══ CONGÉS & RÈGLES ══
+
+const QUOTA_ANNUEL = 25;
+const JOURS_OUVRES = [1,2,3,4,5,6]; // Lun→Sam
+
+// Période de référence : 1 juin N → 31 mai N+1
+function getPeriodeRef() {
+  const now = new Date();
+  const y = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+  return { debut: new Date(y, 5, 1), fin: new Date(y + 1, 4, 31) };
+}
+
+function countJoursOuvres(debut, fin) {
+  let count = 0;
+  let cur = new Date(debut);
+  while (cur <= new Date(fin)) {
+    if (JOURS_OUVRES.includes(cur.getDay())) count++;
+    cur = addDays(cur, 1);
+  }
+  return count;
+}
+
+function getCongesEmp(empId) {
+  const periode = getPeriodeRef();
+  return S.requests.filter(r =>
+    r.empId === empId &&
+    r.type === 'conge' &&
+    r.status !== 'refused' &&
+    r.dateFin &&
+    new Date(r.dateDebut) >= periode.debut &&
+    new Date(r.dateFin) <= periode.fin
+  );
+}
+
+function getJoursPris(empId) {
+  return getCongesEmp(empId)
+    .filter(r => r.status === 'approved')
+    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+}
+
+function getJoursEnAttente(empId) {
+  return getCongesEmp(empId)
+    .filter(r => r.status === 'pending')
+    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+}
+
+function getJokersUtilises(empId) {
+  return (S.params.jokers || {})[empId] || 0;
+}
+
+// ── JOURS FÉRIÉS CHÔMÉS (fixes OK-LA) ──
+const FERIES_CHOMES = ['01-01','05-01','08-15','12-25']; // MM-DD
+function isFerieChome(d) {
+  const mmdd = String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return FERIES_CHOMES.includes(mmdd);
+}
+
+// Jours ouvrés réels (lun-sam, hors fériés chômés)
+function countJoursOuvresReels(debut, fin) {
+  let count = 0;
+  let cur = new Date(debut);
+  while (cur <= new Date(fin)) {
+    const dow = cur.getDay();
+    if (dow !== 0 && !isFerieChome(cur)) count++;
+    cur = addDays(cur, 1);
+  }
+  return count;
+}
+
+// ── DÉLAI DE PRÉVENANCE selon les règles OK-LA ──
+function getDelaiRequis(dateDebut, dateFin) {
+  const debut = new Date(dateDebut);
+  const fin = new Date(dateFin);
+  const moisDebut = debut.getMonth() + 1; // 1-12
+  const nbJours = countJoursOuvresReels(dateDebut, dateFin);
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Période juin-septembre : demande avant le 30/03
+  if (moisDebut >= 6 && moisDebut <= 9) {
+    const limite = new Date(debut.getFullYear(), 2, 30); // 30 mars
+    if (today > limite) {
+      return { jours: 0, regle: 'Période juin-sept : demande requise avant le 30/03', depasseLimite: true, limiteDate: '30/03' };
+    }
+    return { jours: 0, regle: 'Période juin-sept : demande avant le 30/03', depasseLimite: false };
+  }
+  // Décembre : demande avant le 30/09
+  if (moisDebut === 12) {
+    const limite = new Date(debut.getFullYear(), 8, 30); // 30 sept
+    if (today > limite) {
+      return { jours: 0, regle: 'Décembre : demande requise avant le 30/09', depasseLimite: true, limiteDate: '30/09' };
+    }
+    return { jours: 0, regle: 'Décembre : demande avant le 30/09', depasseLimite: false };
+  }
+  // 1 journée → 14 jours
+  if (nbJours === 1) return { jours: 14, regle: '1 journée : 2 semaines de préavis', depasseLimite: false };
+  // 1 semaine ou plus → 60 jours
+  if (nbJours >= 5) return { jours: 60, regle: '1 semaine ou + : 2 mois de préavis', depasseLimite: false };
+  // Autre → 14 jours par défaut
+  return { jours: 14, regle: 'Moins d'une semaine : 2 semaines de préavis', depasseLimite: false };
+}
+
+// ── PRIORITÉ VACANCES SCOLAIRES ──
+// Vacances scolaires zone B 2025-2026 (approximatif)
+const VACANCES_SCOLAIRES = [
+  {debut:'2025-10-18',fin:'2025-11-03'},
+  {debut:'2025-12-20',fin:'2026-01-05'},
+  {debut:'2026-02-14',fin:'2026-03-02'},
+  {debut:'2026-04-11',fin:'2026-04-27'},
+  {debut:'2026-07-04',fin:'2026-08-31'},
+];
+function isVacancesScolaires(dateDebut, dateFin) {
+  return VACANCES_SCOLAIRES.some(v =>
+    dateDebut <= v.fin && dateFin >= v.debut
+  );
+}
+
+function verifierRegleConges(empId, dateDebut, dateFin) {
+  const emp = S.employees.find(e => e.id === empId);
+  const errors = [];
+  const warnings = [];
+  const infos = [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const debut = new Date(dateDebut);
+  const diffJours = Math.floor((debut - today) / 86400000);
+  const jouresDemandes = countJoursOuvresReels(dateDebut, dateFin);
+  const jokersUtilises = getJokersUtilises(empId);
+
+  // 1. Vérif délai de prévenance selon règles OK-LA
+  const delaiInfo = getDelaiRequis(dateDebut, dateFin);
+  if (delaiInfo.depasseLimite) {
+    if (jokersUtilises >= 2) {
+      errors.push(`❌ ${delaiInfo.regle}. Vos 2 jokers sont épuisés — demande impossible.`);
+    } else {
+      warnings.push(`⚠️ ${delaiInfo.regle}. Un joker sera utilisé (${jokersUtilises}/2).`);
+    }
+  } else if (delaiInfo.jours > 0 && diffJours < delaiInfo.jours) {
+    if (jokersUtilises >= 2) {
+      errors.push(`❌ ${delaiInfo.regle} (il reste ${diffJours}j). Vos 2 jokers sont épuisés.`);
+    } else {
+      warnings.push(`⚠️ ${delaiInfo.regle} (il reste ${diffJours}j). Un joker sera utilisé (${jokersUtilises}/2).`);
+    }
+  }
+
+  // 2. Vérif quota restant
+  const joursRestants = QUOTA_ANNUEL - getJoursPris(empId) - getJoursEnAttente(empId);
+  if (jouresDemandes > joursRestants) {
+    errors.push(`❌ Solde insuffisant : ${jouresDemandes}j demandés, ${joursRestants}j restants.`);
+  }
+
+  // 3. Vérif collègue déjà absent (max 1 par magasin)
+  if (emp) {
+    let cur = new Date(dateDebut);
+    while (cur <= new Date(dateFin)) {
+      const dateStr = fmt(cur);
+      if (cur.getDay() !== 0) {
+        const absents = S.employees.filter(e => {
+          if (e.id === empId || e.site !== emp.site) return false;
+          const sh = S.planning[`${e.id}_${dateStr}`];
+          const req = S.requests.find(r =>
+            r.empId === e.id && r.status === 'approved' && r.type === 'conge' &&
+            r.dateDebut <= dateStr && r.dateFin >= dateStr
+          );
+          return (sh && sh.type === 'conge') || req;
+        });
+        if (absents.length >= 1) {
+          const noms = absents.map(e => e.name.split(' ')[0]).join(', ');
+          errors.push(`❌ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. 1 seul salarié par magasin autorisé.`);
+          break;
+        }
+      }
+      cur = addDays(cur, 1);
+    }
+  }
+
+  // 4. Info priorité vacances scolaires
+  if (isVacancesScolaires(dateDebut, dateFin)) {
+    const aEnfants = emp?.hasChildren;
+    if (aEnfants) {
+      infos.push(`ℹ️ Période de vacances scolaires : vous êtes prioritaire (parent d'enfant).`);
+    } else {
+      infos.push(`ℹ️ Vacances scolaires : priorité aux parents. Votre demande sera traitée selon les disponibilités.`);
+    }
+  }
+
+  // 5. Jours fériés chômés inclus dans la période
+  const feriesInclus = [];
+  let cur2 = new Date(dateDebut);
+  while (cur2 <= new Date(dateFin)) {
+    if (isFerieChome(cur2)) feriesInclus.push(fmtFR(cur2, {day:'numeric',month:'long'}));
+    cur2 = addDays(cur2, 1);
+  }
+  if (feriesInclus.length) {
+    infos.push(`ℹ️ ${feriesInclus.join(', ')} : jour(s) férié(s) chômé(s) non décompté(s) de vos CP.`);
+  }
+
+  return { errors, warnings, infos, jouresDemandes };
+}
+
+// Vérification live quand l'employé saisit les dates
+function checkCongeRealtime() {
+  const debut = document.getElementById('rDateDebut')?.value;
+  const fin = document.getElementById('rDateFin')?.value;
+  const el = document.getElementById('congeCheck');
+  if (!el || !debut || !fin || fin < debut) { if(el) el.innerHTML=''; return; }
+  const emp = S.user;
+  if (!emp) return;
+  const result = verifierRegleConges(emp.id, debut, fin);
+  const nb = countJoursOuvresReels(debut, fin);
+  let html = `<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">${nb} jour(s) ouvré(s)</div>`;
+  result.errors.forEach(e => html += `<div class="alert-block" style="padding:8px 10px;font-size:12px;">${e}</div>`);
+  result.warnings.forEach(w => html += `<div class="alert-warn2" style="padding:8px 10px;font-size:12px;">${w}</div>`);
+  (result.infos||[]).forEach(i => html += `<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:8px 10px;font-size:12px;color:#1D4ED8;margin-bottom:4px;">${i}</div>`);
+  if (!result.errors.length && !result.warnings.length) {
+    html += `<div style="color:#059669;font-size:12px;font-weight:600;">✓ Demande valide — ${result.jouresDemandes} jour(s) ouvré(s)</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function toggleCongeFields() {
+  const type = document.getElementById('rType').value;
+  const isConge = type === 'conge';
+  const isEnfant = type === 'enfant_malade';
+  document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
+  document.getElementById('autreFields').style.display = isConge ? 'none' : 'block';
+  // Afficher info enfant malade
+  const infoEl = document.getElementById('enfantMaladeInfo');
+  if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
+}
+
+// Initialiser les listeners dates congés
+function initCongeListeners() {
+  ['rDateDebut','rDateFin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', checkCongeRealtime);
+  });
+}
+
+// Compteur congés vue employé
+function renderEmpQuota() {
+  const emp = S.user;
+  if (!emp) return;
+  const pris = getJoursPris(emp.id);
+  const attente = getJoursEnAttente(emp.id);
+  const restants = QUOTA_ANNUEL - pris - attente;
+  const jokers = getJokersUtilises(emp.id);
+  const pct = Math.round((pris / QUOTA_ANNUEL) * 100);
+  const periode = getPeriodeRef();
+
+  document.getElementById('empQuotaGrid').innerHTML = `
+    <div class="quota-stat"><div class="quota-val" style="color:#059669">${pris}</div><div class="quota-lbl">Pris</div></div>
+    <div class="quota-stat"><div class="quota-val" style="color:#F59E0B">${attente}</div><div class="quota-lbl">En attente</div></div>
+    <div class="quota-stat"><div class="quota-val" style="color:#3B82F6">${restants}</div><div class="quota-lbl">Restants</div></div>`;
+
+  document.getElementById('empJokers').innerHTML =
+    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+      ${[0,1].map(i => `<div class="joker-dot ${i < jokers ? 'joker-used' : 'joker-avail'}"></div>`).join('')}
+      <span style="font-size:12px;color:var(--muted);">${jokers}/2 jokers utilisés</span>
+    </div>
+    <div class="quota-bar-wrap"><div class="quota-bar" style="width:${pct}%;background:${pct>80?'#DC2626':pct>50?'#F59E0B':'#059669'};"></div></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px;">Période : ${fmtFR(periode.debut,{day:'numeric',month:'long',year:'numeric'})} → ${fmtFR(periode.fin,{day:'numeric',month:'long',year:'numeric'})}</div>`;
+
+  // Liste des demandes
+  const mesDemandes = getCongesEmp(emp.id);
+  let h = mesDemandes.length ? '' : '<div style="font-size:12px;color:var(--muted);">Aucune demande cette année</div>';
+  mesDemandes.forEach(r => {
+    const nb = countJoursOuvres(r.dateDebut, r.dateFin);
+    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
+    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
+    h += `<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-size:11px;color:var(--muted)">${nb} jour(s) ouvré(s)</div>
+      </div>
+      <span class="conge-status ${statusCls}">${statusLbl}</span>
+    </div>`;
+  });
+  document.getElementById('empCongesList').innerHTML = h;
+}
+
+// Vue gestionnaire — liste congés tous employés
+function renderCongesMgr() {
+  const regles = S.params.reglesConges || {};
+  document.getElementById('congesRegles').innerHTML = `
+    <div style="font-size:12px;"><strong>Période :</strong> 1 juin → 31 mai</div>
+    <div style="font-size:12px;"><strong>Max par magasin :</strong> 1 salarié simultané</div>
+    <div style="font-size:12px;"><strong>1 journée :</strong> 2 semaines de préavis</div>
+    <div style="font-size:12px;"><strong>1 semaine :</strong> 2 mois de préavis</div>
+    <div style="font-size:12px;"><strong>Juin→Sept :</strong> demande avant le 30/03</div>
+    <div style="font-size:12px;"><strong>Décembre :</strong> demande avant le 30/09</div>
+    <div style="font-size:12px;"><strong>Jours fériés chômés :</strong> 1/01 · 1/05 · 15/08 · 25/12</div>
+    <div style="font-size:12px;"><strong>Alerte solde non utilisé :</strong> ${regles.dateAlerte||'Non définie'}</div>`;
+
+  let h = '';
+  S.employees.forEach(emp => {
+    const pris = getJoursPris(emp.id);
+    const attente = getJoursEnAttente(emp.id);
+    const restants = QUOTA_ANNUEL - pris - attente;
+    const jokers = getJokersUtilises(emp.id);
+    const pct = Math.round((pris / QUOTA_ANNUEL) * 100);
+    const demandes = getCongesEmp(emp.id).filter(r => r.status === 'pending');
+
+    h += `<div class="quota-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+        <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:13px">${emp.name}</div>
+          <div style="font-size:11px;color:var(--muted)">${sPill(emp.site)}</div>
+        </div>
+        <div style="text-align:right;font-size:12px;">
+          <span style="font-weight:700;color:${restants<=3?'#DC2626':restants<=7?'#F59E0B':'#059669'}">${restants}j restants</span>
+          <div style="color:var(--muted)">${pris}/${QUOTA_ANNUEL} pris</div>
+        </div>
+      </div>
+      <div class="quota-bar-wrap"><div class="quota-bar" style="width:${pct}%;background:${pct>80?'#DC2626':pct>50?'#F59E0B':'#059669'};"></div></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+        ${[0,1].map(i=>`<div class="joker-dot ${i<jokers?'joker-used':'joker-avail'}"></div>`).join('')}
+        <span style="font-size:11px;color:var(--muted)">${jokers}/2 jokers</span>
+        ${attente>0?`<span style="margin-left:auto;font-size:11px;background:#FFF7ED;color:#C2410C;padding:2px 8px;border-radius:10px;font-weight:600;">${attente}j en attente</span>`:''}
+      </div>
+      ${demandes.length ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+        ${demandes.map(r=>{
+          const nb=countJoursOuvresReels(r.dateDebut,r.dateFin);
+          const check=verifierRegleConges(r.empId,r.dateDebut,r.dateFin);
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+            <div style="flex:1;font-size:12px;">
+              📅 ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}j
+              ${check.errors.length?`<div style="color:#DC2626;font-size:11px">${check.errors[0]}</div>`:''}
+              ${check.warnings.length&&!check.errors.length?`<div style="color:#F59E0B;font-size:11px">${check.warnings[0]}</div>`:''}
+            </div>
+            <div style="display:flex;gap:5px;">
+              <button class="btn btn-sm btn-ok" onclick="validerConge(${r.id})">✓</button>
+              <button class="btn btn-sm btn-no" onclick="refuserConge(${r.id})">✗</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+    </div>`;
+  });
+  document.getElementById('congesListeMgr').innerHTML = h || '<div style="text-align:center;padding:20px;color:var(--muted)">Aucun congé en cours</div>';
+}
+
+async function validerConge(id) {
+  const req = S.requests.find(r => r.id == id);
+  if (!req) return;
+  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin);
+  // Appliquer joker si warning
+  if (check.warnings.length && !check.errors.length) {
+    if (!S.params.jokers) S.params.jokers = {};
+    S.params.jokers[req.empId] = (S.params.jokers[req.empId] || 0) + 1;
+  }
+  req.status = 'approved';
+  // Marquer dans le planning
+  let cur = new Date(req.dateDebut);
+  while (cur <= new Date(req.dateFin)) {
+    if (JOURS_OUVRES.includes(cur.getDay())) {
+      const emp = S.employees.find(e => e.id === req.empId);
+      S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
+    }
+    cur = addDays(cur, 1);
+  }
+  persist();
+  renderCongesMgr();
+  renderWeek();
+  toast('✓ Congé validé');
+  api('validerConge', {reqId: id, empId: req.empId, dateDebut: req.dateDebut, dateFin: req.dateFin,
+    empEmail: req.empEmail, empName: req.empName, jokers: S.params.jokers});
+}
+
+async function refuserConge(id) {
+  const req = S.requests.find(r => r.id == id);
+  if (!req) return;
+  req.status = 'refused';
+  persist();
+  renderCongesMgr();
+  toast('Congé refusé');
+  api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
+    dateDebut: req.dateDebut, dateFin: req.dateFin});
+}
+
+async function envoyerRelances() {
+  const regles = S.params.reglesConges || {};
+  const empsSansConges = S.employees.filter(e => {
+    const restants = QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id);
+    return restants > 10; // Plus de 10j non posés = relance
+  });
+  if (!empsSansConges.length) { toast('Tous les employés ont posé leurs congés ✓'); return; }
+  toast(`Envoi de ${empsSansConges.length} relance(s)...`);
+  const r = await api('envoyerRelances', {employes: empsSansConges.map(e=>({id:e.id,name:e.name,email:e.email,
+    restants: QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id),
+    jokers: getJokersUtilises(e.id)})), managerEmail: MANAGER_EMAIL||''});
+  toast(r&&r.ok ? `✓ ${empsSansConges.length} relance(s) envoyée(s)` : 'Relances envoyées localement');
+}
+
+// Paramètres règles congés
+function saveReglesConges() {
+  if (!S.params.reglesConges) S.params.reglesConges = {};
+  S.params.reglesConges.dateAlerte = document.getElementById('pDateAlerte')?.value || '';
+  S.params.reglesConges.quota = parseInt(document.getElementById('pQuota')?.value) || 25;
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Paramètres congés enregistrés');
+}
+
+// Rotation samedis
+function renderParamRotation() {
+  const rot = S.params.rotationSamedis || {};
+  let h = '';
+  Object.keys(SC).forEach(site => {
+    h += `<div class="rotation-row">
+      <div style="display:flex;align-items:center;gap:6px;flex:1">
+        <div style="width:10px;height:10px;border-radius:3px;background:${SC[site].color}"></div>
+        <span style="font-size:13px;font-weight:500">${site}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
+        1 samedi off toutes les
+        <input type="number" class="mini-input" id="rot_${site.replace(/[^a-zA-Z]/g,'_')}" value="${rot[site]||2}" min="1" max="8">
+        semaines
+      </div>
+    </div>`;
+  });
+  const el = document.getElementById('paramRotation');
+  if (el) el.innerHTML = h;
+}
+
+function saveRotation() {
+  if (!S.params.rotationSamedis) S.params.rotationSamedis = {};
+  Object.keys(SC).forEach(site => {
+    const el = document.getElementById('rot_'+site.replace(/[^a-zA-Z]/g,'_'));
+    if (el) S.params.rotationSamedis[site] = parseInt(el.value) || 2;
+  });
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Rotation samedis enregistrée');
+}
+
+// Repos fixes par employé
+function renderParamReposFixe() {
+  const repos = S.params.reposFixe || {};
+  const JOURS = ['Aucun','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  S.employees.forEach(emp => {
+    h += `<div class="fg">
+      <label>${emp.name.split(' ')[0]}</label>
+      <select id="rf_${emp.id}" style="font-size:12px;">
+        ${JOURS.map((j,i)=>`<option value="${i}" ${(repos[emp.id]||0)==i?'selected':''}>${j}</option>`).join('')}
+      </select>
+    </div>`;
+  });
+  h += '</div>';
+  const el = document.getElementById('paramReposFixe');
+  if (el) el.innerHTML = h;
+}
+
+function saveReposFixe() {
+  if (!S.params.reposFixe) S.params.reposFixe = {};
+  S.employees.forEach(emp => {
+    const el = document.getElementById('rf_'+emp.id);
+    if (el) S.params.reposFixe[emp.id] = parseInt(el.value) || 0;
+  });
+  persist();
+  api('saveParams', {params: S.params});
+  toast('✓ Jours de repos fixes enregistrés');
 }
 
 // ══ DÉMARRAGE ══
