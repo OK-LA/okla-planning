@@ -1,0 +1,26 @@
+{
+  "name": "OK-LA Planning",
+  "short_name": "OK-LA",
+  "description": "Application de gestion du planning OK-LA",
+  "start_url": "/okla-planning/",
+  "scope": "/okla-planning/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#DCDCDC",
+  "theme_color": "#F28E30",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
