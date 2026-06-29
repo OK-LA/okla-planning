@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>OK-LA Planning</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1A1917">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OK-LA">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 :root{
@@ -2108,7 +2114,35 @@ function saveReposFixe() {
 }
 
 // ══ DÉMARRAGE ══
-window.addEventListener('load',()=>{loadAll();});
+window.addEventListener('load', () => {
+  loadAll();
+
+  // Enregistrer le Service Worker (PWA)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/okla-planning/sw.js')
+      .then(reg => {
+        console.log('SW enregistré:', reg.scope);
+        // Écouter les mises à jour
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // Nouvelle version disponible
+              toast('✓ Application mise à jour', 4000);
+            }
+          });
+        });
+      })
+      .catch(err => console.log('SW erreur:', err));
+
+    // Recevoir message du SW (mise à jour activée)
+    navigator.serviceWorker.addEventListener('message', event => {
+      if (event.data && event.data.type === 'APP_UPDATED') {
+        toast('✓ Nouvelle version installée', 3000);
+      }
+    });
+  }
+});
 </script>
 </body>
 </html>
