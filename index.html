@@ -586,6 +586,22 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL MOT DE PASSE GESTIONNAIRE -->
+<div class="modal-overlay" id="mPwd">
+  <div class="modal" style="max-width:340px;">
+    <div class="modal-title">🔐 Accès gestionnaire</div>
+    <div class="fg">
+      <label>Mot de passe</label>
+      <input type="password" id="pwdInput" placeholder="Entrez le mot de passe" autocomplete="current-password">
+    </div>
+    <div id="pwdError" style="color:#DC2626;font-size:12px;margin-bottom:8px;display:none;">Mot de passe incorrect</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mPwd')">Annuler</button>
+      <button class="btn btn-save" onclick="validerPwd()">→ Accéder</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL ABSENCE -->
 <div class="modal-overlay" id="mAbs">
   <div class="modal">
@@ -809,6 +825,10 @@ function toast(m,d=3000){const t=document.getElementById('toast');t.textContent=
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+// Valider mot de passe avec Entrée
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&document.getElementById('mPwd')?.classList.contains('open')) validerPwd();
+});
 
 function buildLegend(id){
   const el=document.getElementById(id);if(!el)return;
@@ -844,14 +864,21 @@ function doLogin(){
   else toast('Code non reconnu');
 }
 function loginMgr(){
-  // Vérifier le mot de passe gestionnaire
-  const pwd = prompt('Mot de passe gestionnaire :');
-  if(!pwd) return;
-  const savedPwd = lsGet('mgrPassword', 'OKLA2025!');
-  if(pwd === savedPwd){
+  document.getElementById('pwdInput').value='';
+  document.getElementById('pwdError').style.display='none';
+  openModal('mPwd');
+  setTimeout(()=>document.getElementById('pwdInput').focus(),300);
+}
+function validerPwd(){
+  const pwd=document.getElementById('pwdInput').value;
+  const savedPwd=lsGet('mgrPassword','OKLA2025!');
+  if(pwd===savedPwd){
+    closeModal('mPwd');
     S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
   } else {
-    toast('Mot de passe incorrect');
+    document.getElementById('pwdError').style.display='block';
+    document.getElementById('pwdInput').value='';
+    document.getElementById('pwdInput').focus();
   }
 }
 function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];document.getElementById('loginCode').value='';showScr('sLogin');}
