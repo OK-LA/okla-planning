@@ -66,8 +66,9 @@ input:focus,select:focus,textarea:focus{border-color:#3B82F6;background:#fff;}
 .divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);}
 .divider span{background:#fff;padding:0 10px;position:relative;}
 
-.tabs{display:flex;gap:3px;background:var(--border);padding:3px;border-radius:9px;margin-bottom:18px;}
-.tab{flex:1;text-align:center;padding:7px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:inherit;transition:all .15s;}
+.tabs{display:flex;gap:2px;background:var(--border);padding:3px;border-radius:9px;margin-bottom:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.tabs::-webkit-scrollbar{display:none;}
+.tab{flex:0 0 auto;text-align:center;padding:7px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:inherit;transition:all .15s;white-space:nowrap;}
 .tab.active{background:#fff;color:var(--text);box-shadow:var(--sh);}
 .tab-content{display:none;}.tab-content.active{display:block;}
 
@@ -795,7 +796,16 @@ async function loadAll(){
       lsSet('planning',S.planning);
     }
     setLoadingText('Données chargées ✓');
-    setTimeout(()=>{hideLoading();showScr('sLogin');},400);
+    setTimeout(()=>{
+      hideLoading();
+      // Restaurer la session gestionnaire si elle existe (moins de 8h)
+      const session=lsGet('session',null);
+      if(session&&session.role==='mgr'&&(Date.now()-session.ts)<8*3600*1000){
+        S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
+      } else {
+        showScr('sLogin');
+      }
+    },400);
   } else {
     if(S.employees.length>0){
       setLoadingText('Mode hors ligne — données locales');
@@ -874,14 +884,16 @@ function validerPwd(){
   const savedPwd=lsGet('mgrPassword','OKLA2025!');
   if(pwd===savedPwd){
     closeModal('mPwd');
-    S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
+    S.user=MGR;S.role='mgr';
+    lsSet('session',{role:'mgr',ts:Date.now()});
+    showScr('sMgr');renderMgr();
   } else {
     document.getElementById('pwdError').style.display='block';
     document.getElementById('pwdInput').value='';
     document.getElementById('pwdInput').focus();
   }
 }
-function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];document.getElementById('loginCode').value='';showScr('sLogin');}
+function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];lsSet('session',null);document.getElementById('loginCode').value='';showScr('sLogin');}
 document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
 function showScr(id){
