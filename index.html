@@ -535,6 +535,20 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
 
       <div class="param-card" style="margin-top:14px;">
+        <h3>🔐 Sécurité</h3>
+        <div class="fg"><label>Mot de passe gestionnaire actuel</label>
+          <input type="password" id="oldPwd" placeholder="Mot de passe actuel">
+        </div>
+        <div class="fg"><label>Nouveau mot de passe</label>
+          <input type="password" id="newPwd" placeholder="Nouveau mot de passe">
+        </div>
+        <div class="fg"><label>Confirmer le nouveau mot de passe</label>
+          <input type="password" id="confirmPwd" placeholder="Confirmer">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="changePassword()">✓ Changer le mot de passe</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
         <h3>⚙️ Configuration technique</h3>
         <div class="fg"><label>URL du script Google Apps Script</label>
           <input type="url" id="paramScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
@@ -829,7 +843,17 @@ function doLogin(){
   else if(S.employees.length===0){toast('Aucun employé — connectez d\'abord Google Sheets');}
   else toast('Code non reconnu');
 }
-function loginMgr(){S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();}
+function loginMgr(){
+  // Vérifier le mot de passe gestionnaire
+  const pwd = prompt('Mot de passe gestionnaire :');
+  if(!pwd) return;
+  const savedPwd = lsGet('mgrPassword', 'OKLA2025!');
+  if(pwd === savedPwd){
+    S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
+  } else {
+    toast('Mot de passe incorrect');
+  }
+}
 function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];document.getElementById('loginCode').value='';showScr('sLogin');}
 document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
@@ -1664,6 +1688,24 @@ async function saveMagasins(){
 async function saveAdresses(){
   await saveMagasins();
 }
+function changePassword(){
+  const oldPwd = document.getElementById('oldPwd').value;
+  const newPwd = document.getElementById('newPwd').value;
+  const confirmPwd = document.getElementById('confirmPwd').value;
+  const savedPwd = lsGet('mgrPassword', 'OKLA2025!');
+
+  if(!oldPwd||!newPwd||!confirmPwd){toast('Remplissez tous les champs');return;}
+  if(oldPwd !== savedPwd){toast('Mot de passe actuel incorrect');return;}
+  if(newPwd !== confirmPwd){toast('Les nouveaux mots de passe ne correspondent pas');return;}
+  if(newPwd.length < 6){toast('Mot de passe trop court (6 caractères minimum)');return;}
+
+  lsSet('mgrPassword', newPwd);
+  document.getElementById('oldPwd').value='';
+  document.getElementById('newPwd').value='';
+  document.getElementById('confirmPwd').value='';
+  toast('✓ Mot de passe changé avec succès');
+}
+
 function saveScriptUrl(){
   const url=document.getElementById('paramScriptUrl').value.trim();
   if(!url){toast('URL vide');return;}
