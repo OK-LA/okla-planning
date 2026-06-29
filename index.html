@@ -278,8 +278,9 @@ tbody tr:hover td{background:#FAFAF8;}
 
 <div class="header" style="display:none;" id="mainHeader">
   <div style="font-weight:800;font-size:17px;letter-spacing:-.5px;">OK<em style="font-style:normal;color:#3B82F6">-</em>LA <span style="font-weight:400;color:var(--muted);font-size:13px">Planning</span></div>
-  <div style="display:flex;align-items:center;gap:10px;">
+  <div style="display:flex;align-items:center;gap:8px;">
     <div class="sync-bar"><div class="sync-dot" id="syncDot"></div><span id="syncTxt">Connecté</span></div>
+    <button onclick="refreshData()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:4px;" title="Actualiser">🔄</button>
     <div id="hdrBadge"></div>
   </div>
 </div>
@@ -2133,6 +2134,17 @@ function saveReposFixe() {
   persist();
   api('saveParams', {params: S.params});
   toast('✓ Jours de repos fixes enregistrés');
+}
+
+// Actualiser les données depuis Google Sheets
+async function refreshData(){
+  setSyncing(true);
+  setLoadingText('Actualisation...');
+  document.getElementById('loadingScreen').style.display='flex';
+  document.getElementById('mainHeader').style.display='none';
+  await loadAll();
+  if(S.role==='mgr') renderMgr();
+  else if(S.role==='emp') renderEmp();
 }
 
 // ══ DÉMARRAGE ══
