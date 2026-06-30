@@ -103,6 +103,29 @@ tbody tr:hover td{background:#FAFAF8;}
 .sb.empty:hover{border-color:#9CA3AF;background:#F9FAFB;}
 .sb.vip::after{content:'★';font-size:10px;color:rgba(255,255,255,.9);}
 
+/* PASTILLES ÉVÉNEMENTS — wrapper pour superposer une cellule + pastille(s) */
+.cell-wrap{position:relative;width:100%;}
+.ev-dots{position:absolute;top:-3px;right:-2px;display:flex;gap:1px;z-index:2;pointer-events:none;}
+.ev-dot{width:7px;height:7px;border-radius:50%;border:1.2px solid #fff;box-shadow:0 0 0 .5px rgba(0,0,0,.15);}
+.ev-pin-btn{position:absolute;bottom:-3px;left:-2px;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid var(--border);font-size:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;color:var(--muted);line-height:1;opacity:0;transition:opacity .15s;}
+.cell-wrap:hover .ev-pin-btn{opacity:1;}
+.ev-pin-btn:hover{background:var(--bg);color:var(--text);}
+.event-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);}
+.event-row:last-child{border-bottom:none;}
+.event-dot-lg{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+
+/* VUE 12 MOIS GLISSANTS — accordéon */
+.accordeon-mois{background:#fff;border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden;}
+.accordeon-head{padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;}
+.accordeon-head:hover{background:var(--bg);}
+.accordeon-head.current{border-left:3px solid #1A1917;}
+.accordeon-title{font-weight:700;font-size:14px;text-transform:capitalize;}
+.accordeon-chevron{transition:transform .2s;color:var(--muted);}
+.accordeon-chevron.open{transform:rotate(180deg);}
+.accordeon-body{display:none;padding:0 14px 14px;}
+.accordeon-body.open{display:block;}
+.accordeon-summary{font-size:11px;color:var(--muted);}
+
 /* VUE MOIS PAR SITE */
 .site-month-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--border);background:#fff;}
 .site-month-table{border-collapse:collapse;width:100%;}
@@ -483,6 +506,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="vtoggle">
           <button class="vbtn active" id="vSemBtn" onclick="setView('sem')">Semaine</button>
           <button class="vbtn" id="vMoisBtn" onclick="setView('mois')">Mois</button>
+          <button class="vbtn" id="vAnneeBtn" onclick="setView('annee')">12 mois</button>
         </div>
       </div>
       <div id="vSemaine">
@@ -528,6 +552,22 @@ tbody tr:hover td{background:#FAFAF8;}
           <div class="cal-grid" id="calHead" style="margin-bottom:3px;"></div>
           <div class="cal-grid" id="calBody"></div>
         </div>
+      </div>
+
+      <!-- VUE 12 MOIS GLISSANTS -->
+      <div id="vAnneeView" style="display:none;">
+        <div class="filter-bar">
+          <div class="filter-section">
+            <div class="filter-label">Magasins</div>
+            <div class="chips" id="chipsSitesAnnee"></div>
+          </div>
+          <div class="filter-section" id="filterEmpSectionAnnee" style="display:none;">
+            <div class="filter-label">Employés</div>
+            <div class="chips" id="chipsEmpsAnnee"></div>
+          </div>
+        </div>
+        <div class="muted" style="margin-bottom:10px;">Vue d'ensemble glissante sur 12 mois à partir d'aujourd'hui. Cliquez sur un mois pour le déplier.</div>
+        <div id="anneeAccordeon"></div>
       </div>
     </div>
 
@@ -592,6 +632,15 @@ tbody tr:hover td{background:#FAFAF8;}
           <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterMagasin()">+ Ajouter un magasin</button>
           <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveMagasins()">✓ Enregistrer</button>
         </div>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
+        <h3>🔵 Événements & pastilles</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Créez vos propres types d'événements (vacances scolaires, soldes, inventaire...) avec la couleur de votre choix. Ils apparaîtront en petite pastille sur les cases du planning.
+        </div>
+        <div id="paramEvents"></div>
+        <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterTypeEvenement()">+ Ajouter un type d'événement</button>
+        <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveEventTypes()">✓ Enregistrer</button>
       </div>
       <div class="param-card" style="margin-top:14px;">
         <h3>Domicile des employés</h3>
@@ -721,6 +770,21 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL ÉVÉNEMENT (pastille sur une date) -->
+<div class="modal-overlay" id="mEvent">
+  <div class="modal">
+    <div class="modal-title" id="mEventTitle">Événement du jour</div>
+    <div id="mEventList" style="margin-bottom:10px;"></div>
+    <div class="fg"><label>Ajouter un événement</label>
+      <select id="evTypeSel"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mEvent')">Fermer</button>
+      <button class="btn btn-save" onclick="ajouterEvenementJour()">+ Ajouter</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL ABSENCE -->
 <div class="modal-overlay" id="mAbs">
   <div class="modal">
@@ -823,14 +887,21 @@ const S={
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
   eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,empTab:'perso',empView:'sem',
-  view:'sem',moisMode:'site',triConges:'restants',
+  view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
-  editing:null,editType:null,editingAbs:null,
+  editing:null,editType:null,editingAbs:null,editingDateEvent:null,
   params:lsGet('params',{
     minStaff:{'Ham':2,'Longueau':2,'Roye':2,'Breteuil':1,'Entrepôt':1},
     adresses:{'Ham':'','Longueau':'','Roye':'','Breteuil':'','Entrepôt':''}
   }),
+  // Types d'événements personnalisés (nom + couleur), créés/supprimés par le gestionnaire
+  eventTypes:lsGet('eventTypes',[
+    {id:'ferie',  label:'Jour férié chômé', color:'#DC2626'},
+    {id:'soldes', label:'Période de soldes', color:'#F59E0B'},
+  ]),
+  // Événements posés sur des dates précises : { 'YYYY-MM-DD': ['ferie','soldes',...] }
+  events:lsGet('events',{}),
   scriptUrl:lsGet('scriptUrl',''),
   syncing:false,
 };
@@ -842,6 +913,8 @@ function persist(){
   lsSet('absences',S.absences);
   lsSet('mods',S.mods);
   lsSet('params',S.params);
+  lsSet('eventTypes',S.eventTypes);
+  lsSet('events',S.events);
 }
 
 // ══ API GOOGLE SHEETS ══
@@ -899,6 +972,8 @@ async function loadAll(){
     if(r.requests)   {S.requests=r.requests;    lsSet('requests',r.requests);}
     if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
     if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
+    if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
+    if(r.events&&typeof r.events==='object') {S.events=r.events; lsSet('events',r.events);}
     // Initialiser planning vide si pas de données
     if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
     // Générer planning par défaut pour les employés si vide
@@ -1222,10 +1297,15 @@ function setView(v){
   S.view=v;
   document.getElementById('vSemBtn').classList.toggle('active',v==='sem');
   document.getElementById('vMoisBtn').classList.toggle('active',v==='mois');
+  document.getElementById('vAnneeBtn').classList.toggle('active',v==='annee');
   document.getElementById('vSemaine').style.display=v==='sem'?'block':'none';
   document.getElementById('vMoisView').style.display=v==='mois'?'block':'none';
-  if(v==='sem'){document.getElementById('mWLbl').style.display='';renderWeek();}
-  else{
+  document.getElementById('vAnneeView').style.display=v==='annee'?'block':'none';
+  if(v==='sem'){
+    document.getElementById('mWLbl').style.display='';
+    renderWeek();
+  }
+  else if(v==='mois'){
     S.moisMode='site';
     document.getElementById('mSiteBtn').classList.add('active');
     document.getElementById('mEmpBtn').classList.remove('active');
@@ -1235,6 +1315,11 @@ function setView(v){
     document.getElementById('mWLbl').style.display='none';
     renderChipsSites();
     renderMonth();
+  }
+  else{ // annee
+    document.getElementById('mWLbl').style.display='none';
+    renderChipsSites();
+    renderAnnee();
   }
 }
 function setMoisMode(mode){
@@ -1275,12 +1360,14 @@ function renderChipsSites() {
   const sites = Object.keys(SC);
   renderChipsContainer('chipsSites', sites);
   renderChipsContainer('chipsSitesMois', sites);
+  renderChipsContainer('chipsSitesAnnee', sites);
   renderChipsEmps();
 }
 
 function refreshActiveView() {
   if (S.view === 'sem') renderWeek();
-  else renderMonth();
+  else if (S.view === 'mois') renderMonth();
+  else renderAnnee();
 }
 
 function toggleTousSites() {
@@ -1326,6 +1413,7 @@ function renderChipsEmps() {
   const empsVisibles = S.employees.filter(e => S.filtresSites.includes(e.site));
   renderChipsEmpsContainer('chipsEmps', 'filterEmpSection', empsVisibles);
   renderChipsEmpsContainer('chipsEmpsMois', 'filterEmpSectionMois', empsVisibles);
+  renderChipsEmpsContainer('chipsEmpsAnnee', 'filterEmpSectionAnnee', empsVisibles);
 }
 
 function toggleEmp(empId) {
@@ -1435,10 +1523,12 @@ function renderWeek(){
         const isW=d.getDay()===0||d.getDay()===6;
         const sh=S.planning[`${emp.id}_${fmt(d)}`];
         const type=sh?.type||'off';const empSite=sh?.site||emp.site;
+        const dStr=fmt(d);
         const cell=type==='off'
-          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`
-          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
-        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
+          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
+          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`;
+        const wrapped=`<div class="cell-wrap">${cell}${renderEventDots(dStr)}<div class="ev-pin-btn" onclick="event.stopPropagation();openEventModal('${dStr}')" title="Événements">📌</div></div>`;
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${wrapped}</td>`;
       }
       tb+='</tr>';
     });
@@ -1508,9 +1598,13 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0||d.getDay()===6;
     const weCls=isW?' we':'';
-    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
+    const dStr=fmt(d);
+    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}position:relative;">` +
+      `<div class="cell-wrap" style="display:inline-block;width:auto;">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span></td>`;
+      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>` +
+      `${renderEventDots(dStr)}<div class="ev-pin-btn" style="left:-14px;bottom:2px;" onclick="event.stopPropagation();openEventModal('${dStr}')" title="Événements">📌</div>` +
+      `</div></td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
@@ -1546,6 +1640,61 @@ function renderMonthSite(ref,today){
   });
   html+=`<div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l&#39;effectif minimum · Cliquez sur une case pour modifier</div>`;
   document.getElementById('moisSiteView').innerHTML=html;
+}
+
+// ── VUE 12 MOIS GLISSANTS — accordéon, un mois ouvert à la fois par défaut (le mois en cours) ──
+function renderAnnee(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const empsFiltres=getEmpsFiltres();
+  const sitesAAfficher=S.filtresSites.length?S.filtresSites:Object.keys(SC);
+
+  // Ouvrir le mois en cours par défaut au premier rendu
+  if(S.moisOuverts.length===0) S.moisOuverts=[0];
+
+  let html='';
+  for(let m=0; m<12; m++){
+    const ref=new Date(today.getFullYear(), today.getMonth()+m, 1);
+    const isOpen=S.moisOuverts.includes(m);
+    const isCurrent=m===0;
+    const label=fmtFR(ref,{month:'long',year:'numeric'});
+
+    // Comptage rapide pour le résumé fermé : nb d'événements ce mois-ci
+    const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
+    let nbEvents=0;
+    for(let d=1; d<=daysInMonth; d++){
+      const dStr=fmt(new Date(ref.getFullYear(),ref.getMonth(),d));
+      if(S.events[dStr]) nbEvents+=S.events[dStr].length;
+    }
+
+    let body='';
+    if(isOpen){
+      sitesAAfficher.forEach(site=>{
+        body+=renderMonthSiteTable(site, ref, today, empsFiltres);
+      });
+    }
+
+    html+=`<div class="accordeon-mois">
+      <div class="accordeon-head${isCurrent?' current':''}" onclick="toggleMoisAccordeon(${m})">
+        <div>
+          <span class="accordeon-title">${label}</span>
+          ${isCurrent?'<span style="font-size:10px;font-weight:600;color:#1A1917;background:var(--bg);padding:2px 7px;border-radius:10px;margin-left:8px;">Mois en cours</span>':''}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${nbEvents>0?`<span class="accordeon-summary">${nbEvents} événement(s)</span>`:''}
+          <span class="accordeon-chevron${isOpen?' open':''}">▾</span>
+        </div>
+      </div>
+      <div class="accordeon-body${isOpen?' open':''}">${isOpen?body:''}</div>
+    </div>`;
+  }
+
+  document.getElementById('anneeAccordeon').innerHTML=html;
+}
+
+function toggleMoisAccordeon(m){
+  if(S.moisOuverts.includes(m)) S.moisOuverts=S.moisOuverts.filter(x=>x!==m);
+  else S.moisOuverts.push(m);
+  renderAnnee();
 }
 
 function renderMonthEmp(ref,today){
@@ -1897,6 +2046,7 @@ function renderParams(){
   if(alerteEl) alerteEl.value = regles.dateAlerte || '';
   if(quotaEl) quotaEl.value = regles.quota || 25;
   renderParamMagasins();
+  renderParamEvents();
   let h='';
   Object.entries(SC).forEach(([site,cfg])=>{
     h+=`<div class="site-param-row">
@@ -1932,6 +2082,130 @@ async function saveParams(){
   toast(r&&r.ok?'✓ Paramètres enregistrés':'✓ Enregistré localement');
 }
 // ── GESTION MAGASINS ──
+// ── GESTION TYPES D'ÉVÉNEMENTS (pastilles personnalisables) ──
+function renderParamEvents(){
+  const el = document.getElementById('paramEvents');
+  if(!el) return;
+  let h = '';
+  S.eventTypes.forEach((ev,i) => {
+    h += `<div class="magasin-row" id="evRow_${i}">
+      <input type="color" class="color-picker" id="evColor_${i}" value="${ev.color}" title="Couleur">
+      <input type="text" class="magasin-name-input" id="evLabel_${i}" value="${ev.label}" placeholder="Nom de l'événement">
+      <button class="btn-del" onclick="supprimerTypeEvenement(${i})" title="Supprimer">✕</button>
+    </div>`;
+  });
+  el.innerHTML = h || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun type d\'événement configuré</div>';
+}
+
+function ajouterTypeEvenement(){
+  const nom = prompt('Nom du nouveau type d\'événement (ex : Inventaire, Formation...) :');
+  if(!nom || !nom.trim()) return;
+  const id = 'ev_'+Date.now();
+  const couleurs = ['#8B5CF6','#0EA5E9','#10B981','#F97316','#4B5563','#EC4899','#14B8A6'];
+  const couleur = couleurs[S.eventTypes.length % couleurs.length];
+  S.eventTypes.push({id, label:nom.trim(), color:couleur});
+  persist();
+  renderParamEvents();
+  toast(`✓ ${nom.trim()} ajouté`);
+}
+
+function supprimerTypeEvenement(idx){
+  const ev = S.eventTypes[idx];
+  if(!ev) return;
+  // Vérifier si utilisé sur des dates
+  const utilise = Object.values(S.events).some(list => list.includes(ev.id));
+  if(utilise && !confirm(`"${ev.label}" est utilisé sur au moins une date du planning. Le supprimer le retirera aussi de ces dates. Continuer ?`)) return;
+  S.eventTypes.splice(idx,1);
+  // Nettoyer les références dans S.events
+  Object.keys(S.events).forEach(dateStr => {
+    S.events[dateStr] = S.events[dateStr].filter(id => id !== ev.id);
+    if(S.events[dateStr].length === 0) delete S.events[dateStr];
+  });
+  persist();
+  renderParamEvents();
+  renderWeek();
+  toast(`✓ ${ev.label} supprimé`);
+}
+
+async function saveEventTypes(){
+  S.eventTypes.forEach((ev,i) => {
+    const labelEl = document.getElementById('evLabel_'+i);
+    const colorEl = document.getElementById('evColor_'+i);
+    if(labelEl) ev.label = labelEl.value.trim() || ev.label;
+    if(colorEl) ev.color = colorEl.value;
+  });
+  persist();
+  const r = await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
+  renderParamEvents();
+  renderWeek();
+  toast(r&&r.ok?'✓ Types d\'événements enregistrés':'✓ Enregistré localement');
+}
+
+// ── Pastille événements sur une date donnée ──
+function getEventTypeColor(evId){
+  const t = S.eventTypes.find(e=>e.id===evId);
+  return t ? t.color : '#999';
+}
+function renderEventDots(dateStr){
+  const ids = S.events[dateStr];
+  if(!ids || !ids.length) return '';
+  const dots = ids.slice(0,4).map(id => `<div class="ev-dot" style="background:${getEventTypeColor(id)};" title="${S.eventTypes.find(e=>e.id===id)?.label||''}"></div>`).join('');
+  return `<div class="ev-dots">${dots}</div>`;
+}
+function openEventModal(dateStr){
+  S.editingDateEvent = dateStr;
+  const dl = fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('mEventTitle').textContent = `📌 Événements — ${dl}`;
+  renderEventModalList();
+  const used = S.events[dateStr] || [];
+  document.getElementById('evTypeSel').innerHTML = S.eventTypes
+    .filter(t => !used.includes(t.id))
+    .map(t => `<option value="${t.id}">${t.label}</option>`).join('') || '<option value="">Tous les types déjà ajoutés</option>';
+  openModal('mEvent');
+}
+function renderEventModalList(){
+  const dateStr = S.editingDateEvent;
+  const ids = S.events[dateStr] || [];
+  const el = document.getElementById('mEventList');
+  if(!ids.length){ el.innerHTML = '<div class="muted" style="padding:6px 0;">Aucun événement ce jour-là</div>'; return; }
+  el.innerHTML = ids.map(id => {
+    const t = S.eventTypes.find(e=>e.id===id);
+    if(!t) return '';
+    return `<div class="event-row">
+      <div class="event-dot-lg" style="background:${t.color};"></div>
+      <div style="flex:1;font-size:13px;font-weight:500;">${t.label}</div>
+      <button class="btn-del" onclick="retirerEvenementJour('${id}')" title="Retirer">✕</button>
+    </div>`;
+  }).join('');
+}
+async function ajouterEvenementJour(){
+  const dateStr = S.editingDateEvent;
+  const sel = document.getElementById('evTypeSel');
+  const evId = sel.value;
+  if(!evId) { toast('Tous les types sont déjà ajoutés à cette date'); return; }
+  if(!S.events[dateStr]) S.events[dateStr] = [];
+  S.events[dateStr].push(evId);
+  persist();
+  renderEventModalList();
+  openEventModal(dateStr); // rafraîchit aussi le select
+  renderWeek();
+  if(S.view==='mois') renderMonth();
+  toast('✓ Événement ajouté');
+  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
+}
+async function retirerEvenementJour(evId){
+  const dateStr = S.editingDateEvent;
+  if(!S.events[dateStr]) return;
+  S.events[dateStr] = S.events[dateStr].filter(id => id !== evId);
+  if(S.events[dateStr].length === 0) delete S.events[dateStr];
+  persist();
+  openEventModal(dateStr);
+  renderWeek();
+  if(S.view==='mois') renderMonth();
+  toast('✓ Événement retiré');
+  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
+}
+
 function renderParamMagasins(){
   const el = document.getElementById('paramMagasins');
   if(!el) return;
