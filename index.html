@@ -614,6 +614,14 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
       </div>
       <div class="param-card" style="margin-top:14px;">
+        <h3>🎨 Couleurs des types de journée</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Personnalisez la couleur de chaque type (Congé, Maladie, Entrepôt A/B...). Laisser vide = couleur par défaut du magasin.
+        </div>
+        <div id="paramTypeColors"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveTypeColors()">✓ Enregistrer</button>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
         <h3>🔵 Événements & pastilles</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
           Créez vos propres types d'événements (vacances scolaires, soldes, inventaire...) avec la couleur de votre choix. Ils apparaîtront en petite pastille sur les cases du planning.
@@ -864,6 +872,10 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
       <input type="checkbox" id="aeChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
     </label></div>
+    <div class="fg"><label>Date de fin de contrat (optionnel)</label>
+      <input type="date" id="aeDateFin">
+      <div class="muted" style="margin-top:4px;">Laisser vide pour un contrat sans fin prévue. Les jours après cette date seront grisés sur le planning.</div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mEmp')">Annuler</button>
       <button class="btn btn-save" onclick="saveNewEmp()">✓ Ajouter</button>
@@ -895,7 +907,17 @@ const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const MGR={code:'ADMIN',name:'Gestionnaire'};
 
 function getColor(type,site){
-  if(['magasin','entrepotA','entrepotB','remplacement'].includes(type)) return SC[site]||SC['Ham'];
+  // Couleur personnalisée par le gérant (prioritaire sur tout le reste)
+  const custom = S.params?.typeColors?.[type];
+  if(custom) return {color:custom, bg:custom+'22', border:custom+'66'};
+  if(['magasin'].includes(type)) return SC[site]||SC['Ham'];
+  if(type==='entrepotA') return SC['Entrepôt']||SC['Ham'];
+  if(type==='entrepotB') {
+    // Par défaut, Entrepôt B est une variante plus sombre de la couleur Entrepôt pour rester distincte sans config
+    const base=SC['Entrepôt']||SC['Ham'];
+    return {color:'#6D28D9',bg:'#F5F3FF',border:'#DDD6FE'};
+  }
+  if(type==='remplacement') return SC[site]||SC['Ham'];
   const t=TYPES.find(x=>x.key===type);
   return t?{color:t.color,bg:t.bg,border:t.border}:{color:'#ccc',bg:'#f5f5f5',border:'#ddd'};
 }
@@ -1027,12 +1049,8 @@ async function loadAll(){
     if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
     if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
     if(r.events&&Array.isArray(r.events)) {S.events=r.events; lsSet('events',r.events);}
-    // Migration : garantir la présence du type "Vacances scolaires" même sur une config existante
     if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
-    if(!S.eventTypes.some(t=>t.id==='vacances')){
-      S.eventTypes.push({id:'vacances', label:'Vacances scolaires', color:'#8B5CF6'});
-      lsSet('eventTypes', S.eventTypes);
-    }
+    if(!S.params.typeColors) S.params.typeColors={};
     // Initialiser planning vide si pas de données
     if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
     // Générer planning par défaut pour les employés si vide
@@ -1124,6 +1142,10 @@ function isJourRepos(emp, date){
   const rf = S.params?.reposFixe?.[emp.id];
   if(rf && parseInt(rf)===dow) return true;
   return false;
+}
+// Vérifie si une date est postérieure à la fin de contrat d'un employé (jour bloqué/grisé)
+function isHorsContrat(emp, dateStr){
+  return emp.dateFin && dateStr > emp.dateFin;
 }
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function getMon(d){const x=new Date(d);const day=x.getDay();x.setDate(x.getDate()-day+(day===0?-6:1));x.setHours(0,0,0,0);return x;}
@@ -1384,9 +1406,13 @@ function renderMgr(){
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
+  document.querySelectorAll('.tab').forEach(btn=>btn.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
   ['planning','conges','remplace','employes','params'].forEach((x,i)=>{
-    document.querySelectorAll('.tab')[i].classList.toggle('active',x===n);
-    document.getElementById('tab-'+x).classList.toggle('active',x===n);
+    if(x===n){
+      document.querySelectorAll('.tab')[i].classList.add('active');
+      document.getElementById('tab-'+x).classList.add('active');
+    }
   });
 }
 
@@ -1626,8 +1652,11 @@ function renderWeek(){
         const sh=S.planning[`${emp.id}_${fmt(d)}`];
         const type=sh?.type||'off';const empSite=sh?.site||emp.site;
         const dStr=fmt(d);
+        const horsContrat=isHorsContrat(emp,dStr);
         const remLabel=type==='remplacement'?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${empSite}</span>`:'';
-        const cell=type==='off'
+        const cell=horsContrat
+          ?`<div class="sb" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 4px,#E5E7EB 4px,#E5E7EB 8px);cursor:not-allowed;" title="Hors contrat"></div>`
+          :type==='off'
           ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
           :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
@@ -1753,7 +1782,9 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
       const type=sh?.type||'off';const site2=sh?.site||emp.site;
       let cell='';
-      if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      if(isHorsContrat(emp,dStr)){
+        cell=`<div class="mblock" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 3px,#E5E7EB 3px,#E5E7EB 6px);cursor:not-allowed;" title="Hors contrat"></div>`;
+      } else if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
       else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
     });
@@ -1854,8 +1885,7 @@ document.addEventListener('change', e => { if(e.target && ['shiftDateDebut','shi
 
 function renderTypeGrid(emp){
   document.getElementById('typeGrid').innerHTML=TYPES.map(t=>{
-    const isW=['magasin','entrepotA','entrepotB'].includes(t.key);
-    const c=isW?(SC[emp.site]||SC['Ham']):{color:t.color,bg:t.bg,border:t.border};
+    const c=getColor(t.key, emp.site);
     const sel=S.editType===t.key;
     return `<div class="type-opt${sel?' sel':''}"
       style="${sel?`background:${c.color};border-color:${c.color};`:'border-color:var(--border);'}"
@@ -2158,18 +2188,34 @@ function renderAbsList(){
 
 // ── Employés ──
 function renderEmpList(){
-  document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>`
-    <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};">
+  const today=fmt(new Date());
+  document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>{
+    const expire = emp.dateFin && emp.dateFin < today;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
       <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
       <div style="flex:1">
-        <div style="font-weight:600;font-size:13px">${emp.name}</div>
+        <div style="font-weight:600;font-size:13px">${emp.name}${expire?' <span style="color:#DC2626;font-size:10px;font-weight:700;">⚠ CONTRAT EXPIRÉ</span>':''}</div>
         <div style="font-size:11px;color:var(--muted)">${emp.email||'—'} · ${emp.tel||'—'} · Code : <strong>${emp.code}</strong></div>
         <div style="font-size:11px;color:var(--muted)">📍 ${emp.addr||'Non renseigné'}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:6px;">
+          Fin de contrat : <input type="date" value="${emp.dateFin||''}" onchange="updateDateFinContrat('${emp.id}', this.value)" style="font-size:11px;padding:3px 6px;width:auto;">
+        </div>
       </div>
       ${sPill(emp.site)}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
-function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
+async function updateDateFinContrat(empId, dateFin){
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  emp.dateFin = dateFin || null;
+  persist();
+  renderEmpList();
+  refreshActiveView();
+  toast(dateFin?`✓ Fin de contrat enregistrée pour ${emp.name.split(' ')[0]}`:`✓ Date de fin retirée`);
+  api('saveEmployee', emp);
+}
+function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
 document.getElementById('aeName').addEventListener('input',function(){
   const p=this.value.trim().split(' ');
   if(p.length>=2){const c=(p[0].substring(0,3)+p[1].substring(0,2)).toUpperCase().replace(/[^A-Z]/g,'');
@@ -2184,7 +2230,8 @@ async function saveNewEmp(){
   const emp={id:'E'+String(S.employees.length+1).padStart(2,'0'),
     code:document.getElementById('aeCode').value,name,email,
     tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
-    site,slot,hasChildren:document.getElementById('aeChildren').checked};
+    site,slot,hasChildren:document.getElementById('aeChildren').checked,
+    dateFin:document.getElementById('aeDateFin').value||null};
   S.employees.push(emp);
   // Initialiser le planning sur 3 mois
   const today=new Date();today.setHours(0,0,0,0);
@@ -2203,6 +2250,7 @@ function renderParams(){
   if(alerteEl) alerteEl.value = regles.dateAlerte || '';
   if(quotaEl) quotaEl.value = regles.quota || 25;
   renderParamMagasins();
+  renderParamTypeColors();
   renderParamEvents();
   let h='';
   Object.entries(SC).forEach(([site,cfg])=>{
@@ -2234,6 +2282,42 @@ async function saveParams(){
 }
 // ── GESTION MAGASINS ──
 // ── GESTION TYPES D'ÉVÉNEMENTS (pastilles personnalisables) ──
+// ── COULEURS PERSONNALISÉES DES TYPES DE JOURNÉE ──
+function renderParamTypeColors(){
+  const el=document.getElementById('paramTypeColors');
+  if(!el) return;
+  if(!S.params.typeColors) S.params.typeColors={};
+  let h='';
+  TYPES.forEach(t=>{
+    const current=S.params.typeColors[t.key] || getColor(t.key, S.employees[0]?.site||'Ham').color;
+    h+=`<div class="magasin-row">
+      <input type="color" class="color-picker" id="tc_${t.key}" value="${current}" title="Couleur">
+      <div style="flex:1;font-size:13px;font-weight:500;">${t.label}</div>
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap;">${t.info}</span>
+      <button class="btn-del" onclick="reinitialiserCouleurType('${t.key}')" title="Réinitialiser">↺</button>
+    </div>`;
+  });
+  el.innerHTML=h;
+}
+function reinitialiserCouleurType(key){
+  delete S.params.typeColors[key];
+  persist();
+  renderParamTypeColors();
+  refreshActiveView();
+  toast('✓ Couleur réinitialisée');
+}
+async function saveTypeColors(){
+  if(!S.params.typeColors) S.params.typeColors={};
+  TYPES.forEach(t=>{
+    const el=document.getElementById('tc_'+t.key);
+    if(el) S.params.typeColors[t.key]=el.value;
+  });
+  persist();
+  refreshActiveView();
+  const r=await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
+  toast(r&&r.ok?'✓ Couleurs enregistrées':'✓ Enregistré localement');
+}
+
 function renderParamEvents(){
   const el = document.getElementById('paramEvents');
   if(!el) return;
