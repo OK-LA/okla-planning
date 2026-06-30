@@ -344,6 +344,9 @@ tbody tr:hover td{background:#FAFAF8;}
   <div class="content">
     <div class="emp-hero" id="empHero"></div>
     <div id="empAlert"></div>
+    <button class="btn btn-full" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;margin-bottom:14px;" onclick="openAbsEmpModal()">
+      🚩 Signaler une absence
+    </button>
     <div class="view-bar">
       <button class="btn btn-ghost btn-sm" onclick="eW(-1)">←</button>
       <div class="week-label" id="eWLbl"></div>
@@ -359,6 +362,26 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empJokers"></div>
       <div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mes demandes</div>
       <div id="empCongesList"></div>
+    </div>
+
+    <!-- HISTORIQUE MES SIGNALEMENTS D'ABSENCE -->
+    <div class="quota-card mt-10" id="empAbsCard" style="display:none;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🚩 Mes signalements d'absence</div>
+      <div id="empAbsList"></div>
+    </div>
+
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
+      <div style="font-weight:700;margin-bottom:4px;">🕓 Quand puis-je poser mes congés ?</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Simulateur — calcule la date limite de dépôt selon le type de période souhaitée</div>
+      <div class="fg"><label>Type de période</label>
+        <select id="simuType" onchange="updSimuDelai()">
+          <option value="1jour">1 journée isolée</option>
+          <option value="semaine">1 semaine ou plus</option>
+          <option value="ete">Vacances d'été (juin → septembre)</option>
+          <option value="noel">Vacances de Noël (décembre)</option>
+        </select>
+      </div>
+      <div id="simuResult"></div>
     </div>
 
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
@@ -443,12 +466,22 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="muted tc mt-10">Cliquez sur une case pour modifier · Ligne du bas = effectif présent par jour</div>
       </div>
       <div id="vMoisView" style="display:none;">
+        <!-- FILTRES (partagés avec la vue Semaine) -->
+        <div class="filter-bar">
+          <div class="filter-section">
+            <div class="filter-label">Magasins</div>
+            <div class="chips" id="chipsSitesMois"></div>
+          </div>
+          <div class="filter-section" id="filterEmpSectionMois" style="display:none;">
+            <div class="filter-label">Employés</div>
+            <div class="chips" id="chipsEmpsMois"></div>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
           <div style="display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;">
             <button class="vbtn active" id="mSiteBtn" onclick="setMoisMode('site')">Par magasin</button>
             <button class="vbtn" id="mEmpBtn" onclick="setMoisMode('emp')">Par employé</button>
           </div>
-          <select id="moSiteSel" onchange="renderMonth()" style="max-width:180px;"></select>
           <select id="moEmpSel" onchange="renderMonth()" style="max-width:220px;display:none;"></select>
         </div>
         <div id="moisSiteView"></div>
@@ -467,6 +500,27 @@ tbody tr:hover td{background:#FAFAF8;}
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
         <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">RÈGLES EN VIGUEUR</div>
         <div style="font-size:13px;display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="congesRegles"></div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);">RÉCAPITULATIF GLOBAL — TOUS EMPLOYÉS</div>
+          <div style="display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;">
+            <button class="vbtn active" id="triRestantsBtn" onclick="setTriConges('restants')">Tri : Restants</button>
+            <button class="vbtn" id="triNomBtn" onclick="setTriConges('nom')">Tri : Nom</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th style="text-align:left;padding-left:10px;">Salarié</th>
+            <th>Magasin</th>
+            <th>Pris</th>
+            <th>Attente</th>
+            <th>Restants</th>
+            <th>Jokers</th>
+            <th>Dernier congé</th>
+          </tr></thead>
+          <tbody id="congesRecapTable"></tbody>
+        </table></div>
       </div>
       <div id="congesListeMgr"></div>
     </div>
@@ -603,6 +657,31 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL SIGNALEMENT ABSENCE — SALARIÉ -->
+<div class="modal-overlay" id="mAbsEmp">
+  <div class="modal">
+    <div class="modal-title">🚩 Signaler une absence</div>
+    <div class="fg"><label>Date concernée</label><input type="date" id="absEmpDate"></div>
+    <div class="fg"><label>Motif</label>
+      <select id="absEmpMotif">
+        <option value="maladie">Maladie</option>
+        <option value="enfant_malade">Enfant malade</option>
+        <option value="absent">Absence imprévue</option>
+        <option value="autre">Autre</option>
+      </select>
+    </div>
+    <div class="fg"><label>Précisions</label><textarea id="absEmpNote" rows="2" placeholder="Détails..."></textarea></div>
+    <div class="notif-box" style="margin-bottom:4px;">
+      <div class="notif-label">📎 Justificatif</div>
+      Si votre motif nécessite un justificatif (arrêt maladie, certificat enfant malade), merci de le transmettre par email à Gwen dès que possible.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mAbsEmp')">Annuler</button>
+      <button class="btn btn-save" onclick="saveAbsenceEmp()">✓ Signaler</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL ABSENCE -->
 <div class="modal-overlay" id="mAbs">
   <div class="modal">
@@ -705,7 +784,7 @@ const S={
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
   eWO:0,mWO:0,mMO:0,
-  view:'sem',moisMode:'site',
+  view:'sem',moisMode:'site',triConges:'restants',
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
   editing:null,editType:null,editingAbs:null,
@@ -924,6 +1003,8 @@ function renderEmp(){
   initCongeListeners();
   renderEmpWeek();
   renderEmpQuota();
+  renderEmpAbsList();
+  updSimuDelai();
 }
 function eW(d){S.eWO+=d;renderEmpWeek();}
 function renderEmpWeek(){
@@ -1008,11 +1089,11 @@ function setView(v){
     S.moisMode='site';
     document.getElementById('mSiteBtn').classList.add('active');
     document.getElementById('mEmpBtn').classList.remove('active');
-    document.getElementById('moSiteSel').style.display='';
     document.getElementById('moEmpSel').style.display='none';
     document.getElementById('moisSiteView').style.display='block';
     document.getElementById('moisEmpView').style.display='none';
     document.getElementById('mWLbl').style.display='none';
+    renderChipsSites();
     renderMonth();
   }
 }
@@ -1020,7 +1101,6 @@ function setMoisMode(mode){
   S.moisMode=mode;
   document.getElementById('mSiteBtn').classList.toggle('active',mode==='site');
   document.getElementById('mEmpBtn').classList.toggle('active',mode==='emp');
-  document.getElementById('moSiteSel').style.display=mode==='site'?'':'none';
   document.getElementById('moEmpSel').style.display=mode==='emp'?'':'none';
   document.getElementById('moisSiteView').style.display=mode==='site'?'block':'none';
   document.getElementById('moisEmpView').style.display=mode==='emp'?'block':'none';
@@ -1037,8 +1117,9 @@ function initFiltres() {
   renderChipsSites();
 }
 
-function renderChipsSites() {
-  const sites = Object.keys(SC);
+function renderChipsContainer(containerId, sites) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
   let h = `<div class="chip chip-all${S.filtresSites.length===sites.length?' sel':''}" onclick="toggleTousSites()">Tous</div>`;
   sites.forEach(site => {
     const c = SC[site];
@@ -1047,8 +1128,19 @@ function renderChipsSites() {
       style="${active?`background:${c.color};`:`color:${c.color};border-color:${c.color};`}"
       onclick="toggleSite('${site}')">${site}</div>`;
   });
-  document.getElementById('chipsSites').innerHTML = h;
+  el.innerHTML = h;
+}
+
+function renderChipsSites() {
+  const sites = Object.keys(SC);
+  renderChipsContainer('chipsSites', sites);
+  renderChipsContainer('chipsSitesMois', sites);
   renderChipsEmps();
+}
+
+function refreshActiveView() {
+  if (S.view === 'sem') renderWeek();
+  else renderMonth();
 }
 
 function toggleTousSites() {
@@ -1060,7 +1152,7 @@ function toggleTousSites() {
   }
   S.filtresEmps = [];
   renderChipsSites();
-  renderWeek();
+  refreshActiveView();
 }
 
 function toggleSite(site) {
@@ -1071,12 +1163,12 @@ function toggleSite(site) {
   }
   S.filtresEmps = [];
   renderChipsSites();
-  renderWeek();
+  refreshActiveView();
 }
 
-function renderChipsEmps() {
-  const empSection = document.getElementById('filterEmpSection');
-  const empsVisibles = S.employees.filter(e => S.filtresSites.includes(e.site));
+function renderChipsEmpsContainer(containerId, sectionId, empsVisibles) {
+  const empSection = document.getElementById(sectionId);
+  if (!empSection) return;
   if (empsVisibles.length <= 1) { empSection.style.display='none'; return; }
   empSection.style.display = 'block';
   let h = `<div class="chip chip-all${S.filtresEmps.length===0?' sel':''}" onclick="resetFiltresEmps()">Tous</div>`;
@@ -1087,7 +1179,13 @@ function renderChipsEmps() {
       style="color:${c.color};${active?`border-color:${c.color};`:''}"
       onclick="toggleEmp('${emp.id}')">${emp.name.split(' ')[0]}</div>`;
   });
-  document.getElementById('chipsEmps').innerHTML = h;
+  document.getElementById(containerId).innerHTML = h;
+}
+
+function renderChipsEmps() {
+  const empsVisibles = S.employees.filter(e => S.filtresSites.includes(e.site));
+  renderChipsEmpsContainer('chipsEmps', 'filterEmpSection', empsVisibles);
+  renderChipsEmpsContainer('chipsEmpsMois', 'filterEmpSectionMois', empsVisibles);
 }
 
 function toggleEmp(empId) {
@@ -1097,13 +1195,13 @@ function toggleEmp(empId) {
     S.filtresEmps.push(empId);
   }
   renderChipsEmps();
-  renderWeek();
+  refreshActiveView();
 }
 
 function resetFiltresEmps() {
   S.filtresEmps = [];
   renderChipsEmps();
-  renderWeek();
+  refreshActiveView();
 }
 
 function getEmpsFiltres() {
@@ -1227,7 +1325,6 @@ function renderWeek(){
 
 function buildSelects(){
   document.getElementById('moEmpSel').innerHTML=S.employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-  document.getElementById('moSiteSel').innerHTML=Object.keys(SC).map(s=>`<option value="${s}">${s}</option>`).join('');
 }
 
 function renderMonth(){
@@ -1238,19 +1335,29 @@ function renderMonth(){
   else renderMonthEmp(ref,today);
 }
 
-function renderMonthSite(ref,today){
-  const site=document.getElementById('moSiteSel').value;
+// Génère le tableau HTML pour UN magasin donné (réutilisé pour empiler plusieurs magasins)
+function renderMonthSiteTable(site, ref, today, empsFiltres){
   const sColor=SC[site]||SC['Ham'];
-  const emps=S.employees.filter(e=>e.site===site);
+  const emps=empsFiltres.filter(e=>e.site===site);
   const minStaff=S.params.minStaff[site]||1;
   const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
   const days=[];
   for(let d=1;d<=daysInMonth;d++) days.push(new Date(ref.getFullYear(),ref.getMonth(),d));
   const DOW=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
+  if(emps.length===0){
+    return `<div style="margin-bottom:18px;">
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+        <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
+        <span style="font-size:12px;font-weight:600;">${site}</span>
+        <span style="font-size:11px;color:var(--muted);">· aucun employé visible avec les filtres actuels</span>
+      </div>
+    </div>`;
+  }
+
   let th=`<thead><tr><th class="date-th">Date</th>`;
   emps.forEach(emp=>{
-    th+=`<th class="emp-th${emp.name.split(' ')[0].length>6?' ':''}">`+
+    th+=`<th class="emp-th">`+
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
       `<div style="font-size:10px;white-space:nowrap;">${emp.name.split(' ')[0]}</div></th>`;
   });
@@ -1276,24 +1383,41 @@ function renderMonthSite(ref,today){
     const cls=count>=minStaff?'staff-ok':'staff-warn';
     tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
   });
-  // Ligne total
   tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td>`;
   emps.forEach(()=>tb+=`<td></td>`);
   tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
 
-  document.getElementById('moisSiteView').innerHTML=`
+  return `<div style="margin-bottom:22px;">
     <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
       <span style="font-size:12px;font-weight:600;">${site}</span>
       <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)</span>
     </div>
     <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
-    <div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l&#39;effectif minimum · Cliquez sur une case pour modifier</div>`;
+  </div>`;
+}
+
+function renderMonthSite(ref,today){
+  const empsFiltres=getEmpsFiltres();
+  const sitesAAfficher=S.filtresSites.length?S.filtresSites:Object.keys(SC);
+  let html='';
+  sitesAAfficher.forEach(site=>{
+    html+=renderMonthSiteTable(site, ref, today, empsFiltres);
+  });
+  html+=`<div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l&#39;effectif minimum · Cliquez sur une case pour modifier</div>`;
+  document.getElementById('moisSiteView').innerHTML=html;
 }
 
 function renderMonthEmp(ref,today){
-  const empId=document.getElementById('moEmpSel').value;
-  const emp=S.employees.find(e=>e.id===empId);if(!emp)return;
+  // Restreindre le select aux employés filtrés (chips magasins + employés)
+  const empsFiltres=getEmpsFiltres();
+  const sel=document.getElementById('moEmpSel');
+  const prevVal=sel.value;
+  sel.innerHTML=empsFiltres.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  if(empsFiltres.some(e=>e.id===prevVal)) sel.value=prevVal;
+  const empId=sel.value;
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp){document.getElementById('calBody').innerHTML='<div class="muted tc" style="grid-column:1/-1;padding:20px;">Aucun employé visible avec les filtres actuels</div>';return;}
   document.getElementById('calHead').innerHTML=JOURS_C.map(j=>`<div class="cal-head">${j}</div>`).join('');
   const first=new Date(ref.getFullYear(),ref.getMonth(),1);
   const startDow=first.getDay()===0?6:first.getDay()-1;
@@ -1439,10 +1563,60 @@ async function saveAbsence(){
   S.planning[`${empId}_${dateStr}`]={type:motif==='maladie'?'maladie':'off',site:emp.site,note:`Absent: ${note||motif}`};
   S.mods.push({empId,dl:fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'}),det:'Absence',seen:false});
   const absId=Date.now();
-  const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null};
+  const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
   S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
   api('saveAbsence',abs);
   openRempModal(absId);
+}
+
+// ── Signalement absence par le salarié ──
+function openAbsEmpModal(){
+  document.getElementById('absEmpDate').value=fmt(new Date());
+  document.getElementById('absEmpNote').value='';
+  document.getElementById('absEmpMotif').value='maladie';
+  openModal('mAbsEmp');
+}
+async function saveAbsenceEmp(){
+  const emp=S.user;
+  const dateStr=document.getElementById('absEmpDate').value;
+  const motif=document.getElementById('absEmpMotif').value;
+  const note=document.getElementById('absEmpNote').value;
+  if(!dateStr){toast('Sélectionnez une date');return;}
+  // Mettre à jour le planning du salarié pour ce jour
+  const typePlanning=(motif==='maladie')?'maladie':'off';
+  S.planning[`${emp.id}_${dateStr}`]={type:typePlanning,site:emp.site,note:`Absent: ${note||motif}`};
+  const absId=Date.now();
+  const motifLabels={maladie:'Maladie',enfant_malade:'Enfant malade',absent:'Absence imprévue',autre:'Autre'};
+  const abs={id:absId,empId:emp.id,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',
+    dateStr,motif,note,resolved:false,rempId:null,source:'salarie'};
+  S.absences.push(abs);persist();updStats();
+  closeModal('mAbsEmp');
+  renderEmpWeek();renderEmpAbsList();
+  toast('Envoi en cours...');
+  const r=await api('saveAbsence',abs);
+  toast(r&&r.ok
+    ?`✓ Absence signalée — ${motifLabels[motif]||motif} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`
+    :'✓ Signalement enregistré localement');
+}
+function renderEmpAbsList(){
+  const emp=S.user;if(!emp)return;
+  const mine=S.absences.filter(a=>a.empId===emp.id).sort((a,b)=>b.dateStr.localeCompare(a.dateStr));
+  const card=document.getElementById('empAbsCard');
+  if(!mine.length){card.style.display='none';return;}
+  card.style.display='block';
+  const motifLabels={maladie:'Maladie',enfant_malade:'Enfant malade',absent:'Absence imprévue',autre:'Autre'};
+  let h='';
+  mine.forEach(a=>{
+    const dl=fmtFR(new Date(a.dateStr+'T12:00'),{day:'numeric',month:'short'});
+    h+=`<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${dl} — ${motifLabels[a.motif]||a.motif}</div>
+        ${a.note?`<div style="font-size:11px;color:var(--muted)">${a.note}</div>`:''}
+      </div>
+      <span class="conge-status ${a.resolved?'cs-ok':'cs-pending'}">${a.resolved?'Remplacé':'En attente'}</span>
+    </div>`;
+  });
+  document.getElementById('empAbsList').innerHTML=h;
 }
 
 const DIST={
@@ -1511,14 +1685,18 @@ async function validerRemp(){
 }
 
 function renderAbsList(){
-  const list=S.absences;
+  const list=[...S.absences].sort((a,b)=>(a.resolved===b.resolved?0:a.resolved?1:-1)||b.dateStr.localeCompare(a.dateStr));
   let h=list.length?'':'<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">Aucune absence signalée</div>';
+  const motifLabels={maladie:'Maladie',enfant_malade:'Enfant malade',absent:'Absence',autre:'Autre'};
   list.forEach(abs=>{
     const dl=fmtFR(new Date(abs.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
+    const sourceBadge=abs.source==='salarie'
+      ?`<span style="font-size:10px;font-weight:600;color:#2563EB;background:#EFF6FF;padding:2px 7px;border-radius:10px;margin-left:5px;">Signalé par le salarié</span>`
+      :`<span style="font-size:10px;font-weight:600;color:#6B7280;background:#F3F4F6;padding:2px 7px;border-radius:10px;margin-left:5px;">Signalé par Gwen</span>`;
     h+=`<div class="abs-card">
       <div class="abs-head">
         <div>
-          <div style="font-weight:700;font-size:13px">${abs.empName} <span class="abs-badge ${abs.motif==='maladie'?'maladie':'autre'}">${abs.motif==='maladie'?'Maladie':'Absence'}</span></div>
+          <div style="font-weight:700;font-size:13px">${abs.empName} <span class="abs-badge ${abs.motif==='maladie'?'maladie':'autre'}">${motifLabels[abs.motif]||abs.motif}</span>${sourceBadge}</div>
           <div style="font-size:12px;color:var(--muted);margin-top:3px">📅 ${dl} · ${sPill(abs.empSite)}</div>
           ${abs.note?`<div style="font-size:12px;margin-top:4px;color:var(--muted)">${abs.note}</div>`:''}
         </div>
@@ -1803,6 +1981,18 @@ function getJokersUtilises(empId) {
   return (S.params.jokers || {})[empId] || 0;
 }
 
+// Date du dernier congé approuvé et déjà passé (toutes périodes confondues, pas seulement l'année en cours)
+function getDerniereDateConge(empId) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const passes = S.requests.filter(r =>
+    r.empId === empId && r.type === 'conge' && r.status === 'approved' &&
+    r.dateFin && new Date(r.dateFin) <= today
+  );
+  if (!passes.length) return null;
+  passes.sort((a,b) => b.dateFin.localeCompare(a.dateFin));
+  return passes[0].dateFin;
+}
+
 // ── JOURS FÉRIÉS CHÔMÉS (fixes OK-LA) ──
 const FERIES_CHOMES = ['01-01','05-01','08-15','12-25']; // MM-DD
 function isFerieChome(d) {
@@ -1852,6 +2042,51 @@ function getDelaiRequis(dateDebut, dateFin) {
   if (nbJours >= 5) return { jours: 60, regle: '1 semaine ou + : 2 mois de préavis', depasseLimite: false };
   // Autre → 14 jours par défaut
   return { jours: 14, regle: 'Moins d\'une semaine : 2 semaines de préavis', depasseLimite: false };
+}
+
+// ── SIMULATEUR DÉLAI DE PRÉVENANCE (aide à la décision côté salarié) ──
+function updSimuDelai() {
+  const el = document.getElementById('simuResult');
+  if (!el) return;
+  const type = document.getElementById('simuType')?.value || '1jour';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const emp = S.user;
+  let limite, regle, exempleDate;
+
+  if (type === '1jour') {
+    limite = addDays(today, 14);
+    regle = '1 journée isolée : 2 semaines de préavis minimum';
+  } else if (type === 'semaine') {
+    limite = addDays(today, 60);
+    regle = '1 semaine ou plus : 2 mois (60 jours) de préavis minimum';
+  } else if (type === 'ete') {
+    const annee = today.getMonth() >= 9 ? today.getFullYear()+1 : today.getFullYear();
+    limite = new Date(annee, 2, 30); // 30 mars
+    regle = "Vacances d'été (juin → septembre) : demande obligatoire avant le 30 mars";
+  } else { // noel
+    const annee = today.getFullYear();
+    limite = new Date(annee, 8, 30); // 30 sept
+    regle = 'Vacances de Noël (décembre) : demande obligatoire avant le 30 septembre';
+  }
+
+  const depasse = today > limite;
+  const jokers = emp ? getJokersUtilises(emp.id) : 0;
+  const limiteStr = fmtFR(limite, {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+
+  let html = `<div style="background:${depasse?'#FFFBEB':'#ECFDF5'};border:1px solid ${depasse?'#FDE68A':'#A7F3D0'};border-radius:8px;padding:12px;font-size:13px;">
+    <div style="font-weight:600;margin-bottom:4px;color:${depasse?'#92400E':'#059669'};">
+      ${depasse ? '⚠️ Délai déjà dépassé pour aujourd\'hui' : '✓ Vous pouvez déposer dès maintenant'}
+    </div>
+    <div style="color:var(--muted);font-size:12px;margin-bottom:6px;">${regle}</div>
+    <div style="font-size:12px;">Date limite de dépôt habituelle : <strong>${limiteStr}</strong></div>`;
+
+  if (depasse) {
+    html += `<div style="margin-top:6px;font-size:12px;color:#92400E;">
+      Une demande hors délai consommera un joker (${jokers}/2 utilisés${jokers>=2?' — jokers épuisés, demande impossible':''}).
+    </div>`;
+  }
+  html += `</div>`;
+  el.innerHTML = html;
 }
 
 // ── PRIORITÉ VACANCES SCOLAIRES ──
@@ -2032,6 +2267,53 @@ function renderEmpQuota() {
   document.getElementById('empCongesList').innerHTML = h;
 }
 
+// Tableau récapitulatif global congés — tri restants/nom
+function setTriConges(mode){
+  S.triConges = mode;
+  document.getElementById('triRestantsBtn').classList.toggle('active', mode==='restants');
+  document.getElementById('triNomBtn').classList.toggle('active', mode==='nom');
+  renderCongesRecap();
+}
+
+function renderCongesRecap(){
+  const tbody = document.getElementById('congesRecapTable');
+  if (!tbody) return;
+  let rows = S.employees.map(emp => {
+    const pris = getJoursPris(emp.id);
+    const attente = getJoursEnAttente(emp.id);
+    const restants = QUOTA_ANNUEL - pris - attente;
+    const jokers = getJokersUtilises(emp.id);
+    const derniereDate = getDerniereDateConge(emp.id);
+    return { emp, pris, attente, restants, jokers, derniereDate };
+  });
+
+  if (S.triConges === 'restants') rows.sort((a,b)=>a.restants-b.restants);
+  else rows.sort((a,b)=>a.emp.name.localeCompare(b.emp.name));
+
+  let h = '';
+  rows.forEach(r => {
+    const restantsColor = r.restants<=3?'#DC2626':r.restants<=7?'#F59E0B':'#059669';
+    const derniereStr = r.derniereDate
+      ? fmtFR(new Date(r.derniereDate+'T12:00'), {day:'numeric',month:'short',year:'numeric'})
+      : '<span style="color:var(--muted)">Jamais</span>';
+    h += `<tr>
+      <td style="text-align:left;padding-left:10px;">
+        <div style="display:flex;align-items:center;gap:7px;">
+          <div class="avatar" style="width:22px;height:22px;font-size:9px;background:${avc(r.emp.id)};flex-shrink:0;">${ini(r.emp.name)}</div>
+          <span style="font-weight:600;font-size:12px;white-space:nowrap;">${r.emp.name}</span>
+        </div>
+      </td>
+      <td>${sPill(r.emp.site)}</td>
+      <td style="font-weight:600;color:#059669;">${r.pris}</td>
+      <td style="color:${r.attente>0?'#C2410C':'var(--muted)'};">${r.attente}</td>
+      <td style="font-weight:700;color:${restantsColor};">${r.restants}</td>
+      <td>${r.jokers}/2</td>
+      <td style="font-size:12px;">${derniereStr}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = h || '<tr><td colspan="7" class="muted tc" style="padding:16px;">Aucun employé</td></tr>';
+}
+
 // Vue gestionnaire — liste congés tous employés
 function renderCongesMgr() {
   const regles = S.params.reglesConges || {};
@@ -2044,6 +2326,8 @@ function renderCongesMgr() {
     <div style="font-size:12px;"><strong>Décembre :</strong> demande avant le 30/09</div>
     <div style="font-size:12px;"><strong>Jours fériés chômés :</strong> 1/01 · 1/05 · 15/08 · 25/12</div>
     <div style="font-size:12px;"><strong>Alerte solde non utilisé :</strong> ${regles.dateAlerte||'Non définie'}</div>`;
+
+  renderCongesRecap();
 
   let h = '';
   S.employees.forEach(emp => {
