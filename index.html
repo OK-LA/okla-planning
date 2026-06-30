@@ -699,6 +699,11 @@ tbody tr:hover td{background:#FAFAF8;}
     <label>Type de journée</label>
     <div class="type-grid" id="typeGrid"></div>
 
+    <div class="fg" id="remplacementCibleWrap" style="display:none;">
+      <label>Magasin de destination</label>
+      <select id="remplacementCibleSel" onchange="updNotif()"></select>
+    </div>
+
     <div class="fg">
       <label>Appliquer à</label>
       <div class="type-grid" style="grid-template-columns:1fr 1fr;">
@@ -876,6 +881,7 @@ const TYPES=[
   {key:'magasin',   label:'Magasin',      info:'10h–12h / 14h–19h'},
   {key:'entrepotA', label:'Entrepôt A',   info:'9h–12h / 13h30–17h30'},
   {key:'entrepotB', label:'Entrepôt B',   info:'10h–12h / 13h30–18h30'},
+  {key:'remplacement', label:'Remplacement', info:'Renfort dans un autre magasin', color:'#0EA5E9',bg:'#EFF6FF',border:'#BFDBFE'},
   {key:'vip',       label:'★ VIP',        info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
   {key:'conge',     label:'Congé',         info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
   {key:'maladie',   label:'Maladie',       info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
@@ -885,7 +891,7 @@ const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const MGR={code:'ADMIN',name:'Gestionnaire'};
 
 function getColor(type,site){
-  if(['magasin','entrepotA','entrepotB'].includes(type)) return SC[site]||SC['Ham'];
+  if(['magasin','entrepotA','entrepotB','remplacement'].includes(type)) return SC[site]||SC['Ham'];
   const t=TYPES.find(x=>x.key===type);
   return t?{color:t.color,bg:t.bg,border:t.border}:{color:'#ccc',bg:'#f5f5f5',border:'#ddd'};
 }
@@ -1064,6 +1070,18 @@ function hideLoading(){
 }
 
 // ══ UTILS ══
+// Vacances scolaires zone B (utilisé pour la pastille colonne date du planning + priorité congés parents)
+const VACANCES_SCOLAIRES_REF = [
+  {debut:'2025-10-18',fin:'2025-11-03'},
+  {debut:'2025-12-20',fin:'2026-01-05'},
+  {debut:'2026-02-14',fin:'2026-03-02'},
+  {debut:'2026-04-11',fin:'2026-04-27'},
+  {debut:'2026-07-04',fin:'2026-08-31'},
+];
+function isDateVacances(dateStr){
+  return VACANCES_SCOLAIRES_REF.some(v => dateStr >= v.debut && dateStr <= v.fin);
+}
+
 function fmt(d){return d.toISOString().split('T')[0];}
 // Détermine si une date est un jour de repos pour un employé donné :
 // dimanche toujours, + son jour de repos fixe individuel s'il en a un configuré.
@@ -1537,7 +1555,9 @@ function renderWeek(){
   for(let i=0;i<7;i++){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0;
-    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+    const dStr=fmt(d);
+    const vacPastille=isDateVacances(dStr)?'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8B5CF6;margin-left:4px;vertical-align:middle;" title="Vacances scolaires"></span>':'';
+    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}${vacPastille}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
 
@@ -1567,9 +1587,10 @@ function renderWeek(){
         const dStr=fmt(d);
         const evColor=getEventColorFor(emp.id,dStr);
         const evStyle=evColor?`box-shadow:inset 0 0 0 2.5px ${evColor};`:'';
+        const remLabel=type==='remplacement'?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${empSite}</span>`:'';
         const cell=type==='off'
           ?`<div class="sb empty" style="${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
-          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`;
+          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
       }
       tb+='</tr>';
@@ -1643,7 +1664,8 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const dStr=fmt(d);
     tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span></td>`;
+      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>` +
+      `${isDateVacances(dStr)?'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8B5CF6;margin-left:4px;vertical-align:middle;" title="Vacances scolaires"></span>':''}</td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
@@ -1761,6 +1783,20 @@ function renderTypeGrid(emp){
       <div>${t.label}</div><div style="font-size:10px;font-weight:400;margin-top:2px;opacity:.75">${t.info}</div>
     </div>`;
   }).join('');
+  toggleRemplacementCible(emp);
+}
+function toggleRemplacementCible(emp){
+  const wrap=document.getElementById('remplacementCibleWrap');
+  const sel=document.getElementById('remplacementCibleSel');
+  if(S.editType==='remplacement'){
+    wrap.style.display='block';
+    const sites=Object.keys(SC).filter(s=>s!==emp.site);
+    const prevVal=sel.value;
+    sel.innerHTML=sites.map(s=>`<option value="${s}">${s}</option>`).join('');
+    if(sites.includes(prevVal)) sel.value=prevVal;
+  } else {
+    wrap.style.display='none';
+  }
 }
 function selType(key){S.editType=key;const emp=S.employees.find(e=>e.id===S.editing.empId);renderTypeGrid(emp);updNotif();}
 function updNotif(){
@@ -1770,6 +1806,10 @@ function updNotif(){
   const dl=fmtFR(new Date(S.editing.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
   let det=t?t.info:'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
+  if(S.editType==='remplacement'){
+    const cible=document.getElementById('remplacementCibleSel')?.value||'';
+    det=`Remplacement — ${cible}`;
+  }
   document.getElementById('notifTxt').textContent=`Bonjour ${emp.name.split(' ')[0]}, votre planning du ${dl} a été modifié : ${det}.`;
 }
 
@@ -1780,11 +1820,16 @@ async function saveShift(){
   const emp=S.employees.find(e=>e.id===empId);
   const note=document.getElementById('mNote').value;
   const sendMail=document.getElementById('doEmail').checked;
-  const shift={type:S.editType,site:emp.site,note};
+  const siteEffectif = S.editType==='remplacement'
+    ? (document.getElementById('remplacementCibleSel')?.value || emp.site)
+    : emp.site;
+  const shift={type:S.editType,site:siteEffectif,note};
   S.planning[`${empId}_${dateStr}`]=shift;
   const t=TYPES.find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
-  let det=t?t.info:'';if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
+  let det=t?t.info:'';
+  if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
+  if(S.editType==='remplacement') det=`Remplacement — ${siteEffectif}`;
   S.mods.push({empId,dl,det,seen:false});
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
@@ -1792,9 +1837,9 @@ async function saveShift(){
   checkEffectifAlerts(mon2);
   toast('Enregistrement...');
   const r=await api('updateShift',{
-    empId,dateStr,type:S.editType,site:emp.site,note,
+    empId,dateStr,type:S.editType,site:siteEffectif,note,
     sendEmail:sendMail,empEmail:emp.email,empName:emp.name,
-    targetSite:emp.site
+    targetSite:siteEffectif
   });
   toast(r&&r.ok?(sendMail?`✓ Modifié · Email envoyé à ${emp.name.split(' ')[0]}`:'✓ Planning enregistré'):'✓ Sauvegardé localement');
 }
@@ -1807,6 +1852,9 @@ async function saveShiftPeriode(){
   const debut=document.getElementById('shiftDateDebut').value;
   const fin=document.getElementById('shiftDateFin').value;
   const exclDim=document.getElementById('excludeDimanche').checked;
+  const siteEffectif = S.editType==='remplacement'
+    ? (document.getElementById('remplacementCibleSel')?.value || emp.site)
+    : emp.site;
   if(!debut||!fin){toast('Sélectionnez une période');return;}
   if(fin<debut){toast('La date de fin doit être après le début');return;}
 
@@ -1818,7 +1866,7 @@ async function saveShiftPeriode(){
   }
   if(!jours.length){toast('Aucun jour à appliquer sur cette période');return;}
 
-  jours.forEach(dStr=>{ S.planning[`${empId}_${dStr}`]={type:S.editType,site:emp.site,note}; });
+  jours.forEach(dStr=>{ S.planning[`${empId}_${dStr}`]={type:S.editType,site:siteEffectif,note}; });
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
@@ -1827,18 +1875,18 @@ async function saveShiftPeriode(){
 
   for(const dStr of jours){
     await api('updateShift',{
-      empId,dateStr:dStr,type:S.editType,site:emp.site,note,
+      empId,dateStr:dStr,type:S.editType,site:siteEffectif,note,
       sendEmail:false,empEmail:emp.email,empName:emp.name
     });
   }
   if(sendMail && emp.email){
     const t=TYPES.find(x=>x.key===S.editType);
-    const det=t?t.info:'';
+    const det=S.editType==='remplacement'?`Remplacement — ${siteEffectif}`:(t?t.info:'');
     const dl=`du ${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'long'})}`;
     api('updateShift',{
-      empId,dateStr:debut,type:S.editType,site:emp.site,note,
+      empId,dateStr:debut,type:S.editType,site:siteEffectif,note,
       sendEmail:true,empEmail:emp.email,empName:emp.name,
-      overrideDetail:`Période ${dl} : ${emp.site} — ${det}`
+      overrideDetail:`Période ${dl} : ${siteEffectif} — ${det}`
     });
   }
   toast(`✓ Période mise à jour (${jours.length} jour${jours.length>1?'s':''})`);
@@ -2566,13 +2614,7 @@ function updSimuDelai() {
 
 // ── PRIORITÉ VACANCES SCOLAIRES ──
 // Vacances scolaires zone B 2025-2026 (approximatif)
-const VACANCES_SCOLAIRES = [
-  {debut:'2025-10-18',fin:'2025-11-03'},
-  {debut:'2025-12-20',fin:'2026-01-05'},
-  {debut:'2026-02-14',fin:'2026-03-02'},
-  {debut:'2026-04-11',fin:'2026-04-27'},
-  {debut:'2026-07-04',fin:'2026-08-31'},
-];
+const VACANCES_SCOLAIRES = VACANCES_SCOLAIRES_REF;
 function isVacancesScolaires(dateDebut, dateFin) {
   return VACANCES_SCOLAIRES.some(v =>
     dateDebut <= v.fin && dateFin >= v.debut
