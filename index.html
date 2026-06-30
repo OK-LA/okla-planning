@@ -1070,7 +1070,7 @@ function hideLoading(){
 }
 
 // ══ UTILS ══
-// Vacances scolaires zone B (utilisé pour la pastille colonne date du planning + priorité congés parents)
+// Calendrier officiel zone B (utilisé uniquement pour la priorité congés parents)
 const VACANCES_SCOLAIRES_REF = [
   {debut:'2025-10-18',fin:'2025-11-03'},
   {debut:'2025-12-20',fin:'2026-01-05'},
@@ -1080,6 +1080,22 @@ const VACANCES_SCOLAIRES_REF = [
 ];
 function isDateVacances(dateStr){
   return VACANCES_SCOLAIRES_REF.some(v => dateStr >= v.debut && dateStr <= v.fin);
+}
+// Pastille colonne date : reflète les VRAIS événements posés via "Colorer une période" (n'importe quel type), pas le calendrier figé
+function getEvenementsDuJour(dateStr){
+  if(!Array.isArray(S.events)) return [];
+  return S.events.filter(e=>e && dateStr>=e.dateDebut && dateStr<=e.dateFin);
+}
+function renderPastillesDate(dateStr){
+  const evs=getEvenementsDuJour(dateStr);
+  if(!evs.length) return '';
+  const dots=evs.slice(0,3).map(e=>{
+    const t=S.eventTypes.find(et=>et.id===e.typeId);
+    const color=t?t.color:'#999';
+    const label=t?t.label:'Événement';
+    return `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-left:3px;vertical-align:middle;" title="${label}"></span>`;
+  }).join('');
+  return dots;
 }
 
 function fmt(d){
@@ -1561,7 +1577,7 @@ function renderWeek(){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0;
     const dStr=fmt(d);
-    const vacPastille=isDateVacances(dStr)?'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8B5CF6;margin-left:4px;vertical-align:middle;" title="Vacances scolaires"></span>':'';
+    const vacPastille=renderPastillesDate(dStr);
     th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}${vacPastille}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
@@ -1601,14 +1617,43 @@ function renderWeek(){
       tb+='</tr>';
     });
 
+    // Ligne renforts (employés d'autres magasins venus en remplacement sur ce site)
+    const aDesRenforts = (() => {
+      for(let i=0;i<7;i++){
+        const d=addDays(mon,i);
+        const renforts=S.employees.filter(e=>{
+          const sh=S.planning[`${e.id}_${fmt(d)}`];
+          return sh&&sh.type==='remplacement'&&sh.site===site;
+        });
+        if(renforts.length) return true;
+      }
+      return false;
+    })();
+    if(aDesRenforts){
+      tb += `<tr class="renfort-row"><td style="font-size:10px;color:#0EA5E9;font-weight:600;padding-left:12px;">↔ Renforts ${site}</td>`;
+      for(let i=0;i<7;i++){
+        const d=addDays(mon,i);
+        const renforts=S.employees.filter(e=>{
+          const sh=S.planning[`${e.id}_${fmt(d)}`];
+          return sh&&sh.type==='remplacement'&&sh.site===site;
+        });
+        const noms=renforts.map(e=>e.name.split(' ')[0]).join(', ');
+        tb+=`<td style="font-size:10px;color:#0EA5E9;font-weight:600;">${noms||''}</td>`;
+      }
+      tb+='</tr>';
+    }
+
     // Ligne effectif par site
     const minStaff = S.params.minStaff?.[site] || 1;
     tb += `<tr class="effectif-row"><td style="font-size:10px;color:var(--muted);font-weight:600;padding-left:12px;">Présents ${site}</td>`;
     for(let i=0;i<7;i++){
       const d=addDays(mon,i);
+      const dStr2=fmt(d);
+      // Compte les employés DU SITE qui travaillent + les renforts venus d'autres magasins ce jour-là
       const presents=S.employees.filter(e=>{
-        if(e.site!==site)return false;
-        const sh=S.planning[`${e.id}_${fmt(d)}`];
+        const sh=S.planning[`${e.id}_${dStr2}`];
+        const siteEffectifJour = sh?.site || e.site;
+        if(siteEffectifJour!==site)return false;
         return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie';
       }).length;
       const total=S.employees.filter(e=>e.site===site).length;
@@ -1670,7 +1715,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
       `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>` +
-      `${isDateVacances(dStr)?'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8B5CF6;margin-left:4px;vertical-align:middle;" title="Vacances scolaires"></span>':''}</td>`;
+      `${renderPastillesDate(dStr)}</td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
