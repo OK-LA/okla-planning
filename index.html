@@ -2135,12 +2135,6 @@ function renderParams(){
     </div>`;
   });
   document.getElementById('paramSites').innerHTML=h;
-  let ha='';
-  Object.keys(SC).forEach(site=>{
-    ha+=`<div class="fg"><label>${site}</label>
-      <input type="text" id="addr_${site.replace(/[^a-zA-Z]/g,'_')}" value="${S.params.adresses?.[site]||''}"></div>`;
-  });
-  document.getElementById('paramAdresses').innerHTML=ha;
   let he='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
   S.employees.forEach(emp=>{
     he+=`<div class="fg"><label>${emp.name}</label>
