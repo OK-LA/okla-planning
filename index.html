@@ -1082,7 +1082,12 @@ function isDateVacances(dateStr){
   return VACANCES_SCOLAIRES_REF.some(v => dateStr >= v.debut && dateStr <= v.fin);
 }
 
-function fmt(d){return d.toISOString().split('T')[0];}
+function fmt(d){
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 // Détermine si une date est un jour de repos pour un employé donné :
 // dimanche toujours, + son jour de repos fixe individuel s'il en a un configuré.
 // d.getDay() : 0=dimanche,1=lundi,...,6=samedi (natif JS) — reposFixe utilise la même échelle.
@@ -3032,18 +3037,28 @@ window.addEventListener('load', () => {
     navigator.serviceWorker.register('/okla-planning/sw.js')
       .then(reg => {
         console.log('SW enregistré:', reg.scope);
+        // Forcer une vérification de mise à jour à chaque ouverture
+        reg.update();
         // Écouter les mises à jour
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // Nouvelle version disponible
-              toast('✓ Application mise à jour', 4000);
+              // Nouvelle version installée : on l'active immédiatement et on recharge
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
             }
           });
         });
       })
       .catch(err => console.log('SW erreur:', err));
+
+    // Quand le nouveau SW prend le contrôle, recharger automatiquement la page une seule fois
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
 
     // Recevoir message du SW (mise à jour activée)
     navigator.serviceWorker.addEventListener('message', event => {
