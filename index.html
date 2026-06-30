@@ -690,6 +690,25 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="modal-title" id="mShTitle"></div>
     <label>Type de journée</label>
     <div class="type-grid" id="typeGrid"></div>
+
+    <div class="fg">
+      <label>Appliquer à</label>
+      <div class="type-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="type-opt" id="modeJourBtn" style="border-color:#1A1917;background:#1A1917;color:#fff;" onclick="setShiftMode('jour')">Ce jour seulement</div>
+        <div class="type-opt" id="modePeriodeBtn" onclick="setShiftMode('periode')">Une période</div>
+      </div>
+    </div>
+    <div id="periodeFields" style="display:none;">
+      <div class="fg"><label>Du</label><input type="date" id="shiftDateDebut"></div>
+      <div class="fg"><label>Au</label><input type="date" id="shiftDateFin"></div>
+      <div class="fg" style="margin-top:-4px;">
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;text-transform:none;letter-spacing:0;">
+          <input type="checkbox" id="excludeDimanche" checked style="width:auto;"> Laisser les dimanches en repos
+        </label>
+      </div>
+      <div id="periodeInfo" class="muted" style="margin-bottom:8px;"></div>
+    </div>
+
     <div class="fg"><label>Note interne</label><input type="text" id="mNote" placeholder="Remplacement, formation..."></div>
     <div class="notif-box"><div class="notif-label">📧 Email</div><div id="notifTxt"></div></div>
     <div class="fg" style="margin-top:6px;">
@@ -697,14 +716,9 @@ tbody tr:hover td{background:#FAFAF8;}
         <input type="checkbox" id="doEmail" checked style="width:auto;"> Envoyer un email à l'employé
       </label>
     </div>
-    <div style="margin-top:12px;">
-      <button class="btn btn-full" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:8px;" onclick="saveShiftWeek()">
-        ⟳ Appliquer à toute la semaine visible
-      </button>
-    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mShift')">Annuler</button>
-      <button class="btn btn-save" onclick="saveShift()">✓ Enregistrer ce jour</button>
+      <button class="btn btn-save" id="mShiftSaveBtn" onclick="saveShift()">✓ Enregistrer</button>
     </div>
   </div>
 </div>
@@ -885,7 +899,7 @@ const S={
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
-  editing:null,editType:null,editingAbs:null,
+  editing:null,editType:null,editingAbs:null,shiftMode:'jour',
   params:lsGet('params',{
     minStaff:{'Ham':2,'Longueau':2,'Roye':2,'Breteuil':1,'Entrepôt':1},
     adresses:{'Ham':'','Longueau':'','Roye':'','Breteuil':'','Entrepôt':''}
@@ -1662,14 +1676,40 @@ function renderMonthEmp(ref,today){
 // ── Modal shift ──
 function openShiftMod(empId,dateStr){
   S.editing={empId,dateStr};
+  S.shiftMode='jour';
   const emp=S.employees.find(e=>e.id===empId);if(!emp)return;
   const sh=S.planning[`${empId}_${dateStr}`];
   S.editType=sh?.type||emp.slot;
   document.getElementById('mShTitle').textContent=`${emp.name} — ${fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'})}`;
   document.getElementById('mNote').value=sh?.note||'';
   document.getElementById('doEmail').checked=true;
+  document.getElementById('shiftDateDebut').value=dateStr;
+  document.getElementById('shiftDateFin').value=dateStr;
+  document.getElementById('excludeDimanche').checked=true;
+  setShiftMode('jour');
   renderTypeGrid(emp);updNotif();openModal('mShift');
 }
+function setShiftMode(mode){
+  S.shiftMode=mode;
+  document.getElementById('modeJourBtn').style.cssText=mode==='jour'?'border-color:#1A1917;background:#1A1917;color:#fff;':'border-color:var(--border);';
+  document.getElementById('modePeriodeBtn').style.cssText=mode==='periode'?'border-color:#1A1917;background:#1A1917;color:#fff;':'border-color:var(--border);';
+  document.getElementById('periodeFields').style.display=mode==='periode'?'block':'none';
+  document.getElementById('mShiftSaveBtn').textContent=mode==='periode'?'✓ Enregistrer la période':'✓ Enregistrer ce jour';
+  updPeriodeInfo();
+}
+function updPeriodeInfo(){
+  if(S.shiftMode!=='periode') return;
+  const debut=document.getElementById('shiftDateDebut').value;
+  const fin=document.getElementById('shiftDateFin').value;
+  const el=document.getElementById('periodeInfo');
+  if(!debut||!fin||fin<debut){el.textContent='';return;}
+  const exclDim=document.getElementById('excludeDimanche').checked;
+  let nb=0;let cur=new Date(debut+'T12:00');const last=new Date(fin+'T12:00');
+  while(cur<=last){ if(!(exclDim && cur.getDay()===0)) nb++; cur=addDays(cur,1); }
+  el.textContent=`${nb} jour(s) concerné(s) du ${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'short'})} au ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'short'})}`;
+}
+document.addEventListener('change', e => { if(e.target && ['shiftDateDebut','shiftDateFin','excludeDimanche'].includes(e.target.id)) updPeriodeInfo(); });
+
 function renderTypeGrid(emp){
   document.getElementById('typeGrid').innerHTML=TYPES.map(t=>{
     const isW=['magasin','entrepotA','entrepotB'].includes(t.key);
@@ -1692,79 +1732,76 @@ function updNotif(){
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   document.getElementById('notifTxt').textContent=`Bonjour ${emp.name.split(' ')[0]}, votre planning du ${dl} a été modifié : ${det}.`;
 }
-async function saveShiftWeek(){
-  const {empId,dateStr}=S.editing;
-  const emp=S.employees.find(e=>e.id===empId);
-  const note=document.getElementById('mNote').value;
-  const sendMail=document.getElementById('doEmail').checked;
-  const today=new Date();today.setHours(0,0,0,0);
-  const mon=addDays(getMon(today),S.mWO*7);
-  // Appliquer sur les 7 jours de la semaine visible sauf dimanche (off)
-  const promises=[];
-  for(let i=0;i<7;i++){
-    const d=addDays(mon,i);
-    const dow=d.getDay();
-    // Dimanche reste repos sauf si VIP choisi
-    if(dow===0 && S.editType!=='vip') continue;
-    const key=`${empId}_${fmt(d)}`;
-    S.planning[key]={type:S.editType,site:emp.site,note};
-  }
-  persist();
-  closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
-  toast('Envoi...');
-  // Sync chaque jour modifié
-  let count=0;
-  for(let i=0;i<7;i++){
-    const d=addDays(mon,i);
-    const dow=d.getDay();
-    if(dow===0 && S.editType!=='vip') continue;
-    const r=await api('updateShift',{
-      empId,dateStr:fmt(d),type:S.editType,site:emp.site,note,
-      sendEmail:false,empEmail:emp.email,empName:emp.name
-    });
-    count++;
-  }
-  // Un seul email récap si option cochée
-  if(sendMail && emp.email){
-    const today2=new Date();today2.setHours(0,0,0,0);
-    const mon2=addDays(getMon(today2),S.mWO*7);
-    const dl=`du ${fmtFR(mon2,{day:'numeric',month:'long'})} au ${fmtFR(addDays(mon2,6),{day:'numeric',month:'long'})}`;
-    const t=TYPES.find(x=>x.key===S.editType);
-    const det=t?t.info:'';
-    api('updateShift',{
-      empId,dateStr:fmt(mon),type:S.editType,site:emp.site,note,
-      sendEmail:true,empEmail:emp.email,empName:emp.name,
-      overrideDetail:`Semaine ${dl} : ${emp.site} — ${det}`
-    });
-  }
-  toast(`✓ Semaine entière mise à jour (${count} jours)`);
-}
 
 async function saveShift(){
+  if(S.shiftMode==='periode') return saveShiftPeriode();
+
   const {empId,dateStr}=S.editing;
   const emp=S.employees.find(e=>e.id===empId);
   const note=document.getElementById('mNote').value;
   const sendMail=document.getElementById('doEmail').checked;
   const shift={type:S.editType,site:emp.site,note};
-  // Mise à jour locale immédiate
   S.planning[`${empId}_${dateStr}`]=shift;
   const t=TYPES.find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
   let det=t?t.info:'';if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   S.mods.push({empId,dl,det,seen:false});
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
-  // Vérifier si la modif crée un problème d'effectif
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
   checkEffectifAlerts(mon2);
   toast('Enregistrement...');
-  // Sync avec Sheet
   const r=await api('updateShift',{
     empId,dateStr,type:S.editType,site:emp.site,note,
     sendEmail:sendMail,empEmail:emp.email,empName:emp.name,
     targetSite:emp.site
   });
   toast(r&&r.ok?(sendMail?`✓ Modifié · Email envoyé à ${emp.name.split(' ')[0]}`:'✓ Planning enregistré'):'✓ Sauvegardé localement');
+}
+
+async function saveShiftPeriode(){
+  const {empId}=S.editing;
+  const emp=S.employees.find(e=>e.id===empId);
+  const note=document.getElementById('mNote').value;
+  const sendMail=document.getElementById('doEmail').checked;
+  const debut=document.getElementById('shiftDateDebut').value;
+  const fin=document.getElementById('shiftDateFin').value;
+  const exclDim=document.getElementById('excludeDimanche').checked;
+  if(!debut||!fin){toast('Sélectionnez une période');return;}
+  if(fin<debut){toast('La date de fin doit être après le début');return;}
+
+  const jours=[];
+  let cur=new Date(debut+'T12:00');const last=new Date(fin+'T12:00');
+  while(cur<=last){
+    if(!(exclDim && cur.getDay()===0)) jours.push(fmt(cur));
+    cur=addDays(cur,1);
+  }
+  if(!jours.length){toast('Aucun jour à appliquer sur cette période');return;}
+
+  jours.forEach(dStr=>{ S.planning[`${empId}_${dStr}`]={type:S.editType,site:emp.site,note}; });
+  persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
+  const today2=new Date();today2.setHours(0,0,0,0);
+  const mon2=addDays(getMon(today2),S.mWO*7);
+  checkEffectifAlerts(mon2);
+  toast('Envoi...');
+
+  for(const dStr of jours){
+    await api('updateShift',{
+      empId,dateStr:dStr,type:S.editType,site:emp.site,note,
+      sendEmail:false,empEmail:emp.email,empName:emp.name
+    });
+  }
+  if(sendMail && emp.email){
+    const t=TYPES.find(x=>x.key===S.editType);
+    const det=t?t.info:'';
+    const dl=`du ${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'long'})}`;
+    api('updateShift',{
+      empId,dateStr:debut,type:S.editType,site:emp.site,note,
+      sendEmail:true,empEmail:emp.email,empName:emp.name,
+      overrideDetail:`Période ${dl} : ${emp.site} — ${det}`
+    });
+  }
+  toast(`✓ Période mise à jour (${jours.length} jour${jours.length>1?'s':''})`);
 }
 
 // ── Absences ──
