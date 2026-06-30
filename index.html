@@ -910,7 +910,7 @@ const S={
     {id:'soldes', label:'Période de soldes', color:'#F59E0B'},
   ]),
   // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
-  events:lsGet('events',[]),
+  events:(Array.isArray(lsGet('events',[]))?lsGet('events',[]):[]),
   scriptUrl:lsGet('scriptUrl',''),
   syncing:false,
 };
@@ -1308,8 +1308,8 @@ function setView(v){
   document.getElementById('vMoisBtn').classList.toggle('active',v==='mois');
   document.getElementById('vSemaine').style.display=v==='sem'?'block':'none';
   document.getElementById('vMoisView').style.display=v==='mois'?'block':'none';
+  document.getElementById('mWLbl').style.display='';
   if(v==='sem'){
-    document.getElementById('mWLbl').style.display='';
     renderWeek();
   }
   else{ // mois
@@ -1319,7 +1319,6 @@ function setView(v){
     document.getElementById('moEmpSel').style.display='none';
     document.getElementById('moisSiteView').style.display='block';
     document.getElementById('moisEmpView').style.display='none';
-    document.getElementById('mWLbl').style.display='none';
     renderChipsSites();
     renderMonth();
   }
@@ -2109,9 +2108,9 @@ async function saveEventTypes(){
 // Modèle : S.events = [{ id, typeId, dateDebut, dateFin, portee:'tous'|'magasin'|'employe', cible:siteOuEmpId|null }]
 function getEventColorFor(empId, dateStr){
   const emp = S.employees.find(e=>e.id===empId);
-  if(!emp || !S.events) return null;
+  if(!emp || !Array.isArray(S.events) || !S.events.length) return null;
   for(const e of S.events){
-    if(dateStr < e.dateDebut || dateStr > e.dateFin) continue;
+    if(!e || dateStr < e.dateDebut || dateStr > e.dateFin) continue;
     if(e.portee==='tous') { return getEventTypeColor(e.typeId); }
     if(e.portee==='magasin' && emp.site===e.cible) { return getEventTypeColor(e.typeId); }
     if(e.portee==='employe' && empId===e.cible) { return getEventTypeColor(e.typeId); }
