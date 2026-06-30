@@ -347,14 +347,53 @@ tbody tr:hover td{background:#FAFAF8;}
     <button class="btn btn-full" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;margin-bottom:14px;" onclick="openAbsEmpModal()">
       🚩 Signaler une absence
     </button>
-    <div class="view-bar">
-      <button class="btn btn-ghost btn-sm" onclick="eW(-1)">←</button>
-      <div class="week-label" id="eWLbl"></div>
-      <button class="btn btn-ghost btn-sm" onclick="eW(1)">→</button>
+
+    <div class="tabs">
+      <button class="tab active" id="empTabPerso" onclick="switchEmpTab('perso')">Mon planning</button>
+      <button class="tab" id="empTabMagasin" onclick="switchEmpTab('magasin')">👥 Mon magasin</button>
     </div>
-    <div id="empDays"></div>
-    <div class="legend mt-10" id="empLeg"></div>
-    <!-- COMPTEUR CONGÉS EMPLOYÉ -->
+
+    <!-- MON PLANNING (vue perso) -->
+    <div id="empTabContentPerso">
+      <div class="view-bar">
+        <div class="vtoggle" style="margin-right:8px;">
+          <button class="vbtn active" id="empVSemBtn" onclick="setEmpView('sem')">Semaine</button>
+          <button class="vbtn" id="empVMoisBtn" onclick="setEmpView('mois')">Mois</button>
+        </div>
+      </div>
+      <div id="empVSemaine">
+        <div class="view-bar">
+          <button class="btn btn-ghost btn-sm" onclick="eW(-1)">←</button>
+          <div class="week-label" id="eWLbl"></div>
+          <button class="btn btn-ghost btn-sm" onclick="eW(1)">→</button>
+        </div>
+        <div id="empDays"></div>
+        <div class="legend mt-10" id="empLeg"></div>
+      </div>
+      <div id="empVMois" style="display:none;">
+        <div class="view-bar">
+          <button class="btn btn-ghost btn-sm" onclick="eM(-1)">←</button>
+          <div class="week-label" id="eMLbl"></div>
+          <button class="btn btn-ghost btn-sm" onclick="eM(1)">→</button>
+        </div>
+        <div class="cal-grid" id="empCalHead" style="margin-bottom:3px;"></div>
+        <div class="cal-grid" id="empCalBody"></div>
+        <div class="legend mt-10" id="empLegMois"></div>
+      </div>
+    </div>
+
+    <!-- MON MAGASIN (vue équipe) -->
+    <div id="empTabContentMagasin" style="display:none;">
+      <div class="view-bar">
+        <button class="btn btn-ghost btn-sm" onclick="eqM(-1)">←</button>
+        <div class="week-label" id="eqMLbl"></div>
+        <button class="btn btn-ghost btn-sm" onclick="eqM(1)">→</button>
+      </div>
+      <div id="empMagasinView"></div>
+      <div class="legend mt-10" id="empLegMagasin"></div>
+    </div>
+
+
     <div class="quota-card mt-10" id="empQuotaCard">
       <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🏖️ Mes congés payés</div>
       <div class="quota-grid" id="empQuotaGrid"></div>
@@ -783,7 +822,7 @@ const S={
   requests:lsGet('requests',[]),
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
-  eWO:0,mWO:0,mMO:0,
+  eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,empTab:'perso',empView:'sem',
   view:'sem',moisMode:'site',triConges:'restants',
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
@@ -877,10 +916,15 @@ async function loadAll(){
     setLoadingText('Données chargées ✓');
     setTimeout(()=>{
       hideLoading();
-      // Restaurer la session gestionnaire si elle existe (moins de 8h)
+      // Restaurer la session gestionnaire ou salarié si elle existe (moins de 8h)
       const session=lsGet('session',null);
-      if(session&&session.role==='mgr'&&(Date.now()-session.ts)<8*3600*1000){
+      const sessionValide=session&&(Date.now()-session.ts)<8*3600*1000;
+      if(sessionValide&&session.role==='mgr'){
         S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
+      } else if(sessionValide&&session.role==='emp'){
+        const emp=S.employees.find(e=>e.id===session.empId);
+        if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
+        else{lsSet('session',null);showScr('sLogin');}
       } else {
         showScr('sLogin');
       }
@@ -948,7 +992,11 @@ function saveSetup(){
 function doLogin(){
   const code=document.getElementById('loginCode').value.trim().toUpperCase();
   const emp=S.employees.find(e=>e.code===code);
-  if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
+  if(emp){
+    S.user=emp;S.role='emp';
+    lsSet('session',{role:'emp',empId:emp.id,ts:Date.now()});
+    showScr('sEmp');renderEmp();
+  }
   else if(S.employees.length===0){toast('Aucun employé — connectez d\'abord Google Sheets');}
   else toast('Code non reconnu');
 }
@@ -972,7 +1020,7 @@ function validerPwd(){
     document.getElementById('pwdInput').focus();
   }
 }
-function logout(){S.user=null;S.role=null;S.eWO=0;S.filtresSites=[];S.filtresEmps=[];lsSet('session',null);document.getElementById('loginCode').value='';showScr('sLogin');}
+function logout(){S.user=null;S.role=null;S.eWO=0;S.eMO=0;S.eqWO=0;S.empTab='perso';S.empView='sem';S.filtresSites=[];S.filtresEmps=[];lsSet('session',null);document.getElementById('loginCode').value='';showScr('sLogin');}
 document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
 function showScr(id){
@@ -1005,6 +1053,8 @@ function renderEmp(){
   renderEmpQuota();
   renderEmpAbsList();
   updSimuDelai();
+  switchEmpTab('perso');
+  setEmpView('sem');
 }
 function eW(d){S.eWO+=d;renderEmpWeek();}
 function renderEmpWeek(){
@@ -1022,6 +1072,96 @@ function renderEmpWeek(){
     </div>`;
   }
   document.getElementById('empDays').innerHTML=h;
+}
+
+// ── Sous-onglets Mon planning / Mon magasin ──
+function switchEmpTab(tab){
+  S.empTab=tab;
+  document.getElementById('empTabPerso').classList.toggle('active',tab==='perso');
+  document.getElementById('empTabMagasin').classList.toggle('active',tab==='magasin');
+  document.getElementById('empTabContentPerso').style.display=tab==='perso'?'block':'none';
+  document.getElementById('empTabContentMagasin').style.display=tab==='magasin'?'block':'none';
+  if(tab==='magasin'){ buildLegend('empLegMagasin'); renderEmpMagasin(); }
+}
+
+// ── Toggle Semaine/Mois sur "Mon planning" ──
+function setEmpView(v){
+  S.empView=v;
+  document.getElementById('empVSemBtn').classList.toggle('active',v==='sem');
+  document.getElementById('empVMoisBtn').classList.toggle('active',v==='mois');
+  document.getElementById('empVSemaine').style.display=v==='sem'?'block':'none';
+  document.getElementById('empVMois').style.display=v==='mois'?'block':'none';
+  if(v==='sem') renderEmpWeek();
+  else { buildLegend('empLegMois'); renderEmpMonth(); }
+}
+
+// ── Vue mois personnelle (calendrier) ──
+function eM(d){S.eMO+=d;renderEmpMonth();}
+function renderEmpMonth(){
+  const emp=S.user;if(!emp)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const ref=new Date(today.getFullYear(),today.getMonth()+S.eMO,1);
+  document.getElementById('eMLbl').textContent=fmtFR(ref,{month:'long',year:'numeric'});
+  document.getElementById('empCalHead').innerHTML=JOURS_C.map(j=>`<div class="cal-head">${j}</div>`).join('');
+  const first=new Date(ref.getFullYear(),ref.getMonth(),1);
+  const startDow=first.getDay()===0?6:first.getDay()-1;
+  const gridStart=addDays(first,-startDow);
+  const last=new Date(ref.getFullYear(),ref.getMonth()+1,0);
+  const endDow=last.getDay()===0?6:last.getDay()-1;
+  const gridEnd=addDays(last,6-endDow);
+  let h='';let cur=new Date(gridStart);
+  while(cur<=gridEnd){
+    const thisM=cur.getMonth()===ref.getMonth();const isT=fmt(cur)===fmt(today);
+    const sh=S.planning[`${emp.id}_${fmt(cur)}`];
+    const type=sh?.type||'off';const site=sh?.site||emp.site;
+    let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
+    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}">
+      <div class="cnum">${cur.getDate()}</div>${bar}</div>`;
+    cur=addDays(cur,1);
+  }
+  document.getElementById('empCalBody').innerHTML=h;
+}
+
+// ── Vue "Mon magasin" : toute l'équipe du site du salarié ──
+function eqM(d){S.eqWO+=d;renderEmpMagasin();}
+function renderEmpMagasin(){
+  const emp=S.user;if(!emp)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const mon=addDays(getMon(today),S.eqWO*7);
+  document.getElementById('eqMLbl').textContent=`${fmtFR(mon,{day:'numeric',month:'short'})} – ${fmtFR(addDays(mon,6),{day:'numeric',month:'short',year:'numeric'})}`;
+
+  const collegues=S.employees.filter(e=>e.site===emp.site).sort((a,b)=>a.id===emp.id?-1:b.id===emp.id?1:a.name.localeCompare(b.name));
+
+  let th=`<tr><th style="text-align:left;padding-left:12px;">Équipe</th>`;
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+    const isW=d.getDay()===0||d.getDay()===6;
+    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+  }
+  th+='</tr>';
+
+  let tb='';
+  collegues.forEach(c=>{
+    const isMe=c.id===emp.id;
+    tb+=`<tr${isMe?' style="background:#F0F7FF;"':''}><td><div class="emp-cell">
+      <div class="avatar" style="background:${avc(c.id)}">${ini(c.name)}</div>
+      <div style="font-weight:600;font-size:12px;white-space:nowrap;">${c.name.split(' ')[0]}${isMe?' <span style="color:#3B82F6;">(moi)</span>':''}</div>
+    </div></td>`;
+    for(let i=0;i<7;i++){
+      const d=addDays(mon,i);
+      const sh=S.planning[`${c.id}_${fmt(d)}`];
+      const type=sh?.type||'off';const site2=sh?.site||c.site;
+      const cell=type==='off'
+        ?`<div class="sb empty"></div>`
+        :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site2).color};border-color:${getColor(type,site2).color};"></div>`;
+      tb+=`<td>${cell}</td>`;
+    }
+    tb+='</tr>';
+  });
+
+  document.getElementById('empMagasinView').innerHTML=`
+    <div class="table-wrap"><table><thead>${th}</thead><tbody>${tb}</tbody></table></div>
+    <div class="muted tc mt-10">Planning de toute l'équipe ${sPill(emp.site)}</div>`;
 }
 async function sendReq(){
   const emp=S.user;
