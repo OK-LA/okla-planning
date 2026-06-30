@@ -781,6 +781,10 @@ tbody tr:hover td{background:#FAFAF8;}
 <div class="modal-overlay" id="mEvent">
   <div class="modal">
     <div class="modal-title">🎨 Colorer une période</div>
+
+    <div id="evListeExistants" style="margin-bottom:14px;"></div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">+ Nouvelle période</div>
     <div class="fg"><label>Type d'événement</label>
       <select id="evTypeSel"></select>
     </div>
@@ -801,7 +805,7 @@ tbody tr:hover td{background:#FAFAF8;}
     </div>
     <div id="evDateInfo" style="margin-bottom:6px;"></div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('mEvent')">Annuler</button>
+      <button class="btn btn-ghost" onclick="closeModal('mEvent')">Fermer</button>
       <button class="btn btn-save" onclick="appliquerEvenementPlage()">✓ Colorer la période</button>
     </div>
   </div>
@@ -1584,8 +1588,17 @@ function renderWeek(){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0;
     const dStr=fmt(d);
-    const vacPastille=renderPastillesDate(dStr);
-    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}${vacPastille}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+    const evDuJour=getEvenementsDuJour(dStr);
+    let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':'';
+    let evLabel='';
+    if(evDuJour.length){
+      const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
+      if(premierType){
+        headStyle=`background:${premierType.color}22;border-bottom:2.5px solid ${premierType.color};color:${premierType.color};`;
+        evLabel=`<div style="font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;margin:0 auto;">${premierType.label}</div>`;
+      }
+    }
+    th+=`<th style="${headStyle}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span>${evLabel}</th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
 
@@ -1613,12 +1626,10 @@ function renderWeek(){
         const sh=S.planning[`${emp.id}_${fmt(d)}`];
         const type=sh?.type||'off';const empSite=sh?.site||emp.site;
         const dStr=fmt(d);
-        const evColor=getEventColorFor(emp.id,dStr);
-        const evStyle=evColor?`box-shadow:inset 0 0 0 2.5px ${evColor};`:'';
         const remLabel=type==='remplacement'?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${empSite}</span>`:'';
         const cell=type==='off'
-          ?`<div class="sb empty" style="${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
-          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
+          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
+          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
       }
       tb+='</tr>';
@@ -1724,19 +1735,26 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const isW=d.getDay()===0;
     const weCls=isW?' we':'';
     const dStr=fmt(d);
-    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
+    const evDuJour=getEvenementsDuJour(dStr);
+    let dateCellStyle = isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':'';
+    let evLabel='';
+    if(evDuJour.length){
+      const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
+      if(premierType){
+        dateCellStyle=`background:${premierType.color}22;border-left:3px solid ${premierType.color};color:${premierType.color};font-weight:700;`;
+        evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;">· ${premierType.label}</span>`;
+      }
+    }
+    tb+=`<tr><td class="date-td${weCls}" style="${dateCellStyle}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>` +
-      `${renderPastillesDate(dStr)}</td>`;
+      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
       const type=sh?.type||'off';const site2=sh?.site||emp.site;
-      const evColor=getEventColorFor(emp.id,dStr);
-      const evStyle=evColor?`box-shadow:inset 0 0 0 2px ${evColor};`:'';
       let cell='';
-      if(type==='off') cell=`<div class="mblock empty" style="${evStyle}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
-      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};${evStyle}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
+      if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
     });
     const cls=count>=minStaff?'staff-ok':'staff-warn';
@@ -2295,7 +2313,45 @@ function openEventModal(){
   document.getElementById('evEmployeSel').innerHTML = S.employees.map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   document.getElementById('evPortee').value = 'tous';
   toggleEvPortee();
+  renderEvListeExistants();
   openModal('mEvent');
+}
+function renderEvListeExistants(){
+  const el=document.getElementById('evListeExistants');
+  if(!el) return;
+  if(!Array.isArray(S.events) || !S.events.length){
+    el.innerHTML='<div class="muted" style="font-size:12px;">Aucune période colorée pour le moment.</div>';
+    return;
+  }
+  const sorted=[...S.events].sort((a,b)=>a.dateDebut.localeCompare(b.dateDebut));
+  let h='<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">Périodes en cours</div>';
+  sorted.forEach(ev=>{
+    const t=S.eventTypes.find(et=>et.id===ev.typeId);
+    const label=t?t.label:'(type supprimé)';
+    const color=t?t.color:'#999';
+    const porteeLabel = ev.portee==='tous'?'Tous les employés'
+      : ev.portee==='magasin'?`Magasin ${ev.cible}`
+      : (S.employees.find(e=>e.id===ev.cible)?.name || 'Employé');
+    const dl=`${fmtFR(new Date(ev.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(ev.dateFin+'T12:00'),{day:'numeric',month:'short'})}`;
+    h+=`<div class="event-row">
+      <div class="event-dot-lg" style="background:${color};"></div>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;">${label}</div>
+        <div style="font-size:11px;color:var(--muted);">${dl} · ${porteeLabel}</div>
+      </div>
+      <button class="btn-del" onclick="supprimerEvenement(${ev.id})" title="Supprimer">✕</button>
+    </div>`;
+  });
+  el.innerHTML=h;
+}
+async function supprimerEvenement(evId){
+  if(!confirm('Supprimer cette période colorée ?')) return;
+  S.events = (S.events||[]).filter(e=>e.id!==evId);
+  persist();
+  renderEvListeExistants();
+  refreshActiveView();
+  toast('✓ Période supprimée');
+  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
 }
 function toggleEvPortee(){
   const v = document.getElementById('evPortee').value;
