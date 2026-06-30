@@ -104,12 +104,6 @@ tbody tr:hover td{background:#FAFAF8;}
 .sb.vip::after{content:'★';font-size:10px;color:rgba(255,255,255,.9);}
 
 /* PASTILLES ÉVÉNEMENTS — wrapper pour superposer une cellule + pastille(s) */
-.cell-wrap{position:relative;width:100%;}
-.ev-dots{position:absolute;top:-3px;right:-2px;display:flex;gap:1px;z-index:2;pointer-events:none;}
-.ev-dot{width:7px;height:7px;border-radius:50%;border:1.2px solid #fff;box-shadow:0 0 0 .5px rgba(0,0,0,.15);}
-.ev-pin-btn{position:absolute;bottom:-3px;left:-2px;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid var(--border);font-size:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;color:var(--muted);line-height:1;opacity:0;transition:opacity .15s;}
-.cell-wrap:hover .ev-pin-btn{opacity:1;}
-.ev-pin-btn:hover{background:var(--bg);color:var(--text);}
 .event-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);}
 .event-row:last-child{border-bottom:none;}
 .event-dot-lg{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
@@ -499,6 +493,9 @@ tbody tr:hover td{background:#FAFAF8;}
 
     <div class="tab-content active" id="tab-planning">
       <div class="legend" id="mgrLeg"></div>
+      <button class="btn btn-sm" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:12px;" onclick="openEventModal()">
+        🎨 Colorer une période (vacances, soldes, férié...)
+      </button>
       <div class="view-bar">
         <button class="btn btn-ghost btn-sm" onclick="mNavPrev()">←</button>
         <div class="week-label" id="mWLbl"></div>
@@ -506,7 +503,6 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="vtoggle">
           <button class="vbtn active" id="vSemBtn" onclick="setView('sem')">Semaine</button>
           <button class="vbtn" id="vMoisBtn" onclick="setView('mois')">Mois</button>
-          <button class="vbtn" id="vAnneeBtn" onclick="setView('annee')">12 mois</button>
         </div>
       </div>
       <div id="vSemaine">
@@ -552,22 +548,6 @@ tbody tr:hover td{background:#FAFAF8;}
           <div class="cal-grid" id="calHead" style="margin-bottom:3px;"></div>
           <div class="cal-grid" id="calBody"></div>
         </div>
-      </div>
-
-      <!-- VUE 12 MOIS GLISSANTS -->
-      <div id="vAnneeView" style="display:none;">
-        <div class="filter-bar">
-          <div class="filter-section">
-            <div class="filter-label">Magasins</div>
-            <div class="chips" id="chipsSitesAnnee"></div>
-          </div>
-          <div class="filter-section" id="filterEmpSectionAnnee" style="display:none;">
-            <div class="filter-label">Employés</div>
-            <div class="chips" id="chipsEmpsAnnee"></div>
-          </div>
-        </div>
-        <div class="muted" style="margin-bottom:10px;">Vue d'ensemble glissante sur 12 mois à partir d'aujourd'hui. Cliquez sur un mois pour le déplier.</div>
-        <div id="anneeAccordeon"></div>
       </div>
     </div>
 
@@ -770,17 +750,32 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
-<!-- MODAL ÉVÉNEMENT (pastille sur une date) -->
+<!-- MODAL COLORATION D'ÉVÉNEMENT SUR UNE PLAGE DE DATES -->
 <div class="modal-overlay" id="mEvent">
   <div class="modal">
-    <div class="modal-title" id="mEventTitle">Événement du jour</div>
-    <div id="mEventList" style="margin-bottom:10px;"></div>
-    <div class="fg"><label>Ajouter un événement</label>
+    <div class="modal-title">🎨 Colorer une période</div>
+    <div class="fg"><label>Type d'événement</label>
       <select id="evTypeSel"></select>
     </div>
+    <div class="fg"><label>Date de début</label><input type="date" id="evDateDebut"></div>
+    <div class="fg"><label>Date de fin</label><input type="date" id="evDateFin"></div>
+    <div class="fg"><label>Appliquer à</label>
+      <select id="evPortee">
+        <option value="tous">Tous les employés visibles</option>
+        <option value="magasin">Un magasin spécifique</option>
+        <option value="employe">Un employé spécifique</option>
+      </select>
+    </div>
+    <div class="fg" id="evMagasinWrap" style="display:none;"><label>Magasin</label>
+      <select id="evMagasinSel"></select>
+    </div>
+    <div class="fg" id="evEmployeWrap" style="display:none;"><label>Employé</label>
+      <select id="evEmployeSel"></select>
+    </div>
+    <div id="evDateInfo" style="margin-bottom:6px;"></div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('mEvent')">Fermer</button>
-      <button class="btn btn-save" onclick="ajouterEvenementJour()">+ Ajouter</button>
+      <button class="btn btn-ghost" onclick="closeModal('mEvent')">Annuler</button>
+      <button class="btn btn-save" onclick="appliquerEvenementPlage()">✓ Colorer la période</button>
     </div>
   </div>
 </div>
@@ -890,7 +885,7 @@ const S={
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
-  editing:null,editType:null,editingAbs:null,editingDateEvent:null,
+  editing:null,editType:null,editingAbs:null,
   params:lsGet('params',{
     minStaff:{'Ham':2,'Longueau':2,'Roye':2,'Breteuil':1,'Entrepôt':1},
     adresses:{'Ham':'','Longueau':'','Roye':'','Breteuil':'','Entrepôt':''}
@@ -900,8 +895,8 @@ const S={
     {id:'ferie',  label:'Jour férié chômé', color:'#DC2626'},
     {id:'soldes', label:'Période de soldes', color:'#F59E0B'},
   ]),
-  // Événements posés sur des dates précises : { 'YYYY-MM-DD': ['ferie','soldes',...] }
-  events:lsGet('events',{}),
+  // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
+  events:lsGet('events',[]),
   scriptUrl:lsGet('scriptUrl',''),
   syncing:false,
 };
@@ -973,7 +968,7 @@ async function loadAll(){
     if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
     if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
     if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
-    if(r.events&&typeof r.events==='object') {S.events=r.events; lsSet('events',r.events);}
+    if(r.events&&Array.isArray(r.events)) {S.events=r.events; lsSet('events',r.events);}
     // Initialiser planning vide si pas de données
     if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
     // Générer planning par défaut pour les employés si vide
@@ -1297,15 +1292,13 @@ function setView(v){
   S.view=v;
   document.getElementById('vSemBtn').classList.toggle('active',v==='sem');
   document.getElementById('vMoisBtn').classList.toggle('active',v==='mois');
-  document.getElementById('vAnneeBtn').classList.toggle('active',v==='annee');
   document.getElementById('vSemaine').style.display=v==='sem'?'block':'none';
   document.getElementById('vMoisView').style.display=v==='mois'?'block':'none';
-  document.getElementById('vAnneeView').style.display=v==='annee'?'block':'none';
   if(v==='sem'){
     document.getElementById('mWLbl').style.display='';
     renderWeek();
   }
-  else if(v==='mois'){
+  else{ // mois
     S.moisMode='site';
     document.getElementById('mSiteBtn').classList.add('active');
     document.getElementById('mEmpBtn').classList.remove('active');
@@ -1315,11 +1308,6 @@ function setView(v){
     document.getElementById('mWLbl').style.display='none';
     renderChipsSites();
     renderMonth();
-  }
-  else{ // annee
-    document.getElementById('mWLbl').style.display='none';
-    renderChipsSites();
-    renderAnnee();
   }
 }
 function setMoisMode(mode){
@@ -1366,8 +1354,7 @@ function renderChipsSites() {
 
 function refreshActiveView() {
   if (S.view === 'sem') renderWeek();
-  else if (S.view === 'mois') renderMonth();
-  else renderAnnee();
+  else renderMonth();
 }
 
 function toggleTousSites() {
@@ -1524,11 +1511,12 @@ function renderWeek(){
         const sh=S.planning[`${emp.id}_${fmt(d)}`];
         const type=sh?.type||'off';const empSite=sh?.site||emp.site;
         const dStr=fmt(d);
+        const evColor=getEventColorFor(emp.id,dStr);
+        const evStyle=evColor?`box-shadow:inset 0 0 0 2.5px ${evColor};`:'';
         const cell=type==='off'
-          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
-          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`;
-        const wrapped=`<div class="cell-wrap">${cell}${renderEventDots(dStr)}<div class="ev-pin-btn" onclick="event.stopPropagation();openEventModal('${dStr}')" title="Événements">📌</div></div>`;
-        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${wrapped}</td>`;
+          ?`<div class="sb empty" style="${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
+          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};${evStyle}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`;
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
       }
       tb+='</tr>';
     });
@@ -1599,19 +1587,18 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const isW=d.getDay()===0||d.getDay()===6;
     const weCls=isW?' we':'';
     const dStr=fmt(d);
-    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}position:relative;">` +
-      `<div class="cell-wrap" style="display:inline-block;width:auto;">` +
+    tb+=`<tr><td class="date-td${weCls}" style="${isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':''}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>` +
-      `${renderEventDots(dStr)}<div class="ev-pin-btn" style="left:-14px;bottom:2px;" onclick="event.stopPropagation();openEventModal('${dStr}')" title="Événements">📌</div>` +
-      `</div></td>`;
+      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span></td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
       const type=sh?.type||'off';const site2=sh?.site||emp.site;
+      const evColor=getEventColorFor(emp.id,dStr);
+      const evStyle=evColor?`box-shadow:inset 0 0 0 2px ${evColor};`:'';
       let cell='';
-      if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
-      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
+      if(type==='off') cell=`<div class="mblock empty" style="${evStyle}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};${evStyle}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
     });
     const cls=count>=minStaff?'staff-ok':'staff-warn';
@@ -1640,61 +1627,6 @@ function renderMonthSite(ref,today){
   });
   html+=`<div class="muted tc mt-10"><span style="color:#DC2626;font-weight:600;">Rouge</span> = sous l&#39;effectif minimum · Cliquez sur une case pour modifier</div>`;
   document.getElementById('moisSiteView').innerHTML=html;
-}
-
-// ── VUE 12 MOIS GLISSANTS — accordéon, un mois ouvert à la fois par défaut (le mois en cours) ──
-function renderAnnee(){
-  const today=new Date();today.setHours(0,0,0,0);
-  const empsFiltres=getEmpsFiltres();
-  const sitesAAfficher=S.filtresSites.length?S.filtresSites:Object.keys(SC);
-
-  // Ouvrir le mois en cours par défaut au premier rendu
-  if(S.moisOuverts.length===0) S.moisOuverts=[0];
-
-  let html='';
-  for(let m=0; m<12; m++){
-    const ref=new Date(today.getFullYear(), today.getMonth()+m, 1);
-    const isOpen=S.moisOuverts.includes(m);
-    const isCurrent=m===0;
-    const label=fmtFR(ref,{month:'long',year:'numeric'});
-
-    // Comptage rapide pour le résumé fermé : nb d'événements ce mois-ci
-    const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
-    let nbEvents=0;
-    for(let d=1; d<=daysInMonth; d++){
-      const dStr=fmt(new Date(ref.getFullYear(),ref.getMonth(),d));
-      if(S.events[dStr]) nbEvents+=S.events[dStr].length;
-    }
-
-    let body='';
-    if(isOpen){
-      sitesAAfficher.forEach(site=>{
-        body+=renderMonthSiteTable(site, ref, today, empsFiltres);
-      });
-    }
-
-    html+=`<div class="accordeon-mois">
-      <div class="accordeon-head${isCurrent?' current':''}" onclick="toggleMoisAccordeon(${m})">
-        <div>
-          <span class="accordeon-title">${label}</span>
-          ${isCurrent?'<span style="font-size:10px;font-weight:600;color:#1A1917;background:var(--bg);padding:2px 7px;border-radius:10px;margin-left:8px;">Mois en cours</span>':''}
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          ${nbEvents>0?`<span class="accordeon-summary">${nbEvents} événement(s)</span>`:''}
-          <span class="accordeon-chevron${isOpen?' open':''}">▾</span>
-        </div>
-      </div>
-      <div class="accordeon-body${isOpen?' open':''}">${isOpen?body:''}</div>
-    </div>`;
-  }
-
-  document.getElementById('anneeAccordeon').innerHTML=html;
-}
-
-function toggleMoisAccordeon(m){
-  if(S.moisOuverts.includes(m)) S.moisOuverts=S.moisOuverts.filter(x=>x!==m);
-  else S.moisOuverts.push(m);
-  renderAnnee();
 }
 
 function renderMonthEmp(ref,today){
@@ -2112,18 +2044,13 @@ function ajouterTypeEvenement(){
 function supprimerTypeEvenement(idx){
   const ev = S.eventTypes[idx];
   if(!ev) return;
-  // Vérifier si utilisé sur des dates
-  const utilise = Object.values(S.events).some(list => list.includes(ev.id));
-  if(utilise && !confirm(`"${ev.label}" est utilisé sur au moins une date du planning. Le supprimer le retirera aussi de ces dates. Continuer ?`)) return;
+  const utilise = (S.events||[]).some(e => e.typeId === ev.id);
+  if(utilise && !confirm(`"${ev.label}" est utilisé sur au moins une période du planning. Le supprimer retirera aussi ces colorations. Continuer ?`)) return;
   S.eventTypes.splice(idx,1);
-  // Nettoyer les références dans S.events
-  Object.keys(S.events).forEach(dateStr => {
-    S.events[dateStr] = S.events[dateStr].filter(id => id !== ev.id);
-    if(S.events[dateStr].length === 0) delete S.events[dateStr];
-  });
+  S.events = (S.events||[]).filter(e => e.typeId !== ev.id);
   persist();
   renderParamEvents();
-  renderWeek();
+  refreshActiveView();
   toast(`✓ ${ev.label} supprimé`);
 }
 
@@ -2137,72 +2064,63 @@ async function saveEventTypes(){
   persist();
   const r = await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
   renderParamEvents();
-  renderWeek();
+  refreshActiveView();
   toast(r&&r.ok?'✓ Types d\'événements enregistrés':'✓ Enregistré localement');
 }
 
-// ── Pastille événements sur une date donnée ──
-function getEventTypeColor(evId){
-  const t = S.eventTypes.find(e=>e.id===evId);
-  return t ? t.color : '#999';
+// ── COLORATION D'ÉVÉNEMENTS SUR PLAGE DE DATES ──
+// Modèle : S.events = [{ id, typeId, dateDebut, dateFin, portee:'tous'|'magasin'|'employe', cible:siteOuEmpId|null }]
+function getEventColorFor(empId, dateStr){
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp || !S.events) return null;
+  for(const e of S.events){
+    if(dateStr < e.dateDebut || dateStr > e.dateFin) continue;
+    if(e.portee==='tous') { return getEventTypeColor(e.typeId); }
+    if(e.portee==='magasin' && emp.site===e.cible) { return getEventTypeColor(e.typeId); }
+    if(e.portee==='employe' && empId===e.cible) { return getEventTypeColor(e.typeId); }
+  }
+  return null;
 }
-function renderEventDots(dateStr){
-  const ids = S.events[dateStr];
-  if(!ids || !ids.length) return '';
-  const dots = ids.slice(0,4).map(id => `<div class="ev-dot" style="background:${getEventTypeColor(id)};" title="${S.eventTypes.find(e=>e.id===id)?.label||''}"></div>`).join('');
-  return `<div class="ev-dots">${dots}</div>`;
+function getEventTypeColor(typeId){
+  const t = S.eventTypes.find(e=>e.id===typeId);
+  return t ? t.color : null;
 }
-function openEventModal(dateStr){
-  S.editingDateEvent = dateStr;
-  const dl = fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  document.getElementById('mEventTitle').textContent = `📌 Événements — ${dl}`;
-  renderEventModalList();
-  const used = S.events[dateStr] || [];
-  document.getElementById('evTypeSel').innerHTML = S.eventTypes
-    .filter(t => !used.includes(t.id))
-    .map(t => `<option value="${t.id}">${t.label}</option>`).join('') || '<option value="">Tous les types déjà ajoutés</option>';
+
+function openEventModal(){
+  document.getElementById('evTypeSel').innerHTML = S.eventTypes.map(t=>`<option value="${t.id}">${t.label}</option>`).join('') || '<option value="">Aucun type — créez-en un dans Paramètres</option>';
+  document.getElementById('evDateDebut').value = fmt(new Date());
+  document.getElementById('evDateFin').value = fmt(new Date());
+  document.getElementById('evMagasinSel').innerHTML = Object.keys(SC).map(s=>`<option value="${s}">${s}</option>`).join('');
+  document.getElementById('evEmployeSel').innerHTML = S.employees.map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
+  document.getElementById('evPortee').value = 'tous';
+  toggleEvPortee();
   openModal('mEvent');
 }
-function renderEventModalList(){
-  const dateStr = S.editingDateEvent;
-  const ids = S.events[dateStr] || [];
-  const el = document.getElementById('mEventList');
-  if(!ids.length){ el.innerHTML = '<div class="muted" style="padding:6px 0;">Aucun événement ce jour-là</div>'; return; }
-  el.innerHTML = ids.map(id => {
-    const t = S.eventTypes.find(e=>e.id===id);
-    if(!t) return '';
-    return `<div class="event-row">
-      <div class="event-dot-lg" style="background:${t.color};"></div>
-      <div style="flex:1;font-size:13px;font-weight:500;">${t.label}</div>
-      <button class="btn-del" onclick="retirerEvenementJour('${id}')" title="Retirer">✕</button>
-    </div>`;
-  }).join('');
+function toggleEvPortee(){
+  const v = document.getElementById('evPortee').value;
+  document.getElementById('evMagasinWrap').style.display = v==='magasin'?'block':'none';
+  document.getElementById('evEmployeWrap').style.display = v==='employe'?'block':'none';
 }
-async function ajouterEvenementJour(){
-  const dateStr = S.editingDateEvent;
-  const sel = document.getElementById('evTypeSel');
-  const evId = sel.value;
-  if(!evId) { toast('Tous les types sont déjà ajoutés à cette date'); return; }
-  if(!S.events[dateStr]) S.events[dateStr] = [];
-  S.events[dateStr].push(evId);
+document.addEventListener('change', e => { if(e.target && e.target.id==='evPortee') toggleEvPortee(); });
+
+async function appliquerEvenementPlage(){
+  const typeId = document.getElementById('evTypeSel').value;
+  const dateDebut = document.getElementById('evDateDebut').value;
+  const dateFin = document.getElementById('evDateFin').value;
+  const portee = document.getElementById('evPortee').value;
+  if(!typeId){ toast('Créez d\'abord un type d\'événement dans Paramètres'); return; }
+  if(!dateDebut || !dateFin){ toast('Sélectionnez une plage de dates'); return; }
+  if(dateFin < dateDebut){ toast('La date de fin doit être après le début'); return; }
+  const cible = portee==='magasin' ? document.getElementById('evMagasinSel').value
+              : portee==='employe' ? document.getElementById('evEmployeSel').value
+              : null;
+  if(!S.events) S.events = [];
+  S.events.push({ id:Date.now(), typeId, dateDebut, dateFin, portee, cible });
   persist();
-  renderEventModalList();
-  openEventModal(dateStr); // rafraîchit aussi le select
-  renderWeek();
-  if(S.view==='mois') renderMonth();
-  toast('✓ Événement ajouté');
-  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
-}
-async function retirerEvenementJour(evId){
-  const dateStr = S.editingDateEvent;
-  if(!S.events[dateStr]) return;
-  S.events[dateStr] = S.events[dateStr].filter(id => id !== evId);
-  if(S.events[dateStr].length === 0) delete S.events[dateStr];
-  persist();
-  openEventModal(dateStr);
-  renderWeek();
-  if(S.view==='mois') renderMonth();
-  toast('✓ Événement retiré');
+  closeModal('mEvent');
+  refreshActiveView();
+  const typeLabel = S.eventTypes.find(t=>t.id===typeId)?.label || '';
+  toast(`✓ ${typeLabel} appliqué du ${fmtFR(new Date(dateDebut+'T12:00'),{day:'numeric',month:'short'})} au ${fmtFR(new Date(dateFin+'T12:00'),{day:'numeric',month:'short'})}`);
   api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
 }
 
