@@ -1594,7 +1594,7 @@ function renderWeek(){
     if(evDuJour.length){
       const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
       if(premierType){
-        headStyle=`background:${premierType.color}22;border-bottom:2.5px solid ${premierType.color};color:${premierType.color};`;
+        headStyle=`background:${premierType.color};color:#fff;`;
         evLabel=`<div style="font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;margin:0 auto;">${premierType.label}</div>`;
       }
     }
@@ -1741,13 +1741,13 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     if(evDuJour.length){
       const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
       if(premierType){
-        dateCellStyle=`background:${premierType.color}22;border-left:3px solid ${premierType.color};color:${premierType.color};font-weight:700;`;
+        dateCellStyle=`background:${premierType.color};color:#fff;font-weight:700;`;
         evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;">· ${premierType.label}</span>`;
       }
     }
     tb+=`<tr><td class="date-td${weCls}" style="${dateCellStyle}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>`;
+      `<span style="font-size:10px;${evDuJour.length?'color:rgba(255,255,255,.85);':'color:var(--muted);'}margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
@@ -2263,8 +2263,6 @@ function ajouterTypeEvenement(){
 function supprimerTypeEvenement(idx){
   const ev = S.eventTypes[idx];
   if(!ev) return;
-  const utilise = (S.events||[]).some(e => e.typeId === ev.id);
-  if(utilise && !confirm(`"${ev.label}" est utilisé sur au moins une période du planning. Le supprimer retirera aussi ces colorations. Continuer ?`)) return;
   S.eventTypes.splice(idx,1);
   S.events = (S.events||[]).filter(e => e.typeId !== ev.id);
   persist();
@@ -2345,7 +2343,6 @@ function renderEvListeExistants(){
   el.innerHTML=h;
 }
 async function supprimerEvenement(evId){
-  if(!confirm('Supprimer cette période colorée ?')) return;
   S.events = (S.events||[]).filter(e=>e.id!==evId);
   persist();
   renderEvListeExistants();
