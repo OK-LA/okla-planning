@@ -938,6 +938,7 @@ const S={
   eventTypes:lsGet('eventTypes',[
     {id:'ferie',  label:'Jour férié chômé', color:'#DC2626'},
     {id:'soldes', label:'Période de soldes', color:'#F59E0B'},
+    {id:'vacances', label:'Vacances scolaires', color:'#8B5CF6'},
   ]),
   // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
   events:(Array.isArray(lsGet('events',[]))?lsGet('events',[]):[]),
@@ -1022,6 +1023,12 @@ async function loadAll(){
     if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
     if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
     if(r.events&&Array.isArray(r.events)) {S.events=r.events; lsSet('events',r.events);}
+    // Migration : garantir la présence du type "Vacances scolaires" même sur une config existante
+    if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
+    if(!S.eventTypes.some(t=>t.id==='vacances')){
+      S.eventTypes.push({id:'vacances', label:'Vacances scolaires', color:'#8B5CF6'});
+      lsSet('eventTypes', S.eventTypes);
+    }
     // Initialiser planning vide si pas de données
     if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
     // Générer planning par défaut pour les employés si vide
@@ -1617,31 +1624,36 @@ function renderWeek(){
       tb+='</tr>';
     });
 
-    // Ligne renforts (employés d'autres magasins venus en remplacement sur ce site)
-    const aDesRenforts = (() => {
-      for(let i=0;i<7;i++){
-        const d=addDays(mon,i);
-        const renforts=S.employees.filter(e=>{
-          const sh=S.planning[`${e.id}_${fmt(d)}`];
+    // Lignes renforts : un employé venu d'un autre magasin apparaît comme une ligne à part entière,
+    // visible uniquement les jours où il est effectivement en remplacement sur CE site.
+    const renfortsIds=[...new Set(
+      Array.from({length:7},(_,i)=>fmt(addDays(mon,i))).flatMap(dStr=>
+        S.employees.filter(e=>{
+          const sh=S.planning[`${e.id}_${dStr}`];
           return sh&&sh.type==='remplacement'&&sh.site===site;
-        });
-        if(renforts.length) return true;
-      }
-      return false;
-    })();
-    if(aDesRenforts){
-      tb += `<tr class="renfort-row"><td style="font-size:10px;color:#0EA5E9;font-weight:600;padding-left:12px;">↔ Renforts ${site}</td>`;
+        }).map(e=>e.id)
+      )
+    )];
+    renfortsIds.forEach(rId=>{
+      const remp=S.employees.find(e=>e.id===rId);if(!remp)return;
+      tb+=`<tr style="background:#EFF6FF;"><td><div class="emp-cell">
+        <div class="avatar" style="background:${avc(remp.id)}">${ini(remp.name)}</div>
+        <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${remp.name.split(' ')[0]} <span style="font-size:9px;font-weight:700;color:#0EA5E9;">↔ Renfort</span></div>
+        <div style="font-size:10px;color:var(--muted)">Habituellement ${remp.site}</div></div>
+      </div></td>`;
       for(let i=0;i<7;i++){
-        const d=addDays(mon,i);
-        const renforts=S.employees.filter(e=>{
-          const sh=S.planning[`${e.id}_${fmt(d)}`];
-          return sh&&sh.type==='remplacement'&&sh.site===site;
-        });
-        const noms=renforts.map(e=>e.name.split(' ')[0]).join(', ');
-        tb+=`<td style="font-size:10px;color:#0EA5E9;font-weight:600;">${noms||''}</td>`;
+        const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
+        const isW=d.getDay()===0;
+        const dStr=fmt(d);
+        const sh=S.planning[`${rId}_${dStr}`];
+        const enRenfortIci = sh&&sh.type==='remplacement'&&sh.site===site;
+        const cell = enRenfortIci
+          ? `<div class="sb" style="background:${SC[site]?.color||'#888'};border-color:${SC[site]?.color||'#888'};" onclick="openShiftMod('${rId}','${dStr}')"><span style="font-size:8px;font-weight:700;color:#fff;">${remp.name.split(' ')[0]}</span></div>`
+          : `<div class="sb empty" style="opacity:.25;" onclick="openShiftMod('${rId}','${dStr}')"></div>`;
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
       }
       tb+='</tr>';
-    }
+    });
 
     // Ligne effectif par site
     const minStaff = S.params.minStaff?.[site] || 1;
