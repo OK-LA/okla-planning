@@ -2627,16 +2627,7 @@ async function importPlanningReel(){
   persist();
   refreshActiveView();
   toast(`✓ Planning importé : ${applied} jour(s) appliqué(s)${skipped?`, ${skipped} ignoré(s) (code inconnu)`:''}`);
-
-  // 3. Synchroniser avec Google Sheet (un appel par entrée modifiée, en tâche de fond)
-  const entries = Object.entries(PLANNING_IMPORT_DATA);
-  for(const [key, val] of entries){
-    const parts = key.split('_');
-    const empId = codeToId[parts[0]];
-    if(!empId) continue;
-    await api('updateShift', { empId, dateStr: parts[1], type: val.type, site: val.site, note: val.note||'', sendEmail:false });
-  }
-  toast('✓ Synchronisation Google Sheet terminée');
+  // Sync Google Sheet non disponible en raison des restrictions CORS (GitHub Pages → Apps Script)
 }
 
 function saveScriptUrl(){
