@@ -1451,7 +1451,7 @@ function renderEmpMagasin(){
   for(let i=0;i<7;i++){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0;
-    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':'color:#1A1917;'}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+    th+=`<th style="${isT?'background:#EFF6FF;':''}color:#1A1917;">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
   }
   th+='</tr>';
 
@@ -1862,13 +1862,13 @@ function renderWeek(){
     const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
     const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
-    let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':'color:#1A1917;';
+    let headStyle = isT?'background:#EFF6FF;':'';
     let evLabel='';
     if(evAutres.length){
       const premierType=S.eventTypes.find(et=>et.id===evAutres[0].typeId);
       if(premierType){
-        headStyle=`background:${premierType.color};color:#fff;`;
-        evLabel=`<div style="font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;margin:0 auto;">${premierType.label}</div>`;
+        headStyle=`background:${premierType.color};`;
+        evLabel=`<div style="font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;margin:0 auto;color:#fff;">${premierType.label}</div>`;
       }
     }
     // Colonne vacances
@@ -1879,7 +1879,8 @@ function renderWeek(){
     } else if(vacSco){
       vacStyle=`background:#8B5CF6;color:#fff;`;vacLabel=`<div style="font-size:7px;font-weight:700;">Vac.</div>`;
     }
-    th+=`<th style="${headStyle}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span>${evLabel}</th>`;
+    // La date reste toujours en noir, quelle que soit la couleur de fond de la cellule (aujourd'hui, événement...)
+    th+=`<th style="${headStyle}"><span style="color:#1A1917;">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></span>${evLabel}</th>`;
     th+=`<th style="width:18px;min-width:18px;max-width:18px;padding:2px 0;text-align:center;${vacStyle}" title="${evVac.length?(S.eventTypes.find(et=>et.id===evVac[0].typeId)||{label:'Vacances'}).label:vacSco?'Vacances scolaires':''}">${vacLabel}</th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
@@ -1896,8 +1897,12 @@ function renderWeek(){
       const c = SC[site] || {color:'#888'};
       tb += `<tr><td colspan="15" style="background:${c.color}14;border-left:3px solid ${c.color};padding:5px 10px;font-size:11px;font-weight:700;color:${c.color};">${site}</td></tr>`;
     }
-    empsDeCSite.forEach(emp=>{
+    empsDeCSite.forEach((emp,idxSite)=>{
       tb+=`<tr><td><div class="emp-cell">
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <button class="btn btn-sm" title="Monter" ${idxSite===0?'disabled':''} onclick="moveEmpInSite('${emp.id}',-1)" style="padding:1px 4px;line-height:1;font-size:9px;${idxSite===0?'opacity:.25;cursor:default;':''}">▲</button>
+          <button class="btn btn-sm" title="Descendre" ${idxSite===empsDeCSite.length-1?'disabled':''} onclick="moveEmpInSite('${emp.id}',1)" style="padding:1px 4px;line-height:1;font-size:9px;${idxSite===empsDeCSite.length-1?'opacity:.25;cursor:default;':''}">▼</button>
+        </div>
         <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
         <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${emp.name.split(' ')[0]}</div>
         <div style="font-size:10px;color:var(--muted)">${multiSite?emp.site:TYPES.find(t=>t.key===emp.slot)?.info||emp.slot}</div></div>
@@ -2050,21 +2055,22 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
     const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
-    let dateCellStyle = isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':'';
+    let dateCellStyle = isT?'background:#EFF6FF;font-weight:700;':'';
     let evLabel='';
     if(evAutres.length){
       const premierType=S.eventTypes.find(et=>et.id===evAutres[0].typeId);
       if(premierType){
-        dateCellStyle=`background:${premierType.color};color:#fff;font-weight:700;`;
-        evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;">· ${premierType.label}</span>`;
+        dateCellStyle=`background:${premierType.color};font-weight:700;`;
+        evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;color:#fff;">· ${premierType.label}</span>`;
       }
     }
     let vacColStyle='background:transparent;';
     if(evVac.length){const tv=S.eventTypes.find(et=>et.id===evVac[0].typeId);if(tv)vacColStyle=`background:${tv.color};`;}
     else if(vacSco){vacColStyle=`background:#8B5CF6;`;}
+    // La date reste toujours en noir, quelle que soit la couleur de fond de la cellule (aujourd'hui, événement...)
     tb+=`<tr><td class="date-td${weCls}" style="${dateCellStyle}">` +
-      `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;${evAutres.length?'color:rgba(255,255,255,.85);':'color:var(--muted);'}margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>` +
+      `<span style="font-size:13px;font-weight:600;color:#1A1917;">${String(d.getDate()).padStart(2,'0')}</span>` +
+      `<span style="font-size:10px;color:#1A1917;margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>` +
       `<td style="width:14px;min-width:14px;padding:0;${vacColStyle}border-right:1px solid var(--border);"></td>`;
     let count=0;
     emps.forEach(emp=>{
@@ -2510,6 +2516,23 @@ function moveEmp(empId,dir){
   const newIdx=idx+dir;
   if(idx<0||newIdx<0||newIdx>=S.employees.length) return;
   [S.employees[idx],S.employees[newIdx]]=[S.employees[newIdx],S.employees[idx]];
+  persist();
+  renderEmpList();
+  buildSelects();
+  refreshActiveView();
+}
+// Variante utilisée depuis le planning (vue Semaine) : les employés y sont groupés par magasin,
+// donc on échange la position avec le voisin du MÊME magasin dans S.employees (pas le voisin brut
+// du tableau, qui pourrait appartenir à un autre magasin et donc ne rien changer visuellement).
+function moveEmpInSite(empId,dir){
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  const siteIndices=S.employees.map((e,i)=>e.site===emp.site?i:-1).filter(i=>i>=0);
+  const pos=siteIndices.indexOf(S.employees.indexOf(emp));
+  const newPos=pos+dir;
+  if(newPos<0||newPos>=siteIndices.length) return;
+  const idxA=siteIndices[pos],idxB=siteIndices[newPos];
+  [S.employees[idxA],S.employees[idxB]]=[S.employees[idxB],S.employees[idxA]];
   persist();
   renderEmpList();
   buildSelects();
