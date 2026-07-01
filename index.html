@@ -1689,16 +1689,29 @@ function renderWeek(){
     const isW=d.getDay()===0;
     const dStr=fmt(d);
     const evDuJour=getEvenementsDuJour(dStr);
+    // Séparer événements vacances vs autres
+    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
+    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.label.toLowerCase().includes('vacance');});
+    const vacSco=isDateVacances(dStr);
     let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':'';
     let evLabel='';
-    if(evDuJour.length){
-      const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
+    if(evAutres.length){
+      const premierType=S.eventTypes.find(et=>et.id===evAutres[0].typeId);
       if(premierType){
         headStyle=`background:${premierType.color};color:#fff;`;
         evLabel=`<div style="font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;margin:0 auto;">${premierType.label}</div>`;
       }
     }
+    // Colonne vacances
+    let vacStyle='', vacLabel='';
+    if(evVac.length){
+      const tv=S.eventTypes.find(et=>et.id===evVac[0].typeId);
+      if(tv){vacStyle=`background:${tv.color};color:#fff;`;vacLabel=`<div style="font-size:7px;font-weight:700;">Vac.</div>`;}
+    } else if(vacSco){
+      vacStyle=`background:#8B5CF6;color:#fff;`;vacLabel=`<div style="font-size:7px;font-weight:700;">Vac.</div>`;
+    }
     th+=`<th style="${headStyle}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span>${evLabel}</th>`;
+    th+=`<th style="width:18px;min-width:18px;max-width:18px;padding:2px 0;text-align:center;${vacStyle}" title="${evVac.length?(S.eventTypes.find(et=>et.id===evVac[0].typeId)||{label:'Vacances'}).label:vacSco?'Vacances scolaires':''}">${vacLabel}</th>`;
   }
   document.getElementById('tH').innerHTML=th+'</tr>';
 
@@ -1712,7 +1725,7 @@ function renderWeek(){
     if (multiSite) {
       // Ligne séparatrice de site
       const c = SC[site] || {color:'#888'};
-      tb += `<tr><td colspan="8" style="background:${c.color}14;border-left:3px solid ${c.color};padding:5px 10px;font-size:11px;font-weight:700;color:${c.color};">${site}</td></tr>`;
+      tb += `<tr><td colspan="15" style="background:${c.color}14;border-left:3px solid ${c.color};padding:5px 10px;font-size:11px;font-weight:700;color:${c.color};">${site}</td></tr>`;
     }
     empsDeCSite.forEach(emp=>{
       tb+=`<tr><td><div class="emp-cell">
@@ -1734,6 +1747,13 @@ function renderWeek(){
           ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
           :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
+        // Cellule vacances (colonne étroite après chaque jour)
+        const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
+        const vacScoJour=isDateVacances(dStr);
+        let vacCellStyle='background:transparent;';
+        if(evVacJour.length){const tv=S.eventTypes.find(et=>et.id===evVacJour[0].typeId);if(tv)vacCellStyle=`background:${tv.color};`;}
+        else if(vacScoJour){vacCellStyle=`background:#8B5CF6;`;}
+        tb+=`<td style="width:6px;min-width:6px;padding:0;${vacCellStyle}border:none;"></td>`;
       }
       tb+='</tr>';
     });
@@ -1824,7 +1844,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     </div>`;
   }
 
-  let th=`<thead><tr><th class="date-th">Date</th>`;
+  let th=`<thead><tr><th class="date-th">Date</th><th style="width:14px;min-width:14px;padding:2px 0;font-size:8px;color:var(--muted);text-align:center;" title="Vacances">🏖</th>`;
   emps.forEach(emp=>{
     th+=`<th class="emp-th">`+
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
@@ -1839,18 +1859,27 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const weCls=isW?' we':'';
     const dStr=fmt(d);
     const evDuJour=getEvenementsDuJour(dStr);
+    // Séparer événements vacances vs autres pour la colonne date
+    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
+    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.label.toLowerCase().includes('vacance');});
+    const vacSco=isDateVacances(dStr);
     let dateCellStyle = isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':'';
     let evLabel='';
-    if(evDuJour.length){
-      const premierType=S.eventTypes.find(et=>et.id===evDuJour[0].typeId);
+    if(evAutres.length){
+      const premierType=S.eventTypes.find(et=>et.id===evAutres[0].typeId);
       if(premierType){
         dateCellStyle=`background:${premierType.color};color:#fff;font-weight:700;`;
         evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;">· ${premierType.label}</span>`;
       }
     }
+    // Cellule vacances
+    let vacColStyle='background:transparent;';
+    if(evVac.length){const tv=S.eventTypes.find(et=>et.id===evVac[0].typeId);if(tv)vacColStyle=`background:${tv.color};`;}
+    else if(vacSco){vacColStyle=`background:#8B5CF6;`;}
     tb+=`<tr><td class="date-td${weCls}" style="${dateCellStyle}">` +
       `<span style="font-size:13px;font-weight:600;">${String(d.getDate()).padStart(2,'0')}</span>` +
-      `<span style="font-size:10px;${evDuJour.length?'color:rgba(255,255,255,.85);':'color:var(--muted);'}margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>`;
+      `<span style="font-size:10px;${evAutres.length?'color:rgba(255,255,255,.85);':'color:var(--muted);'}margin-left:4px;">${DOW[d.getDay()]}</span>${evLabel}</td>` +
+      `<td style="width:14px;min-width:14px;padding:0;${vacColStyle}border-right:1px solid var(--border);"></td>`;
     let count=0;
     emps.forEach(emp=>{
       const sh=S.planning[`${emp.id}_${fmt(d)}`];
@@ -1865,7 +1894,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const cls=count>=minStaff?'staff-ok':'staff-warn';
     tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
   });
-  tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td>`;
+  tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td><td></td>`;
   emps.forEach(()=>tb+=`<td></td>`);
   tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
 
