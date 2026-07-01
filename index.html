@@ -1087,9 +1087,13 @@ async function api(action,data={}){
       return j;
     }
     // Pour les POST
+    // Content-Type volontairement text/plain (et non application/json) : ce dernier est un header
+    // "non simple" qui déclenche un preflight OPTIONS que Google Apps Script ne gère pas, bloquant
+    // toute la requête côté navigateur. En text/plain, pas de preflight, et le script côté serveur
+    // parse déjà le corps en JSON indépendamment du Content-Type déclaré (vérifié en conditions réelles).
     const r=await fetch(S.scriptUrl,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify({action,...data})
     });
     const j=await r.json();
@@ -1126,26 +1130,26 @@ function restoreSession(){
   }
 }
 
-// Charger toutes les données depuis le Sheet
-// force=false (par défaut, ouverture normale de l'app) : si des données locales existent déjà,
-// on ne relance PAS le fetch — le Sheet est une source obsolète tant que les POST sont bloqués
-// par CORS, et l'écraser à chaque F5/réouverture effaçait silencieusement les modifs du gestionnaire.
-// force=true (bouton "Actualiser" ou setup initial) : on va bien chercher les données du Sheet.
+// Charger toutes les données depuis le Sheet.
+// Maintenant que les POST atteignent réellement le Sheet (fix CORS via Content-Type text/plain),
+// on resynchronise à chaque ouverture/rafraîchissement pour que les modifs faites depuis un autre
+// appareil/gestionnaire apparaissent (enregistrement partagé, pas seulement local).
+// Garde-fou conservé : si le Sheet renvoie une liste plus courte que la version locale (incident
+// réseau ponctuel, sauvegarde qui aurait échoué en silence...), on garde la version locale plutôt
+// que d'effacer des données récentes.
+function keepIfNotSmaller(local,remote){
+  return Array.isArray(remote) && remote.length>=(local?.length||0) ? remote : local;
+}
 async function loadAll(force=false){
   if(!S.scriptUrl){
     hideLoading();
     showScr('sSetup');
     return;
   }
-  if(S.employees.length>0 && !force){
-    setLoadingText('Données locales chargées ✓');
-    setTimeout(()=>{hideLoading();restoreSession();},300);
-    return;
-  }
   setLoadingText('Connexion à Google Sheets...');
   const r=await api('getAll');
   if(r&&r.ok){
-    if(r.employees)  {S.employees=r.employees;  lsSet('employees',r.employees);}
+    if(r.employees)  {S.employees=keepIfNotSmaller(S.employees,r.employees);  lsSet('employees',S.employees);}
     // Résoudre les repos fixes par défaut (code → id réel), uniquement si pas déjà configuré
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
       S.params.reposFixe = {};
@@ -1155,7 +1159,7 @@ async function loadAll(force=false){
       });
       persist();
     }
-    // Ne remplacer le planning local QUE si le Sheet en a plus (évite d'écraser les modifs locales quand CORS bloque les saves)
+    // Ne remplacer le planning local QUE si le Sheet en a plus (évite d'écraser les modifs locales en cas d'échec silencieux)
     if(r.planning){
       const nbSheet = Object.keys(r.planning).length;
       const nbLocal = Object.keys(S.planning||{}).length;
@@ -1164,8 +1168,8 @@ async function loadAll(force=false){
       }
       // Sinon on garde le planning local qui est plus complet
     }
-    if(r.requests)   {S.requests=r.requests;    lsSet('requests',r.requests);}
-    if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
+    if(r.requests)   {S.requests=keepIfNotSmaller(S.requests,r.requests);    lsSet('requests',S.requests);}
+    if(r.absences)   {S.absences=keepIfNotSmaller(S.absences,r.absences);    lsSet('absences',S.absences);}
     if(r.params&&r.params!==null) {
       // Fusionner : garder les clés locales absentes du Sheet (verrou, typeColors, reposFixe...)
       S.params = Object.assign({}, r.params, {
@@ -1175,8 +1179,8 @@ async function loadAll(force=false){
       });
       lsSet('params',S.params);
     }
-    if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
-    if(r.events&&Array.isArray(r.events)) {S.events=r.events; lsSet('events',r.events);}
+    if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=keepIfNotSmaller(S.eventTypes,r.eventTypes); lsSet('eventTypes',S.eventTypes);}
+    if(r.events&&Array.isArray(r.events)) {S.events=keepIfNotSmaller(S.events,r.events); lsSet('events',S.events);}
     if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
     if(!S.params.typeColors) S.params.typeColors={};
     // Initialiser planning vide si pas de données
@@ -1447,7 +1451,7 @@ function renderEmpMagasin(){
   for(let i=0;i<7;i++){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const isW=d.getDay()===0;
-    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':''}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
+    th+=`<th style="${isT?'color:#3B82F6;background:#EFF6FF;':'color:#1A1917;'}">${JOURS_C[i]}<br><span style="font-weight:400">${d.getDate()}/${d.getMonth()+1}</span></th>`;
   }
   th+='</tr>';
 
@@ -1465,6 +1469,33 @@ function renderEmpMagasin(){
       const cell=type==='off'
         ?`<div class="sb empty"></div>`
         :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site2).color};border-color:${getColor(type,site2).color};"></div>`;
+      tb+=`<td>${cell}</td>`;
+    }
+    tb+='</tr>';
+  });
+
+  // Ligne renfort : employé(s) venu(s) d'un autre magasin, visible les jours où ils travaillent effectivement ici.
+  const renfortsIds=[...new Set(
+    Array.from({length:7},(_,i)=>fmt(addDays(mon,i))).flatMap(dStr=>
+      S.employees.filter(e=>{
+        const sh=S.planning[`${e.id}_${dStr}`];
+        return sh&&sh.type==='remplacement'&&sh.site===emp.site;
+      }).map(e=>e.id)
+    )
+  )];
+  renfortsIds.forEach(rId=>{
+    const remp=S.employees.find(e=>e.id===rId);if(!remp)return;
+    tb+=`<tr style="background:#EFF6FF;"><td><div class="emp-cell">
+      <div class="avatar" style="background:#0EA5E9;">↔</div>
+      <div style="font-weight:600;font-size:12px;white-space:nowrap;color:#0EA5E9;">↔ Renfort</div>
+    </div></td>`;
+    for(let i=0;i<7;i++){
+      const d=addDays(mon,i);const dStr=fmt(d);
+      const sh=S.planning[`${rId}_${dStr}`];
+      const enRenfortIci=sh&&sh.type==='remplacement'&&sh.site===emp.site;
+      const cell=enRenfortIci
+        ?`<div class="sb" style="background:${SC[emp.site]?.color||'#888'};border-color:${SC[emp.site]?.color||'#888'};"><span style="font-size:8px;font-weight:700;color:#fff;">${remp.name.split(' ')[0]}</span></div>`
+        :`<div class="sb empty" style="opacity:.25;"></div>`;
       tb+=`<td>${cell}</td>`;
     }
     tb+='</tr>';
@@ -1831,7 +1862,7 @@ function renderWeek(){
     const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
     const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
-    let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':'';
+    let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':'color:#1A1917;';
     let evLabel='';
     if(evAutres.length){
       const premierType=S.eventTypes.find(et=>et.id===evAutres[0].typeId);
@@ -1909,8 +1940,8 @@ function renderWeek(){
     renfortsIds.forEach(rId=>{
       const remp=S.employees.find(e=>e.id===rId);if(!remp)return;
       tb+=`<tr style="background:#EFF6FF;"><td><div class="emp-cell">
-        <div class="avatar" style="background:${avc(remp.id)}">${ini(remp.name)}</div>
-        <div><div style="font-weight:600;font-size:12px;white-space:nowrap">${remp.name.split(' ')[0]} <span style="font-size:9px;font-weight:700;color:#0EA5E9;">↔ Renfort</span></div>
+        <div class="avatar" style="background:#0EA5E9;">↔</div>
+        <div><div style="font-weight:600;font-size:12px;white-space:nowrap;color:#0EA5E9;">↔ Renfort</div>
         <div style="font-size:10px;color:var(--muted)">Habituellement ${remp.site}</div></div>
       </div></td>`;
       for(let i=0;i<7;i++){
@@ -2004,9 +2035,8 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
   // Colonnes renforts
   renforts.forEach(remp=>{
     th+=`<th class="emp-th" style="background:#EFF6FF;">`+
-      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(remp.id)};margin:0 auto 2px;">${ini(remp.name)}</div>`+
-      `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">${remp.name.split(' ')[0]}</div>`+
-      `<div style="font-size:8px;color:var(--muted);">↔ Renfort</div></th>`;
+      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:#0EA5E9;margin:0 auto 2px;">↔</div>`+
+      `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">↔ Renfort</div></th>`;
   });
   th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
 
@@ -2061,7 +2091,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       const enRenfortIci=sh&&sh.type==='remplacement'&&sh.site===site;
       let cell='';
       if(enRenfortIci){
-        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${remp.id}','${dStr}')" title="${remp.name} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;">↔</span></div>`;
+        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${remp.id}','${dStr}')" title="${remp.name} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 1px;">${remp.name.split(' ')[0]}</span></div>`;
         count++;
       } else {
         cell=`<div class="mblock empty" style="opacity:.2;"></div>`;
@@ -2473,6 +2503,18 @@ function renderAbsList(){
 }
 
 // ── Employés ──
+// Change la position d'un employé dans S.employees (dir=-1 monter, dir=+1 descendre).
+// L'ordre du tableau détermine l'ordre d'affichage dans les plannings gestionnaire (semaine/mois par magasin).
+function moveEmp(empId,dir){
+  const idx=S.employees.findIndex(e=>e.id===empId);
+  const newIdx=idx+dir;
+  if(idx<0||newIdx<0||newIdx>=S.employees.length) return;
+  [S.employees[idx],S.employees[newIdx]]=[S.employees[newIdx],S.employees[idx]];
+  persist();
+  renderEmpList();
+  buildSelects();
+  refreshActiveView();
+}
 function renderEmpList(){
   const today=fmt(new Date());
   document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>{
@@ -2483,6 +2525,10 @@ function renderEmpList(){
       : '<span style="color:#059669;">CDI</span>';
     const reposLabel = S.params?.reposFixe?.[emp.id] ? ['','Lun','Mar','Mer','Jeu','Ven','Sam'][parseInt(S.params.reposFixe[emp.id])]||'—' : '—';
     return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <button class="btn btn-sm" title="Monter" ${i===0?'disabled':''} onclick="moveEmp('${emp.id}',-1)" style="padding:2px 6px;line-height:1;${i===0?'opacity:.3;cursor:default;':''}">▲</button>
+        <button class="btn btn-sm" title="Descendre" ${i===S.employees.length-1?'disabled':''} onclick="moveEmp('${emp.id}',1)" style="padding:2px 6px;line-height:1;${i===S.employees.length-1?'opacity:.3;cursor:default;':''}">▼</button>
+      </div>
       <div class="avatar" style="background:${avc(emp.id)};cursor:pointer;" onclick="openFicheEmp('${emp.id}')">${ini(emp.name)}</div>
       <div style="flex:1;cursor:pointer;" onclick="openFicheEmp('${emp.id}')">
         <div style="font-weight:600;font-size:13px;">${emp.name}</div>
@@ -3554,11 +3600,8 @@ function saveReposFixe() {
   toast('✓ Jours de repos fixes enregistrés');
 }
 
-// Actualiser les données depuis Google Sheets (import manuel explicite)
-// Attention : le Sheet peut être obsolète (les sauvegardes POST sont bloquées par CORS),
-// donc ceci peut écraser des modifications locales récentes — d'où la confirmation.
+// Forcer une resynchronisation immédiate avec Google Sheets (au cas où l'auto-sync au chargement n'a pas suffi)
 async function refreshData(){
-  if(!confirm('Cela va recharger les données depuis Google Sheets et peut écraser des modifications locales récentes non synchronisées. Continuer ?')) return;
   setSyncing(true);
   setLoadingText('Actualisation...');
   document.getElementById('loadingScreen').style.display='flex';
