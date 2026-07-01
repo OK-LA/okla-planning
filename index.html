@@ -1887,8 +1887,16 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       let cell='';
       if(isHorsContrat(emp,dStr)){
         cell=`<div class="mblock" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 3px,#E5E7EB 3px,#E5E7EB 6px);cursor:not-allowed;" title="Hors contrat"></div>`;
-      } else if(type==='off') cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
-      else{const c=getColor(type,site2);cell=`<div class="mblock" style="background:${c.color};" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;count++;}
+      } else if(type==='off'){
+        cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+      } else {
+        const c=getColor(type,site2);
+        const remLabel=type==='remplacement'
+          ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${site2}</span>`
+          :'';
+        cell=`<div class="mblock" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
+        count++;
+      }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
     });
     const cls=count>=minStaff?'staff-ok':'staff-warn';
