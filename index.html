@@ -3679,14 +3679,24 @@ window.addEventListener('load', () => {
 // relancée depuis l'arrière-plan sans rechargement complet de la page — window.load ne se redéclenche
 // pas dans ce cas, donc sans ceci deux appareils ouverts en même temps ne se voient jamais l'un l'autre).
 let lastVisibilitySync = Date.now();
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
+function resyncIfPossible(){
   if (!S.role || !S.scriptUrl) return;
-  // Anti-rebond : pas plus d'une resync toutes les 5 secondes
-  if (Date.now() - lastVisibilitySync < 5000) return;
+  // On évite de resynchroniser en plein milieu d'une saisie (une modale est ouverte)
+  if (document.querySelector('.modal-overlay.open')) return;
   lastVisibilitySync = Date.now();
   loadAll();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  // Anti-rebond : pas plus d'une resync toutes les 5 secondes
+  if (Date.now() - lastVisibilitySync < 5000) return;
+  resyncIfPossible();
 });
+// Sondage périodique : deux appareils ouverts en continu (sans jamais changer d'onglet ni recharger)
+// ne se resynchroniseraient sinon jamais entre eux — on vérifie donc aussi toutes les 30 secondes.
+setInterval(() => {
+  if (document.visibilityState === 'visible') resyncIfPossible();
+}, 30000);
 </script>
 <!-- BARRE SÉLECTION MULTIPLE -->
 <div id="selBar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1E293B;color:#fff;padding:12px 20px;z-index:9999;display:none;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 -4px 20px rgba(0,0,0,.25);">
