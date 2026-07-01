@@ -2268,15 +2268,16 @@ function renderEmpList(){
     const typeC = emp.dateFin ? (emp.typeContrat==='cdd'?'CDD':'Autre') : 'CDI';
     const contratLabel = emp.dateFin
       ? `${typeC} · Fin : <strong>${emp.dateFin}</strong>${expire?' <span style="color:#DC2626;font-weight:700;">⚠ EXPIRÉ</span>':''}`
-      : 'CDI';
+      : '<span style="color:#059669;">CDI</span>';
     const reposLabel = S.params?.reposFixe?.[emp.id] ? ['','Lun','Mar','Mer','Jeu','Ven','Sam'][parseInt(S.params.reposFixe[emp.id])]||'—' : '—';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}cursor:pointer;" onclick="openFicheEmp('${emp.id}')">
-      <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:13px;color:var(--primary);">${emp.name} <span style="font-size:10px;font-weight:400;color:var(--muted);">— cliquer pour modifier</span></div>
+    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
+      <div class="avatar" style="background:${avc(emp.id)};cursor:pointer;" onclick="openFicheEmp('${emp.id}')">${ini(emp.name)}</div>
+      <div style="flex:1;cursor:pointer;" onclick="openFicheEmp('${emp.id}')">
+        <div style="font-weight:600;font-size:13px;">${emp.name}</div>
         <div style="font-size:11px;color:var(--muted)">${emp.email||'—'} · ${emp.tel||'—'} · Code : <strong>${emp.code}</strong></div>
         <div style="font-size:11px;color:var(--muted)">Contrat : ${contratLabel} · Repos fixe : <strong>${reposLabel}</strong></div>
       </div>
+      <button class="btn btn-sm" onclick="openFicheEmp('${emp.id}')" style="background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE;white-space:nowrap;">✏️ Modifier</button>
       ${sPill(emp.site)}
     </div>`;
   }).join('');
