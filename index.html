@@ -1159,14 +1159,15 @@ async function loadAll(force=false){
       });
       persist();
     }
-    // Ne remplacer le planning local QUE si le Sheet en a plus (évite d'écraser les modifs locales en cas d'échec silencieux)
-    if(r.planning){
-      const nbSheet = Object.keys(r.planning).length;
-      const nbLocal = Object.keys(S.planning||{}).length;
-      if(nbSheet >= nbLocal){
-        S.planning=r.planning; lsSet('planning',r.planning);
-      }
-      // Sinon on garde le planning local qui est plus complet
+    // Fusion case par case (et non un remplacement global) : le Sheet ne contient parfois que les
+    // cellules explicitement modifiées (pas tout le planning pré-rempli), donc comparer les totaux
+    // empêchait toute synchro dès qu'un autre appareil avait un planning local plus complet — même
+    // une seule case modifiée ailleurs n'était alors jamais adoptée. Ici, chaque case connue du Sheet
+    // écrase la version locale (dernière sauvegarde gagne), et les cases que le Sheet ne connaît pas
+    // (jamais synchronisées) gardent leur valeur locale au lieu d'être effacées.
+    if(r.planning && typeof r.planning==='object'){
+      S.planning = Object.assign({}, S.planning, r.planning);
+      lsSet('planning',S.planning);
     }
     if(r.requests)   {S.requests=keepIfNotSmaller(S.requests,r.requests);    lsSet('requests',S.requests);}
     if(r.absences)   {S.absences=keepIfNotSmaller(S.absences,r.absences);    lsSet('absences',S.absences);}
