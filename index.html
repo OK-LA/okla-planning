@@ -135,6 +135,7 @@ tbody tr:hover td{background:#FAFAF8;}
 .mblock:hover{transform:scale(1.12);filter:brightness(.88);}
 .mblock.empty{background:transparent;border:1px dashed #D1D5DB;}
 .mblock.empty:hover{border-color:#9CA3AF;}
+.sb.sel-active,.mblock.sel-active{outline:3px solid #F59E0B;outline-offset:2px;}
 .staff-row td{font-size:10px;font-weight:700;border-top:2px solid var(--border)!important;background:var(--bg)!important;}
 .staff-ok{color:#059669;}.staff-warn{color:#DC2626;}
 
@@ -504,6 +505,7 @@ tbody tr:hover td{background:#FAFAF8;}
           <button class="vbtn active" id="vSemBtn" onclick="setView('sem')">Semaine</button>
           <button class="vbtn" id="vMoisBtn" onclick="setView('mois')">Mois</button>
         </div>
+        <button id="btnSelMultiple" onclick="toggleSelectionMode()" style="background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">☐ Sélection multiple</button>
       </div>
       <div id="vSemaine">
         <!-- FILTRES -->
@@ -605,6 +607,18 @@ tbody tr:hover td{background:#FAFAF8;}
           <h3>Effectif minimum par magasin</h3>
           <div id="paramSites"></div>
           <button class="btn btn-primary btn-sm mt-10" onclick="saveParams()">✓ Enregistrer</button>
+        </div>
+        <div class="param-card" style="border:2px solid #FCA5A5;background:#FEF2F2;">
+          <h3 style="color:#DC2626;">🔒 Mode anti-erreur</h3>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Quand activé, toute modification du planning est bloquée. Utile pendant la saisie définitive ou le partage avec les salariés.</div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
+              <input type="checkbox" id="modeVerrou" style="width:auto;accent-color:#DC2626;" onchange="toggleModeVerrou(this.checked)">
+              <span id="modeVerrouLabel">Planning déverrouillé</span>
+            </label>
+            <button class="btn btn-sm" onclick="testEmailGestionnaire()" style="background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE;">📧 Tester email gestionnaire</button>
+          </div>
+          <div id="verrouStatut" style="margin-top:10px;font-size:12px;"></div>
         </div>
         <div class="param-card">
           <h3>Magasins & Sites</h3>
@@ -1117,10 +1131,26 @@ async function loadAll(){
       });
       persist();
     }
-    if(r.planning)   {S.planning=r.planning;    lsSet('planning',r.planning);}
+    // Ne remplacer le planning local QUE si le Sheet en a plus (évite d'écraser les modifs locales quand CORS bloque les saves)
+    if(r.planning){
+      const nbSheet = Object.keys(r.planning).length;
+      const nbLocal = Object.keys(S.planning||{}).length;
+      if(nbSheet >= nbLocal){
+        S.planning=r.planning; lsSet('planning',r.planning);
+      }
+      // Sinon on garde le planning local qui est plus complet
+    }
     if(r.requests)   {S.requests=r.requests;    lsSet('requests',r.requests);}
     if(r.absences)   {S.absences=r.absences;    lsSet('absences',r.absences);}
-    if(r.params&&r.params!==null) {S.params=r.params; lsSet('params',r.params);}
+    if(r.params&&r.params!==null) {
+      // Fusionner : garder les clés locales absentes du Sheet (verrou, typeColors, reposFixe...)
+      S.params = Object.assign({}, r.params, {
+        verrou: S.params.verrou,
+        typeColors: S.params.typeColors || r.params.typeColors || {},
+        reposFixe: S.params.reposFixe || r.params.reposFixe || {}
+      });
+      lsSet('params',S.params);
+    }
     if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=r.eventTypes; lsSet('eventTypes',r.eventTypes);}
     if(r.events&&Array.isArray(r.events)) {S.events=r.events; lsSet('events',r.events);}
     if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
@@ -1561,6 +1591,104 @@ function refreshActiveView() {
   else renderMonth();
 }
 
+// ══ SÉLECTION MULTIPLE ══
+let selCells = new Set(); // Set de clés "empId_dateStr"
+let selMode = false;
+
+function toggleSelectionMode(){
+  selMode = !selMode;
+  if(!selMode) annulerSelection();
+  else {
+    toast('Mode sélection activé — cliquez sur les cellules à modifier');
+    renderSelBar();
+  }
+}
+
+function toggleCellSelection(empId, dateStr){
+  // Bloquer si mode verrou
+  if(S.params?.verrou){toast('⛔ Planning verrouillé');return;}
+  const key = empId+'_'+dateStr;
+  if(selCells.has(key)) selCells.delete(key);
+  else selCells.add(key);
+  renderSelBar();
+  // Mettre à jour visuel de la cellule
+  const el = document.querySelector(`[data-sel="${key}"]`);
+  if(el){
+    if(selCells.has(key)) el.classList.add('sel-active');
+    else el.classList.remove('sel-active');
+  }
+}
+
+function renderSelBar(){
+  const bar = document.getElementById('selBar');
+  const countEl = document.getElementById('selCount');
+  const btns = document.getElementById('selTypeButtons');
+  if(!bar||!countEl||!btns) return;
+  if(selCells.size===0 && !selMode){bar.style.display='none';return;}
+  bar.style.display='flex';
+  countEl.textContent = selCells.size+' cellule(s) sélectionnée(s)';
+  // Boutons types
+  btns.innerHTML = TYPES.map(t=>{
+    const c = getColor(t.key, S.employees[0]?.site||'Ham');
+    return `<button onclick="appliquerSelectionType('${t.key}')" style="background:${c.color};color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">${t.label}</button>`;
+  }).join('');
+}
+
+async function appliquerSelectionType(type){
+  if(selCells.size===0){toast('Aucune cellule sélectionnée');return;}
+  const keys = [...selCells];
+  for(const key of keys){
+    const [empId, dateStr] = key.split('_');
+    const emp = S.employees.find(e=>e.id===empId);
+    if(!emp) continue;
+    S.planning[key] = {type, site:emp.site, note:''};
+    api('updateShift',{empId,dateStr,type,site:emp.site,note:'',sendEmail:false});
+  }
+  persist();
+  annulerSelection();
+  refreshActiveView();
+  toast(`✓ ${keys.length} cellule(s) mises à jour`);
+}
+
+function annulerSelection(){
+  selCells.clear();
+  selMode = false;
+  document.querySelectorAll('.sel-active').forEach(el=>el.classList.remove('sel-active'));
+  const bar = document.getElementById('selBar');
+  if(bar) bar.style.display='none';
+}
+
+// ══ MODE VERROU ══
+function toggleModeVerrou(checked){
+  S.params.verrou = checked;
+  persist();
+  const label = document.getElementById('modeVerrouLabel');
+  const statut = document.getElementById('verrouStatut');
+  if(label) label.textContent = checked ? '🔒 Planning verrouillé' : 'Planning déverrouillé';
+  if(statut) statut.innerHTML = checked
+    ? '<span style="color:#DC2626;font-weight:600;">⛔ Toute modification du planning est bloquée</span>'
+    : '<span style="color:#059669;">✓ Les modifications sont autorisées</span>';
+  toast(checked ? '🔒 Planning verrouillé' : '🔓 Planning déverrouillé');
+}
+
+async function testEmailGestionnaire(){
+  toast('📧 Envoi du mail de test...');
+  const r = await api('testMail', {});
+  toast(r&&r.ok ? '✓ Email envoyé à gwen.bruchet@ok-la.fr' : '⚠ Échec — vérifiez l\'URL du script');
+}
+
+function initVerrouUI(){
+  const cb = document.getElementById('modeVerrou');
+  const label = document.getElementById('modeVerrouLabel');
+  const statut = document.getElementById('verrouStatut');
+  if(!cb) return;
+  cb.checked = !!S.params?.verrou;
+  if(label) label.textContent = S.params?.verrou ? '🔒 Planning verrouillé' : 'Planning déverrouillé';
+  if(statut) statut.innerHTML = S.params?.verrou
+    ? '<span style="color:#DC2626;font-weight:600;">⛔ Toute modification du planning est bloquée</span>'
+    : '';
+}
+
 function toggleTousSites() {
   const sites = Object.keys(SC);
   if (S.filtresSites.length === sites.length) {
@@ -1744,8 +1872,8 @@ function renderWeek(){
         const cell=horsContrat
           ?`<div class="sb" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 4px,#E5E7EB 4px,#E5E7EB 8px);cursor:not-allowed;" title="Hors contrat"></div>`
           :type==='off'
-          ?`<div class="sb empty" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
-          :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
+          ?`<div class="sb empty${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
+          :`<div class="sb${type==='vip'?' vip':''}${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
         const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
@@ -1844,11 +1972,31 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     </div>`;
   }
 
+  // Trouver tous les renforts qui viennent sur CE site ce mois
+  const renfortsIds=[...new Set(
+    days.flatMap(d=>{
+      const dStr=fmt(d);
+      return S.employees.filter(e=>{
+        if(e.site===site) return false; // pas les employés du site lui-même
+        const sh=S.planning[`${e.id}_${dStr}`];
+        return sh&&sh.type==='remplacement'&&sh.site===site;
+      }).map(e=>e.id);
+    })
+  )];
+  const renforts=renfortsIds.map(id=>S.employees.find(e=>e.id===id)).filter(Boolean);
+
   let th=`<thead><tr><th class="date-th">Date</th><th style="width:14px;min-width:14px;padding:2px 0;font-size:8px;color:var(--muted);text-align:center;" title="Vacances">🏖</th>`;
   emps.forEach(emp=>{
     th+=`<th class="emp-th">`+
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
       `<div style="font-size:10px;white-space:nowrap;">${emp.name.split(' ')[0]}</div></th>`;
+  });
+  // Colonnes renforts
+  renforts.forEach(remp=>{
+    th+=`<th class="emp-th" style="background:#EFF6FF;">`+
+      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(remp.id)};margin:0 auto 2px;">${ini(remp.name)}</div>`+
+      `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">${remp.name.split(' ')[0]}</div>`+
+      `<div style="font-size:8px;color:var(--muted);">↔ Renfort</div></th>`;
   });
   th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
 
@@ -1859,7 +2007,6 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const weCls=isW?' we':'';
     const dStr=fmt(d);
     const evDuJour=getEvenementsDuJour(dStr);
-    // Séparer événements vacances vs autres pour la colonne date
     const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
     const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
@@ -1872,7 +2019,6 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
         evLabel=`<span style="font-size:9px;font-weight:700;margin-left:4px;">· ${premierType.label}</span>`;
       }
     }
-    // Cellule vacances
     let vacColStyle='background:transparent;';
     if(evVac.length){const tv=S.eventTypes.find(et=>et.id===evVac[0].typeId);if(tv)vacColStyle=`background:${tv.color};`;}
     else if(vacSco){vacColStyle=`background:#8B5CF6;`;}
@@ -1894,23 +2040,38 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
         const remLabel=type==='remplacement'
           ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${site2}</span>`
           :'';
-        cell=`<div class="mblock" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
+        cell=`<div class="mblock${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
         count++;
       }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
+    });
+    // Cellules renforts
+    renforts.forEach(remp=>{
+      const sh=S.planning[`${remp.id}_${dStr}`];
+      const enRenfortIci=sh&&sh.type==='remplacement'&&sh.site===site;
+      let cell='';
+      if(enRenfortIci){
+        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${remp.id}','${dStr}')" title="${remp.name} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;">↔</span></div>`;
+        count++;
+      } else {
+        cell=`<div class="mblock empty" style="opacity:.2;"></div>`;
+      }
+      tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);background:#F8FAFF;">${cell}</td>`;
     });
     const cls=count>=minStaff?'staff-ok':'staff-warn';
     tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
   });
   tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td><td></td>`;
   emps.forEach(()=>tb+=`<td></td>`);
+  renforts.forEach(()=>tb+=`<td></td>`);
   tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
 
   return `<div style="margin-bottom:22px;">
     <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
       <span style="font-size:12px;font-weight:600;">${site}</span>
-      <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)</span>
+      <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)${renforts.length?` · <span style="color:#0EA5E9;font-weight:600;">${renforts.length} renfort(s)</span>`:''}
+      </span>
     </div>
     <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
   </div>`;
@@ -1959,6 +2120,10 @@ function renderMonthEmp(ref,today){
 
 // ── Modal shift ──
 function openShiftMod(empId,dateStr){
+  // Verrou anti-erreur
+  if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
+  // Mode sélection multiple
+  if(selMode){toggleCellSelection(empId,dateStr);return;}
   S.editing={empId,dateStr};
   S.shiftMode='jour';
   const emp=S.employees.find(e=>e.id===empId);if(!emp)return;
@@ -2423,6 +2588,7 @@ function renderParams(){
   renderParamMagasins();
   renderParamTypeColors();
   renderParamEvents();
+  initVerrouUI();
   let h='';
   Object.entries(SC).forEach(([site,cfg])=>{
     h+=`<div class="site-param-row">
@@ -3430,5 +3596,12 @@ window.addEventListener('load', () => {
   }
 });
 </script>
+<!-- BARRE SÉLECTION MULTIPLE -->
+<div id="selBar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1E293B;color:#fff;padding:12px 20px;z-index:9999;display:none;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 -4px 20px rgba(0,0,0,.25);">
+  <span id="selCount" style="font-size:13px;font-weight:600;white-space:nowrap;">0 cellule(s) sélectionnée(s)</span>
+  <div id="selTypeButtons" style="display:flex;gap:6px;flex-wrap:wrap;flex:1;"></div>
+  <button onclick="annulerSelection()" style="background:transparent;color:#94A3B8;border:1px solid #475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">✕ Annuler</button>
+</div>
+
 </body>
 </html>
