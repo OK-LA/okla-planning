@@ -1111,11 +1111,35 @@ function setSyncing(on,err=false){
   txt.textContent=on?'Synchronisation...':(err?'Hors ligne':'Connecté');
 }
 
+// Restaure l'écran (gestionnaire/salarié/login) à partir de la session locale
+function restoreSession(){
+  const session=lsGet('session',null);
+  const sessionValide=session&&(Date.now()-session.ts)<8*3600*1000;
+  if(sessionValide&&session.role==='mgr'){
+    S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
+  } else if(sessionValide&&session.role==='emp'){
+    const emp=S.employees.find(e=>e.id===session.empId);
+    if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
+    else{lsSet('session',null);showScr('sLogin');}
+  } else {
+    showScr('sLogin');
+  }
+}
+
 // Charger toutes les données depuis le Sheet
-async function loadAll(){
+// force=false (par défaut, ouverture normale de l'app) : si des données locales existent déjà,
+// on ne relance PAS le fetch — le Sheet est une source obsolète tant que les POST sont bloqués
+// par CORS, et l'écraser à chaque F5/réouverture effaçait silencieusement les modifs du gestionnaire.
+// force=true (bouton "Actualiser" ou setup initial) : on va bien chercher les données du Sheet.
+async function loadAll(force=false){
   if(!S.scriptUrl){
     hideLoading();
     showScr('sSetup');
+    return;
+  }
+  if(S.employees.length>0 && !force){
+    setLoadingText('Données locales chargées ✓');
+    setTimeout(()=>{hideLoading();restoreSession();},300);
     return;
   }
   setLoadingText('Connexion à Google Sheets...');
@@ -1170,21 +1194,7 @@ async function loadAll(){
       lsSet('planning',S.planning);
     }
     setLoadingText('Données chargées ✓');
-    setTimeout(()=>{
-      hideLoading();
-      // Restaurer la session gestionnaire ou salarié si elle existe (moins de 8h)
-      const session=lsGet('session',null);
-      const sessionValide=session&&(Date.now()-session.ts)<8*3600*1000;
-      if(sessionValide&&session.role==='mgr'){
-        S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
-      } else if(sessionValide&&session.role==='emp'){
-        const emp=S.employees.find(e=>e.id===session.empId);
-        if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
-        else{lsSet('session',null);showScr('sLogin');}
-      } else {
-        showScr('sLogin');
-      }
-    },400);
+    setTimeout(()=>{hideLoading();restoreSession();},400);
   } else {
     if(S.employees.length>0){
       setLoadingText('Mode hors ligne — données locales');
@@ -3544,13 +3554,16 @@ function saveReposFixe() {
   toast('✓ Jours de repos fixes enregistrés');
 }
 
-// Actualiser les données depuis Google Sheets
+// Actualiser les données depuis Google Sheets (import manuel explicite)
+// Attention : le Sheet peut être obsolète (les sauvegardes POST sont bloquées par CORS),
+// donc ceci peut écraser des modifications locales récentes — d'où la confirmation.
 async function refreshData(){
+  if(!confirm('Cela va recharger les données depuis Google Sheets et peut écraser des modifications locales récentes non synchronisées. Continuer ?')) return;
   setSyncing(true);
   setLoadingText('Actualisation...');
   document.getElementById('loadingScreen').style.display='flex';
   document.getElementById('mainHeader').style.display='none';
-  await loadAll();
+  await loadAll(true);
   if(S.role==='mgr') renderMgr();
   else if(S.role==='emp') renderEmp();
 }
