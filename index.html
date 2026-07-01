@@ -883,6 +883,80 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- FICHE EMPLOYÉ COMPLÈTE -->
+<div class="modal-overlay" id="mFicheEmp">
+  <div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;" id="ficheEmpTitle">Fiche employé</h3>
+      <button class="btn btn-ghost" onclick="closeModal('mFicheEmp')" style="padding:4px 10px;">✕</button>
+    </div>
+
+    <!-- Infos générales -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Informations générales</div>
+      <div class="fg"><label>Nom complet</label><input type="text" id="ficheNom"></div>
+      <div class="fg"><label>Email</label><input type="email" id="ficheEmail"></div>
+      <div class="fg"><label>Téléphone</label><input type="tel" id="ficheTel"></div>
+      <div class="fg"><label>Adresse</label><input type="text" id="ficheAddr"></div>
+      <div class="fg"><label>Code employé</label><input type="text" id="ficheCode" readonly style="background:#f9f9f9;color:var(--muted);cursor:not-allowed;"></div>
+      <div class="fg"><label>Site principal</label>
+        <select id="ficheSite">
+          <option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option>
+        </select>
+      </div>
+      <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="ficheChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
+      </label></div>
+    </div>
+
+    <!-- Contrat -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Contrat</div>
+      <div class="fg">
+        <label>Type de contrat</label>
+        <select id="ficheTypeContrat">
+          <option value="">CDI (pas de date de fin)</option>
+          <option value="cdd">CDD</option>
+          <option value="autre">Autre (intérim, saisonnier...)</option>
+        </select>
+      </div>
+      <div class="fg" id="ficheDateFinWrap" style="display:none;">
+        <label>Date de fin de contrat</label>
+        <input type="date" id="ficheDateFin">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Les jours après cette date seront grisés sur le planning.</div>
+      </div>
+      <div id="ficheContratStatut" style="font-size:12px;margin-top:6px;"></div>
+    </div>
+
+    <!-- Repos fixe -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Jour de repos fixe</div>
+      <div class="fg">
+        <select id="ficheRepos">
+          <option value="">Pas de repos fixe défini</option>
+          <option value="1">Lundi</option>
+          <option value="2">Mardi</option>
+          <option value="3">Mercredi</option>
+          <option value="4">Jeudi</option>
+          <option value="5">Vendredi</option>
+          <option value="6">Samedi</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Congés -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Congés payés</div>
+      <div id="ficheCpResume" style="font-size:12px;color:var(--text);line-height:1.8;"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mFicheEmp')">Annuler</button>
+      <button class="btn btn-save" onclick="saveFicheEmp()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ══ CONFIG ══
 const SC={
@@ -2191,28 +2265,87 @@ function renderEmpList(){
   const today=fmt(new Date());
   document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>{
     const expire = emp.dateFin && emp.dateFin < today;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
+    const typeC = emp.dateFin ? (emp.typeContrat==='cdd'?'CDD':'Autre') : 'CDI';
+    const contratLabel = emp.dateFin
+      ? `${typeC} · Fin : <strong>${emp.dateFin}</strong>${expire?' <span style="color:#DC2626;font-weight:700;">⚠ EXPIRÉ</span>':''}`
+      : 'CDI';
+    const reposLabel = S.params?.reposFixe?.[emp.id] ? ['','Lun','Mar','Mer','Jeu','Ven','Sam'][parseInt(S.params.reposFixe[emp.id])]||'—' : '—';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}cursor:pointer;" onclick="openFicheEmp('${emp.id}')">
       <div class="avatar" style="background:${avc(emp.id)}">${ini(emp.name)}</div>
       <div style="flex:1">
-        <div style="font-weight:600;font-size:13px">${emp.name}${expire?' <span style="color:#DC2626;font-size:10px;font-weight:700;">⚠ CONTRAT EXPIRÉ</span>':''}</div>
+        <div style="font-weight:600;font-size:13px;color:var(--primary);">${emp.name} <span style="font-size:10px;font-weight:400;color:var(--muted);">— cliquer pour modifier</span></div>
         <div style="font-size:11px;color:var(--muted)">${emp.email||'—'} · ${emp.tel||'—'} · Code : <strong>${emp.code}</strong></div>
-        <div style="font-size:11px;color:var(--muted)">📍 ${emp.addr||'Non renseigné'}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:6px;">
-          Fin de contrat : <input type="date" value="${emp.dateFin||''}" onchange="updateDateFinContrat('${emp.id}', this.value)" style="font-size:11px;padding:3px 6px;width:auto;">
-        </div>
+        <div style="font-size:11px;color:var(--muted)">Contrat : ${contratLabel} · Repos fixe : <strong>${reposLabel}</strong></div>
       </div>
       ${sPill(emp.site)}
     </div>`;
   }).join('');
 }
-async function updateDateFinContrat(empId, dateFin){
-  const emp=S.employees.find(e=>e.id===empId);
+
+function openFicheEmp(empId){
+  const emp = S.employees.find(e=>e.id===empId);
   if(!emp) return;
-  emp.dateFin = dateFin || null;
+  document.getElementById('ficheEmpTitle').textContent = emp.name;
+  document.getElementById('ficheNom').value = emp.name||'';
+  document.getElementById('ficheEmail').value = emp.email||'';
+  document.getElementById('ficheTel').value = emp.tel||'';
+  document.getElementById('ficheAddr').value = emp.addr||'';
+  document.getElementById('ficheCode').value = emp.code||'';
+  document.getElementById('ficheSite').value = emp.site||'Ham';
+  document.getElementById('ficheChildren').checked = !!emp.hasChildren;
+  // Contrat
+  const typeC = emp.typeContrat||'';
+  document.getElementById('ficheTypeContrat').value = typeC;
+  document.getElementById('ficheDateFin').value = emp.dateFin||'';
+  document.getElementById('ficheDateFinWrap').style.display = typeC ? 'block' : 'none';
+  // Statut contrat
+  const today = fmt(new Date());
+  let statut = '';
+  if(!emp.dateFin){ statut = '<span style="color:#059669;">✓ CDI — contrat sans fin prévue</span>'; }
+  else if(emp.dateFin < today){ statut = `<span style="color:#DC2626;">⚠ Contrat expiré depuis le ${emp.dateFin}</span>`; }
+  else { statut = `<span style="color:#D97706;">⏳ Fin de contrat le ${emp.dateFin}</span>`; }
+  document.getElementById('ficheContratStatut').innerHTML = statut;
+  // Repos fixe
+  document.getElementById('ficheRepos').value = S.params?.reposFixe?.[emp.id]||'';
+  // Congés
+  const cpPris = (S.conges||[]).filter(c=>c.empId===empId&&c.statut==='approuvé').reduce((a,c)=>a+(c.jours||0),0);
+  const quota = S.params?.reglesConges?.quota||25;
+  document.getElementById('ficheCpResume').innerHTML =
+    `Quota annuel : <strong>${quota} jours ouvrés</strong><br>
+     Congés approuvés : <strong>${cpPris} jour(s)</strong><br>
+     Solde restant : <strong style="color:${quota-cpPris<5?'#DC2626':'#059669'}">${quota-cpPris} jour(s)</strong>`;
+  // Stocker l'id courant
+  document.getElementById('mFicheEmp').dataset.empId = empId;
+  openModal('mFicheEmp');
+}
+
+document.getElementById('ficheTypeContrat').addEventListener('change', function(){
+  document.getElementById('ficheDateFinWrap').style.display = this.value ? 'block' : 'none';
+  if(!this.value) document.getElementById('ficheDateFin').value='';
+});
+
+async function saveFicheEmp(){
+  const empId = document.getElementById('mFicheEmp').dataset.empId;
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  emp.name = document.getElementById('ficheNom').value.trim()||emp.name;
+  emp.email = document.getElementById('ficheEmail').value.trim();
+  emp.tel = document.getElementById('ficheTel').value.trim();
+  emp.addr = document.getElementById('ficheAddr').value.trim();
+  emp.site = document.getElementById('ficheSite').value;
+  emp.hasChildren = document.getElementById('ficheChildren').checked;
+  emp.typeContrat = document.getElementById('ficheTypeContrat').value;
+  emp.dateFin = document.getElementById('ficheDateFin').value||null;
+  // Repos fixe
+  const repos = document.getElementById('ficheRepos').value;
+  if(!S.params.reposFixe) S.params.reposFixe={};
+  if(repos) S.params.reposFixe[empId]=repos;
+  else delete S.params.reposFixe[empId];
   persist();
   renderEmpList();
   refreshActiveView();
-  toast(dateFin?`✓ Fin de contrat enregistrée pour ${emp.name.split(' ')[0]}`:`✓ Date de fin retirée`);
+  closeModal('mFicheEmp');
+  toast(`✓ Fiche de ${emp.name.split(' ')[0]} mise à jour`);
   api('saveEmployee', emp);
 }
 function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
