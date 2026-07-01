@@ -1038,7 +1038,7 @@ const S={
   eventTypes:lsGet('eventTypes',[
     {id:'ferie',  label:'Jour férié chômé', color:'#DC2626'},
     {id:'soldes', label:'Période de soldes', color:'#F59E0B'},
-    {id:'vacances', label:'Vacances scolaires', color:'#8B5CF6'},
+    {id:'vacances', label:'Vacances scolaires', color:'#8B5CF6', isVacances:true},
   ]),
   // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
   events:(Array.isArray(lsGet('events',[]))?lsGet('events',[]):[]),
@@ -1690,8 +1690,8 @@ function renderWeek(){
     const dStr=fmt(d);
     const evDuJour=getEvenementsDuJour(dStr);
     // Séparer événements vacances vs autres
-    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
-    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.label.toLowerCase().includes('vacance');});
+    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
+    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
     let headStyle = isT?'color:#3B82F6;background:#EFF6FF;':isW?'color:var(--muted);':'';
     let evLabel='';
@@ -1748,7 +1748,7 @@ function renderWeek(){
           :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
-        const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
+        const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
         const vacScoJour=isDateVacances(dStr);
         let vacCellStyle='background:transparent;';
         if(evVacJour.length){const tv=S.eventTypes.find(et=>et.id===evVacJour[0].typeId);if(tv)vacCellStyle=`background:${tv.color};`;}
@@ -1860,8 +1860,8 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     const dStr=fmt(d);
     const evDuJour=getEvenementsDuJour(dStr);
     // Séparer événements vacances vs autres pour la colonne date
-    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.label.toLowerCase().includes('vacance');});
-    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.label.toLowerCase().includes('vacance');});
+    const evVac=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
+    const evAutres=evDuJour.filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return !t||!t.isVacances;});
     const vacSco=isDateVacances(dStr);
     let dateCellStyle = isT?'background:#EFF6FF;font-weight:700;color:#2563EB;':'';
     let evLabel='';
@@ -2486,9 +2486,12 @@ function renderParamEvents(){
   if(!el) return;
   let h = '';
   S.eventTypes.forEach((ev,i) => {
-    h += `<div class="magasin-row" id="evRow_${i}">
+    h += `<div class="magasin-row" id="evRow_${i}" style="flex-wrap:wrap;gap:6px;">
       <input type="color" class="color-picker" id="evColor_${i}" value="${ev.color}" title="Couleur">
-      <input type="text" class="magasin-name-input" id="evLabel_${i}" value="${ev.label}" placeholder="Nom de l'événement">
+      <input type="text" class="magasin-name-input" id="evLabel_${i}" value="${ev.label}" placeholder="Nom de l'événement" style="flex:1;min-width:120px;">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;padding:4px 8px;border-radius:6px;border:1px solid ${ev.isVacances?'#8B5CF6':'var(--border)'};background:${ev.isVacances?'#F5F3FF':'transparent'};color:${ev.isVacances?'#7C3AED':'var(--muted)'};" title="Afficher dans la colonne vacances (bande violette)">
+        <input type="checkbox" id="evVac_${i}" ${ev.isVacances?'checked':''} style="width:auto;accent-color:#8B5CF6;"> 🏖 Vacances
+      </label>
       <button class="btn-del" onclick="supprimerTypeEvenement(${i})" title="Supprimer">✕</button>
     </div>`;
   });
@@ -2522,8 +2525,10 @@ async function saveEventTypes(){
   S.eventTypes.forEach((ev,i) => {
     const labelEl = document.getElementById('evLabel_'+i);
     const colorEl = document.getElementById('evColor_'+i);
+    const vacEl = document.getElementById('evVac_'+i);
     if(labelEl) ev.label = labelEl.value.trim() || ev.label;
     if(colorEl) ev.color = colorEl.value;
+    if(vacEl) ev.isVacances = vacEl.checked;
   });
   persist();
   const r = await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
