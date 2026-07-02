@@ -962,11 +962,19 @@ tbody tr:hover td{background:#FAFAF8;}
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Congés payés</div>
       <div id="ficheCpResume" style="font-size:12px;color:var(--text);line-height:1.8;"></div>
+      <div class="fg" style="margin-top:10px;">
+        <label>Solde CP constaté aujourd'hui (jours)</label>
+        <input type="number" step="0.5" id="ficheSoldeCPManuel" placeholder="Laisser vide = calcul automatique">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Ajuste le solde à une valeur réelle connue à la date du jour (le solde se recalcule ensuite à partir de cette valeur, pas de zéro).</div>
+      </div>
     </div>
 
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('mFicheEmp')">Annuler</button>
-      <button class="btn btn-save" onclick="saveFicheEmp()">✓ Enregistrer</button>
+    <div class="modal-actions" style="justify-content:space-between;">
+      <button class="btn btn-ghost" style="color:#DC2626;" onclick="deleteEmp()">🗑️ Supprimer cet employé</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="closeModal('mFicheEmp')">Annuler</button>
+        <button class="btn btn-save" onclick="saveFicheEmp()">✓ Enregistrer</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2038,12 +2046,13 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
       `<div style="font-size:10px;white-space:nowrap;">${emp.name.split(' ')[0]}</div></th>`;
   });
-  // Colonnes renforts
-  renforts.forEach(remp=>{
+  // Une seule colonne partagée pour tous les renforts (au lieu d'une colonne par personne) :
+  // affiche le(s) prénom(s) du/des renfort(s) présent(s) ce jour-là, peu importe qui c'est.
+  if(renforts.length){
     th+=`<th class="emp-th" style="background:#EFF6FF;">`+
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:#0EA5E9;margin:0 auto 2px;">↔</div>`+
       `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">↔ Renfort</div></th>`;
-  });
+  }
   th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
 
   let tb=`<tbody>`;
@@ -2088,29 +2097,35 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
           ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${site2}</span>`
           :'';
         cell=`<div class="mblock${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
-        count++;
+        // Compte comme "présent ici" seulement si effectivement sur place ce jour-là :
+        // pas en congé/maladie, et pas parti en renfort ailleurs (site effectif différent).
+        if(type!=='conge' && type!=='maladie' && site2===site) count++;
       }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
     });
-    // Cellules renforts
-    renforts.forEach(remp=>{
-      const sh=S.planning[`${remp.id}_${dStr}`];
-      const enRenfortIci=sh&&sh.type==='remplacement'&&sh.site===site;
+    // Cellule renfort partagée : qui que ce soit, on affiche son/leurs prénom(s) ici.
+    if(renforts.length){
+      const presentsAujourdhui = renforts.filter(remp=>{
+        const sh=S.planning[`${remp.id}_${dStr}`];
+        return sh&&sh.type==='remplacement'&&sh.site===site;
+      });
       let cell='';
-      if(enRenfortIci){
-        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${remp.id}','${dStr}')" title="${remp.name} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 1px;">${remp.name.split(' ')[0]}</span></div>`;
-        count++;
+      if(presentsAujourdhui.length){
+        const noms = presentsAujourdhui.map(r=>r.name.split(' ')[0]).join(' + ');
+        const titres = presentsAujourdhui.map(r=>r.name).join(', ');
+        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;width:auto;min-width:34px;padding:0 3px;" onclick="openShiftMod('${presentsAujourdhui[0].id}','${dStr}')" title="${titres} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${noms}</span></div>`;
+        count += presentsAujourdhui.length;
       } else {
         cell=`<div class="mblock empty" style="opacity:.2;"></div>`;
       }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);background:#F8FAFF;">${cell}</td>`;
-    });
+    }
     const cls=count>=minStaff?'staff-ok':'staff-warn';
     tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
   });
   tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td><td></td>`;
   emps.forEach(()=>tb+=`<td></td>`);
-  renforts.forEach(()=>tb+=`<td></td>`);
+  if(renforts.length) tb+=`<td></td>`;
   tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
 
   return `<div style="margin-bottom:22px;">
@@ -2591,15 +2606,33 @@ function openFicheEmp(empId){
   // Repos fixe
   document.getElementById('ficheRepos').value = S.params?.reposFixe?.[emp.id]||'';
   // Congés
-  const cpPris = (S.conges||[]).filter(c=>c.empId===empId&&c.statut==='approuvé').reduce((a,c)=>a+(c.jours||0),0);
-  const quota = S.params?.reglesConges?.quota||25;
-  document.getElementById('ficheCpResume').innerHTML =
-    `Quota annuel : <strong>${quota} jours ouvrés</strong><br>
-     Congés approuvés : <strong>${cpPris} jour(s)</strong><br>
-     Solde restant : <strong style="color:${quota-cpPris<5?'#DC2626':'#059669'}">${quota-cpPris} jour(s)</strong>`;
+  document.getElementById('ficheSoldeCPManuel').value = emp.soldeCPManuel!=null ? emp.soldeCPManuel : '';
+  document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
   // Stocker l'id courant
   document.getElementById('mFicheEmp').dataset.empId = empId;
   openModal('mFicheEmp');
+}
+
+// Calcule le solde de CP affiché dans la fiche employé.
+// Si un solde manuel a été renseigné (constaté à une date donnée), on part de cette valeur
+// et on ne déduit que les congés approuvés PRIS DEPUIS cette date — pas depuis la création
+// du salarié. Sinon, on retombe sur le quota annuel global moins les congés déjà pris.
+function calcCpResumeHTML(emp){
+  const quota = S.params?.reglesConges?.quota||25;
+  if(emp.soldeCPManuel!=null && emp.soldeCPManuelDate){
+    const prisDepuis = getCongesEmp(emp.id)
+      .filter(r=>r.status==='approved' && r.dateDebut >= emp.soldeCPManuelDate)
+      .reduce((sum,r)=>sum+countJoursOuvresReels(r.dateDebut,r.dateFin),0);
+    const solde = emp.soldeCPManuel - prisDepuis;
+    return `Solde constaté le <strong>${emp.soldeCPManuelDate}</strong> : <strong>${emp.soldeCPManuel} jour(s)</strong><br>
+     Congés pris depuis : <strong>${prisDepuis} jour(s)</strong><br>
+     Solde actuel : <strong style="color:${solde<5?'#DC2626':'#059669'}">${solde} jour(s)</strong>`;
+  }
+  const cpPris = getJoursPris(emp.id);
+  return `Quota annuel : <strong>${quota} jours ouvrés</strong><br>
+     Congés approuvés : <strong>${cpPris} jour(s)</strong><br>
+     Solde restant : <strong style="color:${quota-cpPris<5?'#DC2626':'#059669'}">${quota-cpPris} jour(s)</strong>
+     <div style="font-size:11px;color:var(--muted);margin-top:6px;">Calcul automatique depuis la création du salarié — renseigne un solde constaté ci-dessous pour partir d'une valeur réelle.</div>`;
 }
 
 document.getElementById('ficheTypeContrat').addEventListener('change', function(){
@@ -2624,12 +2657,41 @@ async function saveFicheEmp(){
   if(!S.params.reposFixe) S.params.reposFixe={};
   if(repos) S.params.reposFixe[empId]=repos;
   else delete S.params.reposFixe[empId];
+  // Solde CP manuel : si la valeur a changé, on horodate à aujourd'hui pour que le calcul
+  // ne décompte que les congés pris à partir de maintenant.
+  const soldeInput = document.getElementById('ficheSoldeCPManuel').value;
+  const nouveauSolde = soldeInput===''? null : parseFloat(soldeInput);
+  if(nouveauSolde !== (emp.soldeCPManuel!=null?emp.soldeCPManuel:null)){
+    emp.soldeCPManuel = nouveauSolde;
+    emp.soldeCPManuelDate = nouveauSolde!=null ? fmt(new Date()) : null;
+  }
   persist();
   renderEmpList();
   refreshActiveView();
   closeModal('mFicheEmp');
   toast(`✓ Fiche de ${emp.name.split(' ')[0]} mise à jour`);
   api('saveEmployee', emp);
+}
+
+// Supprime définitivement un employé (fiche + planning + repos fixe associés).
+// Nécessite l'action serveur deleteEmployee (Apps Script v4+) pour que la ligne soit
+// aussi retirée du Google Sheet, sinon elle reviendrait à la prochaine synchro.
+async function deleteEmp(){
+  const empId = document.getElementById('mFicheEmp').dataset.empId;
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  if(!confirm(`Supprimer définitivement ${emp.name} ? Cette action retire aussi son historique de planning. Continuer ?`)) return;
+  S.employees = S.employees.filter(e=>e.id!==empId);
+  Object.keys(S.planning).forEach(key=>{ if(key.startsWith(empId+'_')) delete S.planning[key]; });
+  if(S.params.reposFixe) delete S.params.reposFixe[empId];
+  persist();
+  renderEmpList();
+  buildSelects();
+  refreshActiveView();
+  closeModal('mFicheEmp');
+  toast(`✓ ${emp.name} supprimé(e)`);
+  const r = await api('deleteEmployee', {code: emp.code});
+  if(!r||!r.ok) toast('⚠ Suppression locale ok, mais la synchro avec le Sheet a échoué — réessaie plus tard');
 }
 function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
 document.getElementById('aeName').addEventListener('input',function(){
