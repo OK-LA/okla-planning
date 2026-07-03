@@ -1276,6 +1276,16 @@ function isJourRepos(emp, date){
 function isHorsContrat(emp, dateStr){
   return emp.dateFin && dateStr > emp.dateFin;
 }
+// Un salarié parti reste visible dans le planning jusqu'à la fin de son mois de départ
+// (ses jours après dateFin sont déjà grisés par isHorsContrat), puis disparaît complètement
+// des vues à partir du mois suivant — sans jamais être supprimé de la fiche employés.
+function estVisibleDansPlanning(emp, refDate){
+  if(!emp.dateFin) return true;
+  const fin = new Date(emp.dateFin+'T12:00:00');
+  const finKey = fin.getFullYear()*12+fin.getMonth();
+  const refKey = refDate.getFullYear()*12+refDate.getMonth();
+  return refKey <= finKey;
+}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function getMon(d){const x=new Date(d);const day=x.getDay();x.setDate(x.getDate()-day+(day===0?-6:1));x.setHours(0,0,0,0);return x;}
 function fmtFR(d,o){return d.toLocaleDateString('fr-FR',o);}
@@ -1456,7 +1466,7 @@ function renderEmpMagasin(){
   const mon=addDays(getMon(today),S.eqWO*7);
   document.getElementById('eqMLbl').textContent=`${fmtFR(mon,{day:'numeric',month:'short'})} – ${fmtFR(addDays(mon,6),{day:'numeric',month:'short',year:'numeric'})}`;
 
-  const collegues=S.employees.filter(e=>e.site===emp.site).sort((a,b)=>a.id===emp.id?-1:b.id===emp.id?1:a.name.localeCompare(b.name));
+  const collegues=S.employees.filter(e=>e.site===emp.site && estVisibleDansPlanning(e,mon)).sort((a,b)=>a.id===emp.id?-1:b.id===emp.id?1:a.name.localeCompare(b.name));
 
   let th=`<tr><th style="text-align:left;padding-left:12px;">Équipe</th>`;
   for(let i=0;i<7;i++){
@@ -1822,8 +1832,9 @@ function checkEffectifAlerts(mon) {
     Object.keys(SC).forEach(site => {
       const minStaff = S.params.minStaff?.[site] || 1;
       const presents = S.employees.filter(e => {
-        if (e.site !== site) return false;
         const sh = S.planning[`${e.id}_${dateStr}`];
+        const siteEffectifJour = sh?.site || e.site;
+        if (siteEffectifJour !== site) return false;
         return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie';
       }).length;
       const total = S.employees.filter(e => e.site === site).length;
@@ -1861,7 +1872,7 @@ function renderWeek(){
   // Vérifier alertes effectif sur toute la semaine
   checkEffectifAlerts(mon);
 
-  const emps = getEmpsFiltres();
+  const emps = getEmpsFiltres().filter(e=>estVisibleDansPlanning(e,mon));
 
   let th=`<tr><th>Employé</th>`;
   for(let i=0;i<7;i++){
@@ -2012,7 +2023,7 @@ function renderMonth(){
 // Génère le tableau HTML pour UN magasin donné (réutilisé pour empiler plusieurs magasins)
 function renderMonthSiteTable(site, ref, today, empsFiltres){
   const sColor=SC[site]||SC['Ham'];
-  const emps=empsFiltres.filter(e=>e.site===site);
+  const emps=empsFiltres.filter(e=>e.site===site && estVisibleDansPlanning(e,ref));
   const minStaff=S.params.minStaff[site]||1;
   const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
   const days=[];
@@ -2619,22 +2630,59 @@ function openFicheEmp(empId){
 // Si un solde manuel a été renseigné (constaté à une date donnée), on part de cette valeur
 // et on ne déduit que les congés approuvés PRIS DEPUIS cette date — pas depuis la création
 // du salarié. Sinon, on retombe sur le quota annuel global moins les congés déjà pris.
+// Acquisition mensuelle de CP selon les règles légales simplifiées (base 2,08 jours ouvrés/mois) :
+// - Travail effectif ou assimilé (magasin, entrepôt, VIP, remplacement, congé) : taux plein 2,08 j/mois
+// - Arrêt maladie ordinaire : taux réduit ~1,67 j/mois (art. L3141-5-1), proratisé si arrêt partiel
+// Ne gère pas l'absence injustifiée séparément (aucun type de planning dédié pour ça actuellement) —
+// un ajustement manuel via "solde constaté" reste le recours pour ce cas.
+const TAUX_CP_PLEIN = 2.08, TAUX_CP_MALADIE = 1.67;
+function calcAccrualCP(empId, depuis, jusquA){
+  let total = 0;
+  let cur = new Date(depuis.getFullYear(), depuis.getMonth(), 1);
+  while(cur <= jusquA){
+    const debutMoisCal = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    const finMoisCal = new Date(cur.getFullYear(), cur.getMonth()+1, 0);
+    const finCompte = finMoisCal < jusquA ? finMoisCal : jusquA;
+    const joursOuvresMoisEntier = countJoursOuvresReels(debutMoisCal, finMoisCal);
+    if(joursOuvresMoisEntier>0){
+      let joursComptes=0, joursMaladie=0;
+      let d = new Date(Math.max(debutMoisCal, depuis));
+      while(d <= finCompte){
+        if(d.getDay()!==0 && !isFerieChome(d)){
+          joursComptes++;
+          const sh = S.planning[`${empId}_${fmt(d)}`];
+          if(sh && sh.type==='maladie') joursMaladie++;
+        }
+        d = addDays(d,1);
+      }
+      total += ((joursComptes-joursMaladie)*TAUX_CP_PLEIN + joursMaladie*TAUX_CP_MALADIE) / joursOuvresMoisEntier;
+    }
+    cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1);
+  }
+  return Math.round(total*100)/100;
+}
+
 function calcCpResumeHTML(emp){
-  const quota = S.params?.reglesConges?.quota||25;
+  const today = new Date();
   if(emp.soldeCPManuel!=null && emp.soldeCPManuelDate){
+    const acquisDepuis = calcAccrualCP(emp.id, new Date(emp.soldeCPManuelDate+'T12:00:00'), today);
     const prisDepuis = getCongesEmp(emp.id)
       .filter(r=>r.status==='approved' && r.dateDebut >= emp.soldeCPManuelDate)
       .reduce((sum,r)=>sum+countJoursOuvresReels(r.dateDebut,r.dateFin),0);
-    const solde = emp.soldeCPManuel - prisDepuis;
+    const solde = emp.soldeCPManuel + acquisDepuis - prisDepuis;
     return `Solde constaté le <strong>${emp.soldeCPManuelDate}</strong> : <strong>${emp.soldeCPManuel} jour(s)</strong><br>
-     Congés pris depuis : <strong>${prisDepuis} jour(s)</strong><br>
-     Solde actuel : <strong style="color:${solde<5?'#DC2626':'#059669'}">${solde} jour(s)</strong>`;
+     Acquis depuis (2,08 j/mois, réduit si maladie) : <strong>+${acquisDepuis} jour(s)</strong><br>
+     Congés pris depuis : <strong>-${prisDepuis} jour(s)</strong><br>
+     Solde actuel : <strong style="color:${solde<5?'#DC2626':'#059669'}">${solde.toFixed(2)} jour(s)</strong>`;
   }
+  const periode = getPeriodeRef();
+  const acquis = calcAccrualCP(emp.id, periode.debut, today);
   const cpPris = getJoursPris(emp.id);
-  return `Quota annuel : <strong>${quota} jours ouvrés</strong><br>
+  const solde = acquis - cpPris;
+  return `Acquis depuis le 1er juin (2,08 j/mois, réduit si maladie) : <strong>${acquis} jour(s)</strong><br>
      Congés approuvés : <strong>${cpPris} jour(s)</strong><br>
-     Solde restant : <strong style="color:${quota-cpPris<5?'#DC2626':'#059669'}">${quota-cpPris} jour(s)</strong>
-     <div style="font-size:11px;color:var(--muted);margin-top:6px;">Calcul automatique depuis la création du salarié — renseigne un solde constaté ci-dessous pour partir d'une valeur réelle.</div>`;
+     Solde restant : <strong style="color:${solde<5?'#DC2626':'#059669'}">${solde.toFixed(2)} jour(s)</strong>
+     <div style="font-size:11px;color:var(--muted);margin-top:6px;">Calcul automatique mensuel depuis le 1er juin (période légale) — renseigne un solde constaté ci-dessous pour partir d'une valeur réelle si besoin.</div>`;
 }
 
 document.getElementById('ficheTypeContrat').addEventListener('change', function(){
