@@ -1177,6 +1177,19 @@ function restoreSession(){
 function keepIfNotSmaller(local,remote){
   return Array.isArray(remote) && remote.length>=(local?.length||0) ? remote : local;
 }
+// Fusion par id (et non par taille de tableau) : chaque entrée connue du Sheet écrase sa version
+// locale (dernière sauvegarde gagne), les entrées locales pas encore synchronisées sont gardées.
+// Nécessaire pour S.requests : un changement de statut (ex. échange accepté par un collègue) ne
+// change jamais la taille du tableau, donc keepIfNotSmaller ne le laissait jamais remonter tant
+// qu'un autre appareil (le gestionnaire) avait déjà au moins autant de demandes en local — bloquant
+// indéfiniment la visibilité des échanges à valider (cas réel 2026-07-03).
+function mergeParId(local,remote){
+  if(!Array.isArray(remote)) return local||[];
+  const map={};
+  (local||[]).forEach(item=>{ if(item&&item.id!=null) map[item.id]=item; });
+  remote.forEach(item=>{ if(item&&item.id!=null) map[item.id]=item; });
+  return Object.values(map);
+}
 async function loadAll(force=false){
   if(!S.scriptUrl){
     hideLoading();
@@ -1211,7 +1224,7 @@ async function loadAll(force=false){
       S.planning = Object.assign({}, S.planning, r.planning);
       lsSet('planning',S.planning);
     }
-    if(r.requests)   {S.requests=keepIfNotSmaller(S.requests,r.requests);    lsSet('requests',S.requests);}
+    if(r.requests)   {S.requests=mergeParId(S.requests,r.requests);    lsSet('requests',S.requests);}
     if(r.absences)   {S.absences=keepIfNotSmaller(S.absences,r.absences);    lsSet('absences',S.absences);}
     if(r.params&&r.params!==null) {
       // Fusionner : garder les clés locales absentes du Sheet (verrou, typeColors, reposFixe...)
