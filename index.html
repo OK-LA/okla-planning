@@ -1618,11 +1618,15 @@ function renderMgr(){
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
-  document.querySelectorAll('.tab').forEach(btn=>btn.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  // Scopé à #sMgr : la vue salarié (#sEmp) a aussi des boutons ".tab" (Mon planning / Mon magasin)
+  // — sans ce scope, un document.querySelectorAll('.tab') global les comptait aussi et décalait
+  // l'index de tous les onglets gestionnaire (ex: cliquer "Paramètres" surlignait "Échanges").
+  const mgrScreen = document.getElementById('sMgr');
+  mgrScreen.querySelectorAll('.tab').forEach(btn=>btn.classList.remove('active'));
+  mgrScreen.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
   ['planning','conges','remplace','echanges','employes','params'].forEach((x,i)=>{
     if(x===n){
-      document.querySelectorAll('.tab')[i].classList.add('active');
+      mgrScreen.querySelectorAll('.tab')[i].classList.add('active');
       document.getElementById('tab-'+x).classList.add('active');
     }
   });
