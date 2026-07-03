@@ -1030,9 +1030,13 @@ tbody tr:hover td{background:#FAFAF8;}
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Congés payés</div>
       <div id="ficheCpResume" style="font-size:12px;color:var(--text);line-height:1.8;"></div>
       <div class="fg" style="margin-top:10px;">
-        <label>Solde CP constaté aujourd'hui (jours)</label>
+        <label>Solde CP constaté (jours)</label>
         <input type="number" step="0.5" id="ficheSoldeCPManuel" placeholder="Laisser vide = calcul automatique">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Ajuste le solde à une valeur réelle connue à la date du jour (le solde se recalcule ensuite à partir de cette valeur, pas de zéro).</div>
+      </div>
+      <div class="fg">
+        <label>Solde valide au</label>
+        <input type="date" id="ficheSoldeCPManuelDate">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Date à laquelle ce solde était exact (ex: le 31/05, fin de période) — le solde se recalcule ensuite à partir de cette date, pas depuis aujourd'hui.</div>
       </div>
     </div>
 
@@ -2860,6 +2864,8 @@ function openFicheEmp(empId){
   document.getElementById('ficheRepos').value = S.params?.reposFixe?.[emp.id]||'';
   // Congés
   document.getElementById('ficheSoldeCPManuel').value = emp.soldeCPManuel!=null ? emp.soldeCPManuel : '';
+  // Date par défaut si aucune n'est encore renseignée : le 31/05 le plus récent (fin de période légale)
+  document.getElementById('ficheSoldeCPManuelDate').value = emp.soldeCPManuelDate || fmt(addDays(getPeriodeRef().debut,-1));
   document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
   // Stocker l'id courant
   document.getElementById('mFicheEmp').dataset.empId = empId;
@@ -2900,6 +2906,22 @@ function calcAccrualCP(empId, depuis, jusquA){
     cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1);
   }
   return Math.round(total*100)/100;
+}
+
+// Projette le solde de CP à une date donnée (accrual mensuel jusqu'à cette date, moins ce qui est
+// déjà pris/en attente) — utilisé pour avertir dès la demande si le solde ne sera pas suffisant
+// AU MOMENT DU CONGÉ, plutôt que de comparer au solde du jour de la demande (qui peut être trompeur
+// si la demande porte sur une date lointaine où le salarié aura eu le temps d'acquérir plus de jours).
+function calcSoldeProjete(empId, dateProjection){
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp) return 0;
+  let acquis;
+  if(emp.soldeCPManuel!=null && emp.soldeCPManuelDate){
+    acquis = emp.soldeCPManuel + calcAccrualCP(empId, new Date(emp.soldeCPManuelDate+'T12:00:00'), dateProjection);
+  } else {
+    acquis = calcAccrualCP(empId, getPeriodeRef().debut, dateProjection);
+  }
+  return acquis - getJoursPris(empId) - getJoursEnAttente(empId);
 }
 
 function calcCpResumeHTML(emp){
@@ -2975,14 +2997,13 @@ async function saveFicheEmp(){
   if(!S.params.reposFixe) S.params.reposFixe={};
   if(repos) S.params.reposFixe[empId]=repos;
   else delete S.params.reposFixe[empId];
-  // Solde CP manuel : si la valeur a changé, on horodate à aujourd'hui pour que le calcul
-  // ne décompte que les congés pris à partir de maintenant.
+  // Solde CP manuel : la date "valide au" est saisie librement (ex: 31/05, fin de période) —
+  // ce n'est plus automatiquement la date du jour, le calcul décompte les congés pris depuis
+  // CETTE date, pas depuis aujourd'hui.
   const soldeInput = document.getElementById('ficheSoldeCPManuel').value;
   const nouveauSolde = soldeInput===''? null : parseFloat(soldeInput);
-  if(nouveauSolde !== (emp.soldeCPManuel!=null?emp.soldeCPManuel:null)){
-    emp.soldeCPManuel = nouveauSolde;
-    emp.soldeCPManuelDate = nouveauSolde!=null ? fmt(new Date()) : null;
-  }
+  emp.soldeCPManuel = nouveauSolde;
+  emp.soldeCPManuelDate = nouveauSolde!=null ? (document.getElementById('ficheSoldeCPManuelDate').value || fmt(new Date())) : null;
   persist();
   renderEmpList();
   refreshActiveView();
@@ -3765,10 +3786,11 @@ function verifierRegleConges(empId, dateDebut, dateFin) {
     }
   }
 
-  // 2. Vérif quota restant
-  const joursRestants = QUOTA_ANNUEL - getJoursPris(empId) - getJoursEnAttente(empId);
-  if (jouresDemandes > joursRestants) {
-    errors.push(`❌ Solde insuffisant : ${jouresDemandes}j demandés, ${joursRestants}j restants.`);
+  // 2. Vérif quota restant — projeté à la date de DÉBUT du congé (le solde continue de s'acquérir
+  // entre aujourd'hui et cette date), pas au solde du jour de la demande.
+  const soldeProjete = calcSoldeProjete(empId, debut);
+  if (jouresDemandes > soldeProjete) {
+    errors.push(`❌ Solde insuffisant au ${fmtFR(debut,{day:'numeric',month:'long'})} : ${jouresDemandes}j demandés, ${soldeProjete.toFixed(2)}j projetés disponibles à cette date.`);
   }
 
   // 3. Vérif collègue déjà absent (max 1 par magasin)
