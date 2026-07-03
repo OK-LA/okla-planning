@@ -467,7 +467,7 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
       <div id="enfantMaladeInfo" style="display:none;background:#FFF7ED;border:1px solid #FED7AA;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#C2410C;">
         <strong>Enfant malade</strong> — Certificat médical obligatoire à transmettre à Gwen.<br>
-        Quota : 3 j/an (1 enfant) ou 5 j/an (enfant &lt; 1 an ou 3 enfants+).<br>
+        <span id="enfantMaladeQuotaTxt">Quota : —</span><br>
         Indemnisation : 2 jours maximum par an.
       </div>
       <div id="congeFields">
@@ -692,6 +692,28 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg"><label>Quota annuel par employé (jours ouvrés)</label>
           <input type="number" id="pQuota" value="25" min="1" max="50"></div>
         <button class="btn btn-primary btn-sm mt-10" onclick="saveReglesConges()">✓ Enregistrer</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>🚩 Motifs d'absence (salarié)</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Liste proposée aux salariés dans "Signaler une absence". Ajoutez ou supprimez des motifs selon vos besoins.
+        </div>
+        <div id="paramMotifsAbsence"></div>
+        <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterMotifAbsence()">+ Ajouter un motif</button>
+        <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveMotifsAbsence()">✓ Enregistrer</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>👶 Règles "Enfant malade"</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Nombre de jours accordés par an selon le nombre d'enfants du salarié (renseigné dans sa fiche). Le seuil le plus élevé atteint s'applique.
+        </div>
+        <div id="paramReglesEnfantMalade"></div>
+        <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterSeuilEnfantMalade()">+ Ajouter un palier</button>
+        <div class="fg" style="margin-top:12px;"><label>Jours si au moins un enfant a moins d'1 an (quel que soit le nombre d'enfants)</label>
+          <input type="number" id="pJoursMoinsUnAn" min="0" max="30"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveReglesEnfantMalade()">✓ Enregistrer</button>
       </div>
 
       <div class="param-card" style="margin-top:14px;">
@@ -950,6 +972,14 @@ tbody tr:hover td{background:#FAFAF8;}
       </label></div>
     </div>
 
+    <!-- Enfants (pour le calcul automatique du quota "enfant malade") -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Enfants (date de naissance)</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Utilisé pour calculer automatiquement le quota "enfant malade" (nombre d'enfants + majoration si moins d'1 an).</div>
+      <div id="ficheEnfantsList"></div>
+      <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterEnfantFiche()">+ Ajouter un enfant</button>
+    </div>
+
     <!-- Contrat -->
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Contrat</div>
@@ -1082,6 +1112,18 @@ const S={
       'BM05':5, // Berleque Marina — vendredi
     },
     reposFixe:{}, // rempli automatiquement à l'init à partir de reposFixeParCode (clé = id employé)
+    // Motifs disponibles dans "Signaler une absence" (salarié) — configurable par le gestionnaire.
+    motifsAbsence:[
+      {id:'maladie',label:'Maladie'},
+      {id:'enfant_malade',label:'Enfant malade'},
+      {id:'absent',label:'Absence imprévue'},
+      {id:'autre',label:'Autre'},
+    ],
+    // Quota "enfant malade" (jours/an) selon le nombre d'enfants, + majoration si un enfant a moins d'1 an.
+    reglesEnfantMalade:{
+      seuils:[{seuil:1,jours:3},{seuil:3,jours:5}],
+      joursSiMoinsUnAn:5,
+    },
   }),
   // Types d'événements personnalisés (nom + couleur), créés/supprimés par le gestionnaire
   eventTypes:lsGet('eventTypes',[
@@ -1231,7 +1273,9 @@ async function loadAll(force=false){
       S.params = Object.assign({}, r.params, {
         verrou: S.params.verrou,
         typeColors: S.params.typeColors || r.params.typeColors || {},
-        reposFixe: S.params.reposFixe || r.params.reposFixe || {}
+        reposFixe: S.params.reposFixe || r.params.reposFixe || {},
+        motifsAbsence: r.params.motifsAbsence || S.params.motifsAbsence,
+        reglesEnfantMalade: r.params.reglesEnfantMalade || S.params.reglesEnfantMalade,
       });
       lsSet('params',S.params);
     }
@@ -1626,7 +1670,7 @@ async function sendReq(){
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderEchangesMgr();
+  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();
   if(document.getElementById('paramScriptUrl'))
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
@@ -2443,7 +2487,7 @@ async function saveAbsence(){
 function openAbsEmpModal(){
   document.getElementById('absEmpDate').value=fmt(new Date());
   document.getElementById('absEmpNote').value='';
-  document.getElementById('absEmpMotif').value='maladie';
+  populerMotifsAbsenceEmp();
   openModal('mAbsEmp');
 }
 async function saveAbsenceEmp(){
@@ -2731,6 +2775,9 @@ function openFicheEmp(empId){
   document.getElementById('ficheCode').value = emp.code||'';
   document.getElementById('ficheSite').value = emp.site||'Ham';
   document.getElementById('ficheChildren').checked = !!emp.hasChildren;
+  // Enfants (pour le quota "enfant malade")
+  editingEnfants = JSON.parse(JSON.stringify(emp.enfants||[]));
+  renderFicheEnfants();
   // Contrat
   const typeC = emp.typeContrat||'';
   document.getElementById('ficheTypeContrat').value = typeC;
@@ -2812,6 +2859,28 @@ function calcCpResumeHTML(emp){
      <div style="font-size:11px;color:var(--muted);margin-top:6px;">Calcul automatique mensuel depuis le 1er juin (période légale) — renseigne un solde constaté ci-dessous pour partir d'une valeur réelle si besoin.</div>`;
 }
 
+// État temporaire pendant l'édition des enfants d'un salarié dans sa fiche (non persisté tant
+// que "Enregistrer" n'est pas cliqué).
+let editingEnfants = [];
+function renderFicheEnfants(){
+  const el = document.getElementById('ficheEnfantsList');
+  if(!el) return;
+  el.innerHTML = editingEnfants.map((e,i)=>`
+    <div class="magasin-row" style="gap:6px;">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
+      <input type="date" class="magasin-name-input" id="enfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <button class="btn-del" onclick="supprimerEnfantFiche(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
+}
+function ajouterEnfantFiche(){
+  editingEnfants.push({dateNaissance:''});
+  renderFicheEnfants();
+}
+function supprimerEnfantFiche(idx){
+  editingEnfants.splice(idx,1);
+  renderFicheEnfants();
+}
+
 document.getElementById('ficheTypeContrat').addEventListener('change', function(){
   document.getElementById('ficheDateFinWrap').style.display = this.value ? 'block' : 'none';
   if(!this.value) document.getElementById('ficheDateFin').value='';
@@ -2827,6 +2896,12 @@ async function saveFicheEmp(){
   emp.addr = document.getElementById('ficheAddr').value.trim();
   emp.site = document.getElementById('ficheSite').value;
   emp.hasChildren = document.getElementById('ficheChildren').checked;
+  // Enfants : relit les dates de naissance saisies, ignore les lignes vides
+  editingEnfants.forEach((e,i)=>{
+    const dateEl = document.getElementById('enfantDate_'+i);
+    if(dateEl) e.dateNaissance = dateEl.value;
+  });
+  emp.enfants = editingEnfants.filter(e=>e.dateNaissance);
   emp.typeContrat = document.getElementById('ficheTypeContrat').value;
   emp.dateFin = document.getElementById('ficheDateFin').value||null;
   // Repos fixe
@@ -3028,6 +3103,120 @@ async function saveEventTypes(){
   renderParamEvents();
   refreshActiveView();
   toast(r&&r.ok?'✓ Types d\'événements enregistrés':'✓ Enregistré localement');
+}
+
+// ── Motifs d'absence configurables (salarié → "Signaler une absence") ──
+function renderParamMotifsAbsence(){
+  const el = document.getElementById('paramMotifsAbsence');
+  if(!el) return;
+  const motifs = S.params.motifsAbsence || [];
+  el.innerHTML = motifs.map((m,i)=>`
+    <div class="magasin-row" id="motifRow_${i}" style="flex-wrap:wrap;gap:6px;">
+      <input type="text" class="magasin-name-input" id="motifLabel_${i}" value="${m.label}" placeholder="Nom du motif" style="flex:1;min-width:120px;">
+      <button class="btn-del" onclick="supprimerMotifAbsence(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun motif configuré</div>';
+}
+function ajouterMotifAbsence(){
+  const nom = prompt('Nom du nouveau motif (ex : Rendez-vous médical, Panne de voiture...) :');
+  if(!nom || !nom.trim()) return;
+  if(!S.params.motifsAbsence) S.params.motifsAbsence=[];
+  S.params.motifsAbsence.push({id:'motif_'+Date.now(), label:nom.trim()});
+  persist();
+  renderParamMotifsAbsence();
+  toast(`✓ ${nom.trim()} ajouté`);
+}
+function supprimerMotifAbsence(idx){
+  const m = S.params.motifsAbsence[idx];
+  if(!m) return;
+  if(!confirm(`Supprimer le motif "${m.label}" ?`)) return;
+  S.params.motifsAbsence.splice(idx,1);
+  persist();
+  renderParamMotifsAbsence();
+  toast(`✓ ${m.label} supprimé`);
+}
+async function saveMotifsAbsence(){
+  S.params.motifsAbsence.forEach((m,i)=>{
+    const labelEl = document.getElementById('motifLabel_'+i);
+    if(labelEl) m.label = labelEl.value.trim() || m.label;
+  });
+  persist();
+  const r = await api('saveParams',{params:S.params});
+  renderParamMotifsAbsence();
+  populerMotifsAbsenceEmp();
+  toast(r&&r.ok?'✓ Motifs enregistrés':'✓ Enregistré localement');
+}
+// Remplit dynamiquement le select du modal "Signaler une absence" côté salarié
+function populerMotifsAbsenceEmp(){
+  const sel = document.getElementById('absEmpMotif');
+  if(!sel) return;
+  const motifs = S.params.motifsAbsence || [];
+  const current = sel.value;
+  sel.innerHTML = motifs.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
+  if(motifs.some(m=>m.id===current)) sel.value = current;
+}
+
+// ── Règles "Enfant malade" (jours/an selon nombre d'enfants) ──
+function renderParamReglesEnfantMalade(){
+  const el = document.getElementById('paramReglesEnfantMalade');
+  if(!el) return;
+  const regles = S.params.reglesEnfantMalade || {seuils:[],joursSiMoinsUnAn:0};
+  el.innerHTML = (regles.seuils||[]).map((s,i)=>`
+    <div class="magasin-row" id="seuilRow_${i}" style="flex-wrap:wrap;gap:6px;">
+      <span style="font-size:12px;white-space:nowrap;">À partir de</span>
+      <input type="number" class="mini-input" id="seuilNb_${i}" value="${s.seuil}" min="1" max="20" style="width:60px;">
+      <span style="font-size:12px;white-space:nowrap;">enfant(s) :</span>
+      <input type="number" class="mini-input" id="seuilJours_${i}" value="${s.jours}" min="0" max="30" style="width:60px;">
+      <span style="font-size:12px;white-space:nowrap;">jour(s)/an</span>
+      <button class="btn-del" onclick="supprimerSeuilEnfantMalade(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun palier configuré</div>';
+  const joursEl = document.getElementById('pJoursMoinsUnAn');
+  if(joursEl) joursEl.value = regles.joursSiMoinsUnAn || 0;
+}
+function ajouterSeuilEnfantMalade(){
+  if(!S.params.reglesEnfantMalade) S.params.reglesEnfantMalade={seuils:[],joursSiMoinsUnAn:0};
+  if(!S.params.reglesEnfantMalade.seuils) S.params.reglesEnfantMalade.seuils=[];
+  S.params.reglesEnfantMalade.seuils.push({seuil:1,jours:3});
+  persist();
+  renderParamReglesEnfantMalade();
+}
+function supprimerSeuilEnfantMalade(idx){
+  S.params.reglesEnfantMalade.seuils.splice(idx,1);
+  persist();
+  renderParamReglesEnfantMalade();
+}
+async function saveReglesEnfantMalade(){
+  const regles = S.params.reglesEnfantMalade || {seuils:[],joursSiMoinsUnAn:0};
+  (regles.seuils||[]).forEach((s,i)=>{
+    const nbEl = document.getElementById('seuilNb_'+i);
+    const joursEl = document.getElementById('seuilJours_'+i);
+    if(nbEl) s.seuil = parseInt(nbEl.value)||s.seuil;
+    if(joursEl) s.jours = parseInt(joursEl.value)||0;
+  });
+  regles.joursSiMoinsUnAn = parseInt(document.getElementById('pJoursMoinsUnAn').value)||0;
+  S.params.reglesEnfantMalade = regles;
+  persist();
+  const r = await api('saveParams',{params:S.params});
+  renderParamReglesEnfantMalade();
+  toast(r&&r.ok?'✓ Règles enregistrées':'✓ Enregistré localement');
+}
+// Calcule le quota "enfant malade" (jours/an) d'un employé selon ses enfants déclarés.
+// Prend le palier le plus élevé atteint par le nombre d'enfants, ou la majoration "moins d'1 an"
+// si elle est supérieure (l'âge est calculé dynamiquement à partir de la date de naissance, donc
+// ce quota peut changer d'une année sur l'autre sans intervention manuelle).
+function calcQuotaEnfantMalade(emp){
+  const enfants = emp.enfants || [];
+  const nb = enfants.length;
+  if(nb===0) return 0;
+  const regles = S.params.reglesEnfantMalade || {seuils:[],joursSiMoinsUnAn:0};
+  let jours = 0;
+  (regles.seuils||[]).forEach(s=>{ if(nb>=s.seuil && s.jours>jours) jours=s.jours; });
+  const aMoinsUnAn = enfants.some(e=>{
+    if(!e.dateNaissance) return false;
+    const ageAns = (Date.now() - new Date(e.dateNaissance+'T12:00:00').getTime()) / (365.25*24*3600*1000);
+    return ageAns >= 0 && ageAns < 1;
+  });
+  if(aMoinsUnAn && (regles.joursSiMoinsUnAn||0) > jours) jours = regles.joursSiMoinsUnAn;
+  return jours;
 }
 
 // ── COLORATION D'ÉVÉNEMENTS SUR PLAGE DE DATES ──
@@ -3594,9 +3783,18 @@ function toggleCongeFields() {
   document.getElementById('autreFields').style.display = (!isConge && !isEchange) ? 'block' : 'none';
   document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
   if(isEchange) remplirSelectCollegues();
-  // Afficher info enfant malade
+  // Afficher info enfant malade, avec le quota calculé selon les enfants déclarés du salarié
   const infoEl = document.getElementById('enfantMaladeInfo');
   if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
+  if(isEnfant && S.user){
+    const quota = calcQuotaEnfantMalade(S.user);
+    const txtEl = document.getElementById('enfantMaladeQuotaTxt');
+    if(txtEl){
+      txtEl.textContent = quota>0
+        ? `Quota : ${quota} jour(s)/an pour vos ${S.user.enfants.length} enfant(s) déclaré(s).`
+        : `Quota : aucun enfant déclaré dans votre fiche — contactez le gestionnaire.`;
+    }
+  }
 }
 
 // Remplit le select des collègues (même site, hors moi-même) pour la demande d'échange
