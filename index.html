@@ -433,6 +433,12 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empAbsList"></div>
     </div>
 
+    <!-- MES DEMANDES DE CONGÉ SANS SOLDE -->
+    <div class="quota-card mt-10" id="empCongeSansSoldeCard" style="display:none;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">📋 Mes congés sans solde</div>
+      <div id="empCongeSansSoldeList"></div>
+    </div>
+
     <!-- MES DEMANDES D'ÉCHANGE ENVOYÉES -->
     <div class="quota-card mt-10" id="empEchangesEnvoyesCard" style="display:none;">
       <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🔄 Mes demandes d'échange</div>
@@ -458,6 +464,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="fg"><label>Type</label>
         <select id="rType" onchange="toggleCongeFields()">
           <option value="conge">Demande de congé payé</option>
+          <option value="conge_sans_solde">Congé sans solde</option>
           <option value="enfant_malade">Enfant malade (- de 16 ans)</option>
           <option value="maladie">Arrêt maladie</option>
           <option value="echange">Échange avec un collègue</option>
@@ -606,6 +613,9 @@ tbody tr:hover td{background:#FAFAF8;}
         </table></div>
       </div>
       <div id="congesListeMgr"></div>
+
+      <div style="font-weight:600;font-size:14px;margin:18px 0 12px;">📋 Congés sans solde — en attente</div>
+      <div id="congeSansSoldeListeMgr"></div>
     </div>
 
     <div class="tab-content" id="tab-remplace">
@@ -1057,6 +1067,7 @@ const TYPES=[
   {key:'remplacement', label:'Remplacement', info:'Renfort dans un autre magasin', color:'#0EA5E9',bg:'#EFF6FF',border:'#BFDBFE'},
   {key:'vip',       label:'★ VIP',        info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
   {key:'conge',     label:'Congé',         info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
+  {key:'congeSansSolde', label:'Congé sans solde', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
   {key:'maladie',   label:'Maladie',       info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
   {key:'off',       label:'Repos',         info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
 ];
@@ -1405,6 +1416,18 @@ function buildLegend(id){
   let h=Object.entries(SC).map(([n,c])=>`<div class="legend-item"><div class="ldot" style="background:${c.color}"></div>${n}</div>`).join('');
   el.innerHTML=h;
 }
+// Légende des TYPES de journée (Magasin, Entrepôt A/B, Congé, Maladie, Repos...) plutôt que des
+// sites — c'est ce qui aide un salarié à lire les couleurs de SON planning (il ne travaille que
+// dans son propre magasin, donc la légende des sites n'apporte rien côté salarié).
+function buildTypeLegend(id){
+  const el=document.getElementById(id);if(!el)return;
+  const site = S.user?.site || Object.keys(SC)[0];
+  let h = TYPES.map(t=>{
+    const c = getColor(t.key, site);
+    return `<div class="legend-item"><div class="ldot" style="background:${c.color}"></div>${t.label}</div>`;
+  }).join('');
+  el.innerHTML = h;
+}
 function updStats(){
   document.getElementById('sE').textContent=S.employees.length;
   document.getElementById('sM').textContent=S.mods.length;
@@ -1480,13 +1503,14 @@ function renderEmp(){
   document.getElementById('empAlert').innerHTML=myMods.length
     ?`<div class="alert-mod">⚠️ <strong>Planning modifié :</strong> ${myMods.map(m=>`${m.dl} : ${m.det}`).join(' · ')}</div>`:'';
   myMods.forEach(m=>m.seen=true);
-  buildLegend('empLeg');
+  buildTypeLegend('empLeg');
   document.getElementById('rDate').value=fmt(new Date());
   toggleCongeFields();
   initCongeListeners();
   renderEmpWeek();
   renderEmpQuota();
   renderEmpAbsList();
+  renderEmpCongeSansSolde();
   renderEmpEchanges();
   updSimuDelai();
   switchEmpTab('perso');
@@ -1517,7 +1541,7 @@ function switchEmpTab(tab){
   document.getElementById('empTabMagasin').classList.toggle('active',tab==='magasin');
   document.getElementById('empTabContentPerso').style.display=tab==='perso'?'block':'none';
   document.getElementById('empTabContentMagasin').style.display=tab==='magasin'?'block':'none';
-  if(tab==='magasin'){ buildLegend('empLegMagasin'); renderEmpMagasin(); }
+  if(tab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
 }
 
 // ── Toggle Semaine/Mois sur "Mon planning" ──
@@ -1528,7 +1552,7 @@ function setEmpView(v){
   document.getElementById('empVSemaine').style.display=v==='sem'?'block':'none';
   document.getElementById('empVMois').style.display=v==='mois'?'block':'none';
   if(v==='sem') renderEmpWeek();
-  else { buildLegend('empLegMois'); renderEmpMonth(); }
+  else { buildTypeLegend('empLegMois'); renderEmpMonth(); }
 }
 
 // ── Vue mois personnelle (calendrier) ──
@@ -1649,6 +1673,15 @@ async function sendReq(){
     const nb=countJoursOuvres(dateDebut,dateFin);
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'conge',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
+  } else if(type==='conge_sans_solde'){
+    const dateDebut=document.getElementById('rDateDebut')?.value;
+    const dateFin=document.getElementById('rDateFin')?.value;
+    if(!dateDebut||!dateFin){toast('Sélectionnez les dates');return;}
+    if(dateFin<dateDebut){toast('La date de fin doit être après le début');return;}
+    // Pas de vérification de quota/préavis : le congé sans solde est hors règles CP standard.
+    const nb=countJoursOuvres(dateDebut,dateFin);
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'conge_sans_solde',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
   } else if(type==='echange'){
     const dateA=document.getElementById('rEchangeDate')?.value;
     const cibleId=document.getElementById('rEchangeCollegue')?.value;
@@ -1670,6 +1703,7 @@ async function sendReq(){
   S.requests.push(req);persist();updStats();
   document.getElementById('rNote').value='';
   renderEmpQuota();
+  renderEmpCongeSansSolde();
   renderEmpEchanges();
   toast('Envoi en cours...');
   const r=await api('saveRequest',req);
@@ -1680,7 +1714,7 @@ async function sendReq(){
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();
+  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();
   if(document.getElementById('paramScriptUrl'))
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
@@ -2541,6 +2575,28 @@ function renderEmpAbsList(){
     </div>`;
   });
   document.getElementById('empAbsList').innerHTML=h;
+}
+
+function getCongesSansSoldeEmp(empId){
+  return S.requests.filter(r=>r.empId===empId && r.type==='conge_sans_solde').sort((a,b)=>b.id-a.id);
+}
+function renderEmpCongeSansSolde(){
+  const emp=S.user;if(!emp)return;
+  const mine=getCongesSansSoldeEmp(emp.id);
+  const card=document.getElementById('empCongeSansSoldeCard');
+  if(!mine.length){card.style.display='none';return;}
+  card.style.display='block';
+  document.getElementById('empCongeSansSoldeList').innerHTML = mine.map(r=>{
+    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
+    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
+    return `<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-size:11px;color:var(--muted)">${r.joursOuvres} jour(s) ouvré(s) — non rémunéré</div>
+      </div>
+      <span class="conge-status ${statusCls}">${statusLbl}</span>
+    </div>`;
+  }).join('');
 }
 
 // ── Échanges d'horaire (vue salarié) ──
@@ -3772,8 +3828,13 @@ function checkCongeRealtime() {
   if (!el || !debut || !fin || fin < debut) { if(el) el.innerHTML=''; return; }
   const emp = S.user;
   if (!emp) return;
-  const result = verifierRegleConges(emp.id, debut, fin);
   const nb = countJoursOuvresReels(debut, fin);
+  // Congé sans solde : pas de quota CP, pas de règles de préavis à vérifier — juste un récap.
+  if (document.getElementById('rType')?.value === 'conge_sans_solde') {
+    el.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--muted);">${nb} jour(s) ouvré(s) — non rémunéré(s), sans impact sur votre solde de congés payés.</div>`;
+    return;
+  }
+  const result = verifierRegleConges(emp.id, debut, fin);
   let html = `<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">${nb} jour(s) ouvré(s)</div>`;
   result.errors.forEach(e => html += `<div class="alert-block" style="padding:8px 10px;font-size:12px;">${e}</div>`);
   result.warnings.forEach(w => html += `<div class="alert-warn2" style="padding:8px 10px;font-size:12px;">${w}</div>`);
@@ -3786,7 +3847,7 @@ function checkCongeRealtime() {
 
 function toggleCongeFields() {
   const type = document.getElementById('rType').value;
-  const isConge = type === 'conge';
+  const isConge = type === 'conge' || type === 'conge_sans_solde';
   const isEnfant = type === 'enfant_malade';
   const isEchange = type === 'echange';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
@@ -4020,6 +4081,62 @@ async function refuserConge(id) {
   toast('Congé refusé');
   api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
     dateDebut: req.dateDebut, dateFin: req.dateFin});
+}
+
+// ── Congés sans solde (gestionnaire) : hors quota CP, pas de jokers ──
+function renderCongeSansSoldeMgr(){
+  const enAttente = S.requests.filter(r=>r.type==='conge_sans_solde' && r.status==='pending');
+  const el = document.getElementById('congeSansSoldeListeMgr');
+  if(!el) return;
+  if(!enAttente.length){
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px;">Aucun congé sans solde en attente</div>';
+    return;
+  }
+  el.innerHTML = enAttente.map(r=>`
+    <div class="quota-card" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:180px;">
+          <div style="font-weight:600;font-size:13px;">${r.empName}</div>
+          <div style="font-size:12px;color:var(--muted);">
+            ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${r.joursOuvres} jour(s)
+          </div>
+          ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
+        </div>
+        <div style="display:flex;gap:5px;">
+          <button class="btn btn-sm btn-ok" onclick="validerCongeSansSolde(${r.id})">✓</button>
+          <button class="btn btn-sm btn-no" onclick="refuserCongeSansSolde(${r.id})">✗</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+async function validerCongeSansSolde(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  req.status = 'approved';
+  // Marquer le planning en "Congé sans solde" — pas de joker, pas de déduction CP.
+  let cur = new Date(req.dateDebut+'T12:00');
+  const fin = new Date(req.dateFin+'T12:00');
+  while(cur <= fin){
+    if(JOURS_OUVRES.includes(cur.getDay())){
+      const emp = S.employees.find(e=>e.id===req.empId);
+      S.planning[`${req.empId}_${fmt(cur)}`] = {type:'congeSansSolde', site:emp?.site||'', note:'Congé sans solde'};
+    }
+    cur = addDays(cur,1);
+  }
+  persist();
+  renderCongeSansSoldeMgr();
+  renderWeek();
+  toast('✓ Congé sans solde validé');
+  api('validerConge', {reqId:id, empId:req.empId, dateDebut:req.dateDebut, dateFin:req.dateFin,
+    empEmail:req.empEmail, empName:req.empName});
+}
+async function refuserCongeSansSolde(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  req.status = 'refused';
+  persist();
+  renderCongeSansSoldeMgr();
+  toast('Congé sans solde refusé');
+  api('refuserConge', {reqId:id, empEmail:req.empEmail, empName:req.empName,
+    dateDebut:req.dateDebut, dateFin:req.dateFin});
 }
 
 // ── Échanges d'horaire (vue gestionnaire) ──
