@@ -641,9 +641,18 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="tab-content" id="tab-params">
       <div class="params-grid">
         <div class="param-card">
-          <h3>Effectif minimum par magasin</h3>
+          <h3>Effectif minimum par magasin et par jour</h3>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Un minimum différent peut être défini pour chaque jour de la semaine (ex: renforcé le samedi).</div>
           <div id="paramSites"></div>
           <button class="btn btn-primary btn-sm mt-10" onclick="saveParams()">✓ Enregistrer</button>
+        </div>
+        <div class="param-card">
+          <h3>📅 Samedis "effectif plein"</h3>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+            Le 1er samedi de chaque mois est automatiquement en effectif plein (tout le monde requis). Décoche-le si besoin, ou coche d'autres samedis (ex: période de soldes).
+          </div>
+          <div id="paramSamedisPleins"></div>
+          <button class="btn btn-primary btn-sm mt-10" onclick="saveSamedisPleins()">✓ Enregistrer</button>
         </div>
         <div class="param-card" style="border:2px solid #FCA5A5;background:#FEF2F2;">
           <h3 style="color:#DC2626;">🔒 Mode anti-erreur</h3>
@@ -1143,6 +1152,8 @@ const S={
       seuils:[{seuil:1,jours:3},{seuil:3,jours:5}],
       joursSiMoinsUnAn:5,
     },
+    // Exceptions au 1er-samedi-du-mois automatique pour l'effectif plein : { 'YYYY-MM-DD': true|false }
+    samedisPleins:{},
   }),
   // Types d'événements personnalisés (nom + couleur), créés/supprimés par le gestionnaire
   eventTypes:lsGet('eventTypes',[
@@ -1296,6 +1307,7 @@ async function loadAll(force=false){
         reposFixe: S.params.reposFixe || r.params.reposFixe || {},
         motifsAbsence: r.params.motifsAbsence || S.params.motifsAbsence,
         reglesEnfantMalade: r.params.reglesEnfantMalade || S.params.reglesEnfantMalade,
+        samedisPleins: r.params.samedisPleins || S.params.samedisPleins,
       });
       lsSet('params',S.params);
     }
@@ -1402,6 +1414,37 @@ function estVisibleDansPlanning(emp, refDate){
 }
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function getMon(d){const x=new Date(d);const day=x.getDay();x.setDate(x.getDate()-day+(day===0?-6:1));x.setHours(0,0,0,0);return x;}
+// S.params.minStaff[site] peut être soit un nombre simple (ancien format, même effectif tous les
+// jours), soit un objet {0:n,...,6:n} indexé par jour de semaine (Date.getDay()) pour un effectif
+// différent selon le jour (ex: samedi renforcé). Lecture rétro-compatible.
+function getMinStaff(site, date){
+  const v = S.params.minStaff?.[site];
+  if(v==null) return 1;
+  if(typeof v === 'object') return (v[date.getDay()] ?? 1);
+  return v;
+}
+// Un samedi peut être marqué "effectif plein" (1er samedi du mois par défaut, + exceptions
+// manuelles dans S.params.samedisPleins). Dans ce cas, l'effectif minimum du jour est remplacé par
+// "tout le monde disponible" (voir getMinStaff appelants) plutôt que le minimum habituel.
+function estSamediEffectifPlein(dateStr){
+  const d = new Date(dateStr+'T12:00:00');
+  if(d.getDay()!==6) return false;
+  const exceptions = S.params.samedisPleins || {}; // { 'YYYY-MM-DD': true|false } — override manuel
+  if(dateStr in exceptions) return !!exceptions[dateStr];
+  // Par défaut : 1er samedi du mois = effectif plein
+  const premierJourMois = new Date(d.getFullYear(), d.getMonth(), 1);
+  const premierSamedi = addDays(premierJourMois, (6 - premierJourMois.getDay() + 7) % 7);
+  return fmt(premierSamedi) === dateStr;
+}
+// Fonction à utiliser partout où l'effectif minimum d'un jour est vérifié : combine le minimum
+// habituel (par jour de semaine) et le cas "samedi effectif plein" (tout l'effectif du magasin
+// requis ce jour-là, ex: soldes ou 1er samedi du mois).
+function getMinStaffEffectif(site, date){
+  if(estSamediEffectifPlein(fmt(date))){
+    return S.employees.filter(e=>e.site===site).length;
+  }
+  return getMinStaff(site, date);
+}
 function fmtFR(d,o){return d.toLocaleDateString('fr-FR',o);}
 function ini(n){return n.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();}
 function avc(id){return AVC[parseInt(id.replace(/\D/g,''))%AVC.length];}
@@ -1985,7 +2028,7 @@ function checkEffectifAlerts(mon) {
     if (d.getDay() === 0) continue; // dimanche skip
     const dateStr = fmt(d);
     Object.keys(SC).forEach(site => {
-      const minStaff = S.params.minStaff?.[site] || 1;
+      const minStaff = getMinStaffEffectif(site, d);
       const presents = S.employees.filter(e => {
         const sh = S.planning[`${e.id}_${dateStr}`];
         const siteEffectifJour = sh?.site || e.site;
@@ -2140,12 +2183,12 @@ function renderWeek(){
       tb+='</tr>';
     });
 
-    // Ligne effectif par site
-    const minStaff = S.params.minStaff?.[site] || 1;
+    // Ligne effectif par site (minimum requis désormais variable selon le jour de la semaine)
     tb += `<tr class="effectif-row"><td style="font-size:10px;color:var(--muted);font-weight:600;padding-left:12px;">Présents ${site}</td>`;
     for(let i=0;i<7;i++){
       const d=addDays(mon,i);
       const dStr2=fmt(d);
+      const minStaff = getMinStaffEffectif(site, d);
       // Compte les employés DU SITE qui travaillent + les renforts venus d'autres magasins ce jour-là
       const presents=S.employees.filter(e=>{
         const sh=S.planning[`${e.id}_${dStr2}`];
@@ -2179,7 +2222,6 @@ function renderMonth(){
 function renderMonthSiteTable(site, ref, today, empsFiltres){
   const sColor=SC[site]||SC['Ham'];
   const emps=empsFiltres.filter(e=>e.site===site && estVisibleDansPlanning(e,ref));
-  const minStaff=S.params.minStaff[site]||1;
   const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
   const days=[];
   for(let d=1;d<=daysInMonth;d++) days.push(new Date(ref.getFullYear(),ref.getMonth(),d));
@@ -2288,19 +2330,17 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);background:#F8FAFF;">${cell}</td>`;
     }
-    const cls=count>=minStaff?'staff-ok':'staff-warn';
-    tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}</td></tr>`;
+    const minStaffJour = getMinStaffEffectif(site, d);
+    const cls=count>=minStaffJour?'staff-ok':'staff-warn';
+    tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}<span style="font-size:9px;color:var(--muted);font-weight:400;"> /${minStaffJour}</span></td></tr>`;
   });
-  tb+=`<tr class="staff-row"><td class="date-td" style="font-size:10px;color:var(--muted);font-weight:600;">Min requis</td><td></td>`;
-  emps.forEach(()=>tb+=`<td></td>`);
-  if(renforts.length) tb+=`<td></td>`;
-  tb+=`<td style="font-size:11px;font-weight:700;color:var(--muted);">${minStaff}</td></tr></tbody>`;
+  tb+=`</tbody>`;
 
   return `<div style="margin-bottom:22px;">
     <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
       <span style="font-size:12px;font-weight:600;">${site}</span>
-      <span style="font-size:11px;color:var(--muted);">· min : <strong>${minStaff}</strong> · ${emps.length} employé(s)${renforts.length?` · <span style="color:#0EA5E9;font-weight:600;">${renforts.length} renfort(s)</span>`:''}
+      <span style="font-size:11px;color:var(--muted);">· ${emps.length} employé(s)${renforts.length?` · <span style="color:#0EA5E9;font-weight:600;">${renforts.length} renfort(s)</span>`:''} · min affiché par jour (colonne Présents)
       </span>
     </div>
     <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
@@ -2683,7 +2723,7 @@ function estimDist(addr,targetSite){
 function findReplacements(absentId,dateStr,targetSite){
   // Calcule, pour un magasin donné à une date donnée, le nombre de présents et la marge par rapport au minimum requis
   function effectifDuJour(site){
-    const minStaff=S.params.minStaff[site]||1;
+    const minStaff=getMinStaffEffectif(site, new Date(dateStr+'T12:00:00'));
     const presents=S.employees.filter(e=>{
       const s=S.planning[`${e.id}_${dateStr}`];
       return s&&s.type!=='off'&&s.type!=='conge'&&s.type!=='maladie'&&s.site===site;
@@ -3071,16 +3111,28 @@ function renderParams(){
   renderParamEvents();
   initVerrouUI();
   let h='';
+  const JOURS_ABBREV=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
   Object.entries(SC).forEach(([site,cfg])=>{
-    h+=`<div class="site-param-row">
-      <div style="width:10px;height:10px;border-radius:3px;background:${cfg.color};flex-shrink:0;"></div>
-      <div style="flex:1;font-size:13px;font-weight:500;">${site}</div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);">
-        Min <input type="number" class="mini-input" id="pm_${site.replace(/[^a-zA-Z]/g,'_')}" value="${S.params.minStaff[site]||1}" min="0" max="20">
+    const siteKey=site.replace(/[^a-zA-Z]/g,'_');
+    const raw = S.params.minStaff?.[site];
+    // Rétro-compat : un nombre simple (ancien format) devient la valeur par défaut des 7 jours.
+    const parJour = (raw && typeof raw==='object') ? raw : {0:raw||1,1:raw||1,2:raw||1,3:raw||1,4:raw||1,5:raw||1,6:raw||1};
+    h+=`<div class="site-param-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:10px;height:10px;border-radius:3px;background:${cfg.color};flex-shrink:0;"></div>
+        <div style="flex:1;font-size:13px;font-weight:500;">${site}</div>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        ${[1,2,3,4,5,6,0].map(jour=>`
+          <div style="text-align:center;">
+            <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">${JOURS_ABBREV[jour]}</div>
+            <input type="number" class="mini-input" style="width:42px;" id="pm_${siteKey}_${jour}" value="${parJour[jour]??1}" min="0" max="20">
+          </div>`).join('')}
       </div>
     </div>`;
   });
   document.getElementById('paramSites').innerHTML=h;
+  renderParamSamedisPleins();
   let he='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
   S.employees.forEach(emp=>{
     he+=`<div class="fg"><label>${emp.name}</label>
@@ -3090,13 +3142,70 @@ function renderParams(){
   document.getElementById('paramEmpAdresses').innerHTML=he;
 }
 async function saveParams(){
+  if(!S.params.minStaff) S.params.minStaff={};
   Object.keys(SC).forEach(site=>{
-    const el=document.getElementById('pm_'+site.replace(/[^a-zA-Z]/g,'_'));
-    if(el) S.params.minStaff[site]=parseInt(el.value)||1;
+    const siteKey=site.replace(/[^a-zA-Z]/g,'_');
+    const parJour={};
+    let auMoinsUnTrouve=false;
+    for(let jour=0;jour<=6;jour++){
+      const el=document.getElementById(`pm_${siteKey}_${jour}`);
+      if(el){ parJour[jour]=parseInt(el.value)||0; auMoinsUnTrouve=true; }
+    }
+    if(auMoinsUnTrouve) S.params.minStaff[site]=parJour;
   });
   persist();
   const r=await api('saveParams',{params:S.params});
+  refreshActiveView();
   toast(r&&r.ok?'✓ Paramètres enregistrés':'✓ Enregistré localement');
+}
+
+// Détermine si une date (samedi) est le 1er samedi du mois — comportement par défaut "effectif plein".
+function estPremierSamediDuMois(dateStr){
+  const d = new Date(dateStr+'T12:00:00');
+  const premierJourMois = new Date(d.getFullYear(), d.getMonth(), 1);
+  const premierSamedi = addDays(premierJourMois, (6 - premierJourMois.getDay() + 7) % 7);
+  return fmt(premierSamedi) === dateStr;
+}
+// Liste les ~16 prochains samedis avec une case à cocher "effectif plein", pré-cochée pour le 1er
+// samedi de chaque mois (par défaut) ou selon une exception déjà enregistrée.
+function renderParamSamedisPleins(){
+  const el = document.getElementById('paramSamedisPleins');
+  if(!el) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let cur = new Date(today);
+  while(cur.getDay()!==6) cur = addDays(cur,1);
+  let h = '';
+  for(let i=0;i<16;i++){
+    const dateStr = fmt(cur);
+    const isPlein = estSamediEffectifPlein(dateStr);
+    const isDefaut = estPremierSamediDuMois(dateStr);
+    h += `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;">
+      <input type="checkbox" id="sp_${dateStr}" ${isPlein?'checked':''} style="width:auto;">
+      ${fmtFR(cur,{weekday:'long',day:'numeric',month:'long'})}
+      ${isDefaut?'<span style="font-size:11px;color:var(--muted);">(1er samedi du mois, coché par défaut)</span>':''}
+    </label>`;
+    cur = addDays(cur,7);
+  }
+  el.innerHTML = h;
+}
+async function saveSamedisPleins(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  let cur = new Date(today);
+  while(cur.getDay()!==6) cur = addDays(cur,1);
+  if(!S.params.samedisPleins) S.params.samedisPleins = {};
+  for(let i=0;i<16;i++){
+    const dateStr = fmt(cur);
+    const checked = !!document.getElementById('sp_'+dateStr)?.checked;
+    // On ne stocke une exception QUE si le choix diffère du comportement automatique
+    // (1er samedi du mois) — garde le paramétrage propre pour les mois futurs non encore listés.
+    if(checked !== estPremierSamediDuMois(dateStr)) S.params.samedisPleins[dateStr] = checked;
+    else delete S.params.samedisPleins[dateStr];
+    cur = addDays(cur,7);
+  }
+  persist();
+  const r = await api('saveParams',{params:S.params});
+  refreshActiveView();
+  toast(r&&r.ok?'✓ Samedis enregistrés':'✓ Enregistré localement');
 }
 // ── GESTION MAGASINS ──
 // ── GESTION TYPES D'ÉVÉNEMENTS (pastilles personnalisables) ──
@@ -3428,7 +3537,7 @@ function ajouterMagasin(){
   const couleur = couleurs[Object.keys(SC).length % couleurs.length];
   SC[nomTrim] = { color: couleur, bg: couleur+'22', border: couleur+'66' };
   if(!S.params.minStaff) S.params.minStaff = {};
-  S.params.minStaff[nomTrim] = 1;
+  S.params.minStaff[nomTrim] = {0:1,1:1,2:1,3:1,4:1,5:1,6:1};
   if(!S.params.adresses) S.params.adresses = {};
   S.params.adresses[nomTrim] = '';
   persist();
@@ -3487,7 +3596,7 @@ async function saveMagasins(){
       if(newMinStaff[oldSite]!==undefined){ newMinStaff[newNom]=newMinStaff[oldSite]; delete newMinStaff[oldSite]; }
       hasRename = true;
     }
-    if(newMinStaff[newNom]===undefined) newMinStaff[newNom]=1;
+    if(newMinStaff[newNom]===undefined) newMinStaff[newNom]={0:1,1:1,2:1,3:1,4:1,5:1,6:1};
   });
 
   // Appliquer
