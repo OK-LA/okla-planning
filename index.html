@@ -366,6 +366,12 @@ tbody tr:hover td{background:#FAFAF8;}
       🚩 Signaler une absence
     </button>
 
+    <!-- ÉCHANGES REÇUS : demandes d'un collègue qui attendent MA réponse -->
+    <div class="quota-card mt-10" id="empEchangesRecusCard" style="display:none;border:1px solid #0EA5E9;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;color:#0EA5E9;">🔄 Échanges qui vous concernent</div>
+      <div id="empEchangesRecusList"></div>
+    </div>
+
     <div class="tabs">
       <button class="tab active" id="empTabPerso" onclick="switchEmpTab('perso')">Mon planning</button>
       <button class="tab" id="empTabMagasin" onclick="switchEmpTab('magasin')">👥 Mon magasin</button>
@@ -427,6 +433,12 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empAbsList"></div>
     </div>
 
+    <!-- MES DEMANDES D'ÉCHANGE ENVOYÉES -->
+    <div class="quota-card mt-10" id="empEchangesEnvoyesCard" style="display:none;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🔄 Mes demandes d'échange</div>
+      <div id="empEchangesEnvoyesList"></div>
+    </div>
+
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
       <div style="font-weight:700;margin-bottom:4px;">🕓 Quand puis-je poser mes congés ?</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Simulateur — calcule la date limite de dépôt selon le type de période souhaitée</div>
@@ -466,6 +478,15 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="autreFields" style="display:none;">
         <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
       </div>
+      <div id="echangeFields" style="display:none;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue d'échanger vos jours de travail : vous prenez sa place le jour choisi, il/elle prend la vôtre.</div>
+        <div class="fg"><label>Ma date à céder</label><input type="date" id="rEchangeDate"></div>
+        <div class="fg"><label>Collègue</label>
+          <select id="rEchangeCollegue" onchange="updEchangeCollegueInfo()"><option value="">Choisir un collègue...</option></select>
+        </div>
+        <div class="fg"><label>Sa date que je récupère</label><input type="date" id="rEchangeDateCollegue"></div>
+        <div id="echangeCheck" style="margin-bottom:10px;font-size:12px;"></div>
+      </div>
       <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
       <button class="btn btn-primary btn-full" onclick="sendReq()">Envoyer la demande</button>
     </div>
@@ -488,6 +509,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
       <button class="tab" onclick="switchTab('conges')">Congés</button>
       <button class="tab" onclick="switchTab('remplace')">Remplacements</button>
+      <button class="tab" onclick="switchTab('echanges')">Échanges</button>
       <button class="tab" onclick="switchTab('employes')">Employés</button>
       <button class="tab" onclick="switchTab('params')">Paramètres</button>
     </div>
@@ -592,6 +614,11 @@ tbody tr:hover td{background:#FAFAF8;}
         <button class="btn btn-sm" style="background:#FFF7ED;color:#C2410C;border:1px solid #FED7AA;" onclick="openAbsModal()">+ Signaler une absence</button>
       </div>
       <div id="absListMgr"></div>
+    </div>
+
+    <div class="tab-content" id="tab-echanges">
+      <div style="font-weight:600;font-size:14px;margin-bottom:12px;">Échanges d'horaire — en attente de validation</div>
+      <div id="echangesListeMgr"></div>
     </div>
 
     <div class="tab-content" id="tab-employes">
@@ -1309,7 +1336,7 @@ function buildLegend(id){
 function updStats(){
   document.getElementById('sE').textContent=S.employees.length;
   document.getElementById('sM').textContent=S.mods.length;
-  document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending').length;
+  document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending'||r.status==='pending_gestionnaire').length;
   document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
 }
 
@@ -1388,6 +1415,7 @@ function renderEmp(){
   renderEmpWeek();
   renderEmpQuota();
   renderEmpAbsList();
+  renderEmpEchanges();
   updSimuDelai();
   switchEmpTab('perso');
   setEmpView('sem');
@@ -1549,6 +1577,18 @@ async function sendReq(){
     const nb=countJoursOuvres(dateDebut,dateFin);
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'conge',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
+  } else if(type==='echange'){
+    const dateA=document.getElementById('rEchangeDate')?.value;
+    const cibleId=document.getElementById('rEchangeCollegue')?.value;
+    const dateB=document.getElementById('rEchangeDateCollegue')?.value;
+    if(!dateA||!cibleId||!dateB){toast('Complétez ma date, le collègue et sa date');return;}
+    const shA=S.planning[`${emp.id}_${dateA}`];
+    if(!shA||['off','conge','maladie'].includes(shA.type)){toast('Vous ne travaillez pas ce jour-là');return;}
+    const cible=S.employees.find(e=>e.id===cibleId);
+    if(!cible){toast('Collègue introuvable');return;}
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'echange',dateA,dateB,cibleId,cibleName:cible.name,cibleEmail:cible.email,
+      date:dateA,dateDebut:dateA,dateFin:dateA,note,status:'pending_collegue'};
   } else {
     const date=document.getElementById('rDate')?.value||fmt(new Date());
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
@@ -1558,6 +1598,7 @@ async function sendReq(){
   S.requests.push(req);persist();updStats();
   document.getElementById('rNote').value='';
   renderEmpQuota();
+  renderEmpEchanges();
   toast('Envoi en cours...');
   const r=await api('saveRequest',req);
   toast(r&&r.ok?'✓ Demande envoyée':'✓ Demande enregistrée');
@@ -1567,14 +1608,14 @@ async function sendReq(){
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();
+  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderEchangesMgr();
   if(document.getElementById('paramScriptUrl'))
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
   document.querySelectorAll('.tab').forEach(btn=>btn.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  ['planning','conges','remplace','employes','params'].forEach((x,i)=>{
+  ['planning','conges','remplace','echanges','employes','params'].forEach((x,i)=>{
     if(x===n){
       document.querySelectorAll('.tab')[i].classList.add('active');
       document.getElementById('tab-'+x).classList.add('active');
@@ -2424,6 +2465,70 @@ function renderEmpAbsList(){
     </div>`;
   });
   document.getElementById('empAbsList').innerHTML=h;
+}
+
+// ── Échanges d'horaire (vue salarié) ──
+function dlEchange(r){
+  return `${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'short'})} ↔ ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'short'})}`;
+}
+function renderEmpEchanges(){
+  const emp=S.user; if(!emp) return;
+  // Reçus : demandes où je suis la cible, en attente de MA réponse
+  const recus=S.requests.filter(r=>r.type==='echange'&&r.cibleId===emp.id&&r.status==='pending_collegue');
+  const cardRecus=document.getElementById('empEchangesRecusCard');
+  if(recus.length){
+    cardRecus.style.display='block';
+    document.getElementById('empEchangesRecusList').innerHTML = recus.map(r=>`
+      <div class="conge-item" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div>
+          <div style="font-weight:600;font-size:12px">${r.empName} propose un échange</div>
+          <div style="font-size:11px;color:var(--muted)">${dlEchange(r)}${r.note?' · '+r.note:''}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-ok" style="flex:1;" onclick="accepterEchangeCollegue(${r.id})">✓ Accepter</button>
+          <button class="btn btn-sm btn-no" style="flex:1;" onclick="refuserEchangeCollegue(${r.id})">✗ Refuser</button>
+        </div>
+      </div>`).join('');
+  } else {
+    cardRecus.style.display='none';
+  }
+  // Envoyés : mes propres demandes d'échange, avec statut
+  const envoyes=S.requests.filter(r=>r.type==='echange'&&r.empId===emp.id).sort((a,b)=>b.id-a.id);
+  const cardEnvoyes=document.getElementById('empEchangesEnvoyesCard');
+  if(envoyes.length){
+    cardEnvoyes.style.display='block';
+    document.getElementById('empEchangesEnvoyesList').innerHTML = envoyes.map(r=>{
+      const labels={pending_collegue:['En attente de '+r.cibleName.split(' ')[0],'cs-pending'],pending_gestionnaire:['En attente du gestionnaire','cs-pending'],approved:['Validé','cs-ok'],refused:['Refusé','cs-refused']};
+      const [lbl,cls]=labels[r.status]||['—','cs-pending'];
+      return `<div class="conge-item">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:12px">Avec ${r.cibleName}</div>
+          <div style="font-size:11px;color:var(--muted)">${dlEchange(r)}</div>
+        </div>
+        <span class="conge-status ${cls}">${lbl}</span>
+      </div>`;
+    }).join('');
+  } else {
+    cardEnvoyes.style.display='none';
+  }
+}
+async function accepterEchangeCollegue(id){
+  const req=S.requests.find(r=>r.id==id); if(!req) return;
+  req.status='pending_gestionnaire';
+  persist();
+  renderEmpEchanges();
+  toast('✓ Échange accepté, en attente de validation du gestionnaire');
+  api('updateRequestStatus',{reqId:id,newStatus:'pending_gestionnaire',
+    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB});
+}
+async function refuserEchangeCollegue(id){
+  const req=S.requests.find(r=>r.id==id); if(!req) return;
+  req.status='refused';
+  persist();
+  renderEmpEchanges();
+  toast('Échange refusé');
+  api('updateRequestStatus',{reqId:id,newStatus:'refused',
+    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB,refusePar:'collegue'});
 }
 
 const DIST={
@@ -3462,11 +3567,30 @@ function toggleCongeFields() {
   const type = document.getElementById('rType').value;
   const isConge = type === 'conge';
   const isEnfant = type === 'enfant_malade';
+  const isEchange = type === 'echange';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
-  document.getElementById('autreFields').style.display = isConge ? 'none' : 'block';
+  document.getElementById('autreFields').style.display = (!isConge && !isEchange) ? 'block' : 'none';
+  document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
+  if(isEchange) remplirSelectCollegues();
   // Afficher info enfant malade
   const infoEl = document.getElementById('enfantMaladeInfo');
   if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
+}
+
+// Remplit le select des collègues (même site, hors moi-même) pour la demande d'échange
+function remplirSelectCollegues(){
+  const emp = S.user; if(!emp) return;
+  const sel = document.getElementById('rEchangeCollegue');
+  const collegues = S.employees.filter(e=>e.site===emp.site && e.id!==emp.id && estVisibleDansPlanning(e,new Date()));
+  sel.innerHTML = '<option value="">Choisir un collègue...</option>' +
+    collegues.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+function updEchangeCollegueInfo(){
+  const collegueId = document.getElementById('rEchangeCollegue').value;
+  const el = document.getElementById('echangeCheck');
+  if(!collegueId){ el.innerHTML=''; return; }
+  const collegue = S.employees.find(e=>e.id===collegueId);
+  el.innerHTML = collegue ? `<span style="color:var(--muted);">Le collègue et le gestionnaire devront tous les deux valider cet échange.</span>` : '';
 }
 
 // Initialiser les listeners dates congés
@@ -3666,6 +3790,64 @@ async function refuserConge(id) {
   toast('Congé refusé');
   api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
     dateDebut: req.dateDebut, dateFin: req.dateFin});
+}
+
+// ── Échanges d'horaire (vue gestionnaire) ──
+function renderEchangesMgr(){
+  const enAttente = S.requests.filter(r=>r.type==='echange'&&r.status==='pending_gestionnaire');
+  const el = document.getElementById('echangesListeMgr');
+  if(!enAttente.length){
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Aucun échange en attente de validation</div>';
+    return;
+  }
+  el.innerHTML = enAttente.map(r=>`
+    <div class="quota-card" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <div style="font-weight:600;font-size:13px;">${r.empName} ↔ ${r.cibleName}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+            ${r.empName.split(' ')[0]} cède le ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} et prend le ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'long'})} de ${r.cibleName.split(' ')[0]}
+          </div>
+          ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
+          <div style="font-size:11px;color:#059669;margin-top:4px;">✓ Accepté par ${r.cibleName.split(' ')[0]}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-ok" onclick="validerEchange(${r.id})">✓ Valider</button>
+          <button class="btn btn-sm btn-no" onclick="refuserEchangeGestionnaire(${r.id})">✗ Refuser</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+async function validerEchange(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  const empA = S.employees.find(e=>e.id===req.empId);
+  const empB = S.employees.find(e=>e.id===req.cibleId);
+  if(!empA||!empB){toast('Employé introuvable');return;}
+  const shA = S.planning[`${req.empId}_${req.dateA}`] || {type:'off',site:empA.site,note:''};
+  const shB = S.planning[`${req.cibleId}_${req.dateB}`] || {type:'off',site:empB.site,note:''};
+  // A prend la place de B le dateB (avec le type de B), et devient repos le dateA (B prend sa place)
+  S.planning[`${req.empId}_${req.dateB}`] = {type:shB.type, site:shB.site, note:'Échange avec '+req.cibleName};
+  S.planning[`${req.empId}_${req.dateA}`] = {type:'off', site:empA.site, note:''};
+  S.planning[`${req.cibleId}_${req.dateA}`] = {type:shA.type, site:shA.site, note:'Échange avec '+req.empName};
+  S.planning[`${req.cibleId}_${req.dateB}`] = {type:'off', site:empB.site, note:''};
+  req.status = 'approved';
+  persist();
+  renderEchangesMgr();
+  renderWeek();
+  updStats();
+  toast('✓ Échange validé, planning mis à jour');
+  api('updateRequestStatus',{reqId:id,newStatus:'approved',
+    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB});
+}
+async function refuserEchangeGestionnaire(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  req.status = 'refused';
+  persist();
+  renderEchangesMgr();
+  updStats();
+  toast('Échange refusé');
+  api('updateRequestStatus',{reqId:id,newStatus:'refused',
+    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB,refusePar:'gestionnaire'});
 }
 
 async function envoyerRelances() {
