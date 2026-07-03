@@ -1186,7 +1186,12 @@ async function loadAll(force=false){
   setLoadingText('Connexion à Google Sheets...');
   const r=await api('getAll');
   if(r&&r.ok){
-    if(r.employees)  {S.employees=keepIfNotSmaller(S.employees,r.employees);  lsSet('employees',S.employees);}
+    // Contrairement à requests/absences/eventTypes/events, on fait confiance au Sheet sans
+    // garde-fou de taille pour les employés : le vrai risque (doublons via id non fiable) est
+    // corrigé côté serveur depuis, et le garde-fou avait l'effet pervers inverse — un appareil
+    // dont le cache local avait été pollué par d'anciens doublons ne pouvait plus jamais revenir
+    // à une liste plus petite (donc correcte) venant du Sheet (cas réel 2026-07-03).
+    if(r.employees)  {S.employees=r.employees;  lsSet('employees',S.employees);}
     // Résoudre les repos fixes par défaut (code → id réel), uniquement si pas déjà configuré
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
       S.params.reposFixe = {};
