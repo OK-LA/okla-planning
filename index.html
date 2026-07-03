@@ -4304,18 +4304,28 @@ async function validerEchange(id){
   const shA = S.planning[`${req.empId}_${req.dateA}`] || {type:'off',site:empA.site,note:''};
   const shB = S.planning[`${req.cibleId}_${req.dateB}`] || {type:'off',site:empB.site,note:''};
   // A prend la place de B le dateB (avec le type de B), et devient repos le dateA (B prend sa place)
-  S.planning[`${req.empId}_${req.dateB}`] = {type:shB.type, site:shB.site, note:'Échange avec '+req.cibleName};
-  S.planning[`${req.empId}_${req.dateA}`] = {type:'off', site:empA.site, note:''};
-  S.planning[`${req.cibleId}_${req.dateA}`] = {type:shA.type, site:shA.site, note:'Échange avec '+req.empName};
-  S.planning[`${req.cibleId}_${req.dateB}`] = {type:'off', site:empB.site, note:''};
+  const cellEmpDateB = {type:shB.type, site:shB.site, note:'Échange avec '+req.cibleName};
+  const cellEmpDateA = {type:'off', site:empA.site, note:''};
+  const cellCibleDateA = {type:shA.type, site:shA.site, note:'Échange avec '+req.empName};
+  const cellCibleDateB = {type:'off', site:empB.site, note:''};
+  S.planning[`${req.empId}_${req.dateB}`] = cellEmpDateB;
+  S.planning[`${req.empId}_${req.dateA}`] = cellEmpDateA;
+  S.planning[`${req.cibleId}_${req.dateA}`] = cellCibleDateA;
+  S.planning[`${req.cibleId}_${req.dateB}`] = cellCibleDateB;
   req.status = 'approved';
   persist();
   renderEchangesMgr();
   renderWeek();
   updStats();
   toast('✓ Échange validé, planning mis à jour');
-  api('updateRequestStatus',{reqId:id,newStatus:'approved',
-    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB});
+  await Promise.all([
+    api('updateShift',{empId:req.empId,dateStr:req.dateB,type:cellEmpDateB.type,site:cellEmpDateB.site,note:cellEmpDateB.note,sendEmail:false}),
+    api('updateShift',{empId:req.empId,dateStr:req.dateA,type:cellEmpDateA.type,site:cellEmpDateA.site,note:cellEmpDateA.note,sendEmail:false}),
+    api('updateShift',{empId:req.cibleId,dateStr:req.dateA,type:cellCibleDateA.type,site:cellCibleDateA.site,note:cellCibleDateA.note,sendEmail:false}),
+    api('updateShift',{empId:req.cibleId,dateStr:req.dateB,type:cellCibleDateB.type,site:cellCibleDateB.site,note:cellCibleDateB.note,sendEmail:false}),
+    api('updateRequestStatus',{reqId:id,newStatus:'approved',
+      empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB}),
+  ]);
 }
 async function refuserEchangeGestionnaire(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
