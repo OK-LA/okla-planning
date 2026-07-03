@@ -1038,13 +1038,17 @@ tbody tr:hover td{background:#FAFAF8;}
 
 <script>
 // ══ CONFIG ══
-const SC={
+// Couleurs des sites : valeurs par défaut fusionnées avec ce qui a été sauvegardé localement,
+// puis re-fusionnées avec la version serveur au chargement (voir loadAll) — auparavant SC n'était
+// jamais persisté nulle part (ni localStorage, ni vraiment lu depuis le Sheet), donc toute
+// modification de couleur était perdue au premier rechargement de page.
+const SC=Object.assign({
   'Ham':      {color:'#3B82F6',bg:'#EFF6FF',border:'#BFDBFE'},
   'Longueau': {color:'#10B981',bg:'#ECFDF5',border:'#A7F3D0'},
   'Roye':     {color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
   'Breteuil': {color:'#EC4899',bg:'#FDF2F8',border:'#FBCFE8'},
   'Entrepôt': {color:'#8B5CF6',bg:'#F5F3FF',border:'#DDD6FE'},
-};
+}, lsGet('sc',{}));
 const AVC=['#DBEAFE','#D1FAE5','#FEF3C7','#FCE7F3','#EDE9FE','#FFE4E6','#FEF9C3','#E0E7FF','#ECFDF5'];
 const TYPES=[
   {key:'magasin',   label:'Magasin',      info:'10h–12h / 14h–19h'},
@@ -1148,6 +1152,7 @@ function persist(){
   lsSet('params',S.params);
   lsSet('eventTypes',S.eventTypes);
   lsSet('events',S.events);
+  lsSet('sc',SC);
 }
 
 // ══ API GOOGLE SHEETS ══
@@ -1281,6 +1286,11 @@ async function loadAll(force=false){
     }
     if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=keepIfNotSmaller(S.eventTypes,r.eventTypes); lsSet('eventTypes',S.eventTypes);}
     if(r.events&&Array.isArray(r.events)) {S.events=keepIfNotSmaller(S.events,r.events); lsSet('events',S.events);}
+    if(r.sc && typeof r.sc==='object'){
+      Object.keys(SC).forEach(k=>delete SC[k]);
+      Object.assign(SC, r.sc);
+      lsSet('sc',SC);
+    }
     if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
     if(!S.params.typeColors) S.params.typeColors={};
     // Initialiser planning vide si pas de données
