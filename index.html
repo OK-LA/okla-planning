@@ -1064,7 +1064,9 @@ const S={
   ]),
   // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
   events:(Array.isArray(lsGet('events',[]))?lsGet('events',[]):[]),
-  scriptUrl:lsGet('scriptUrl',''),
+  // URL Apps Script pré-intégrée par défaut : évite que chaque nouvel appareil (un par salarié)
+  // ait à la coller manuellement à la première ouverture. Reste modifiable dans Paramètres si besoin.
+  scriptUrl:lsGet('scriptUrl','https://script.google.com/macros/s/AKfycbzpl5x4P-A05TtXqTufaPOcYlPtsBxoHyQedSnp908N_827T1yXSOEtgKJ7Hs-VyxCV/exec'),
   syncing:false,
 };
 
