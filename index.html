@@ -821,7 +821,25 @@ tbody tr:hover td{background:#FAFAF8;}
 
       <div class="param-card" style="margin-top:14px;">
         <h3>⚙️ Configuration technique</h3>
-        <div class="fg"><label>URL du script Google Apps Script</label>
+        <div style="background:#F0FDF4;border:1px solid #A7F3D0;border-radius:8px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:12px;font-weight:700;color:#059669;margin-bottom:8px;">🟢 Supabase — Synchronisation multi-appareils</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+            Trouvez ces informations dans votre Dashboard Supabase → Settings → API
+          </div>
+          <div class="fg"><label>URL du projet Supabase</label>
+            <input type="url" id="paramSupaUrl" placeholder="https://xxxx.supabase.co" value="">
+          </div>
+          <div class="fg"><label>Clé publique (anon key)</label>
+            <input type="text" id="paramSupaKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." value="" style="font-size:11px;">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn btn-primary btn-sm" onclick="saveSupaConfig()">✓ Enregistrer et connecter</button>
+            <button class="btn btn-ghost btn-sm" onclick="testSupaConnection()" id="btnTestSupa">🔌 Tester la connexion</button>
+            <button class="btn btn-ghost btn-sm" onclick="supaUploadAll()" style="color:#059669;">⬆️ Tout envoyer vers Supabase</button>
+          </div>
+          <div id="supaStatus" style="font-size:12px;margin-top:8px;"></div>
+        </div>
+        <div class="fg"><label>URL du script Google Apps Script (ancien système)</label>
           <input type="url" id="paramScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
         </div>
         <button class="btn btn-primary btn-sm" onclick="saveScriptUrl()">✓ Mettre à jour l'URL</button>
@@ -1233,6 +1251,76 @@ function getColor(type,site){
 function lsGet(k,def){try{const v=localStorage.getItem('okla_'+k);return v!==null?JSON.parse(v):def;}catch{return def;}}
 function lsSet(k,v){try{localStorage.setItem('okla_'+k,JSON.stringify(v));}catch{}}
 
+// ══ SUPABASE CONFIG ══
+// Remplacez ces deux valeurs par celles de votre projet Supabase
+// Dashboard Supabase → Settings → API
+const SUPA_URL = lsGet('supaUrl', '');
+const SUPA_KEY = lsGet('supaKey', '');
+
+let _supaUrl = SUPA_URL;
+let _supaKey = SUPA_KEY;
+
+// Lecture d'une section depuis Supabase
+async function supaRead(section) {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?section=eq.${section}&select=data`, {
+      headers: {
+        'apikey': _supaKey,
+        'Authorization': `Bearer ${_supaKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if(!r.ok) return null;
+    const j = await r.json();
+    return j[0]?.data ?? null;
+  } catch(e) { console.warn('supaRead error', e); return null; }
+}
+
+// Écriture d'une section dans Supabase (upsert)
+async function supaWrite(section, data) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const r = await fetch(`${_supaUrl}/rest/v1/okla_store`, {
+      method: 'POST',
+      headers: {
+        'apikey': _supaKey,
+        'Authorization': `Bearer ${_supaKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({ section, data })
+    });
+    return r.ok;
+  } catch(e) { console.warn('supaWrite error', e); return false; }
+}
+
+// Lecture de toutes les sections en une seule requête
+async function supaReadAll() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?select=section,data`, {
+      headers: {
+        'apikey': _supaKey,
+        'Authorization': `Bearer ${_supaKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    const result = {};
+    rows.forEach(row => { result[row.section] = row.data; });
+    return result;
+  } catch(e) { console.warn('supaReadAll error', e); return null; }
+}
+
+// Écriture différée (debounce 1.5s pour éviter les appels en rafale)
+let _supaWriteTimers = {};
+function supaWriteDebounced(section, data) {
+  clearTimeout(_supaWriteTimers[section]);
+  _supaWriteTimers[section] = setTimeout(() => supaWrite(section, data), 1500);
+}
+
 // ══ STATE ══
 const S={
   user:null,role:null,
@@ -1295,6 +1383,7 @@ const S={
 };
 
 function persist(){
+  // 1. Sauvegarde locale immédiate (cache hors ligne)
   lsSet('employees',S.employees);
   lsSet('planning',S.planning);
   lsSet('requests',S.requests);
@@ -1304,6 +1393,17 @@ function persist(){
   lsSet('eventTypes',S.eventTypes);
   lsSet('events',S.events);
   lsSet('sc',SC);
+  // 2. Synchronisation Supabase (différée pour éviter les appels en rafale)
+  if(_supaUrl && _supaKey) {
+    supaWriteDebounced('employees', S.employees);
+    supaWriteDebounced('planning', S.planning);
+    supaWriteDebounced('requests', S.requests);
+    supaWriteDebounced('absences', S.absences);
+    supaWriteDebounced('params', S.params);
+    supaWriteDebounced('event_types', S.eventTypes);
+    supaWriteDebounced('events', S.events);
+    supaWriteDebounced('sc', SC);
+  }
 }
 
 // ══ API GOOGLE SHEETS ══
@@ -1389,6 +1489,83 @@ function mergeParId(local,remote){
   return Object.values(map);
 }
 async function loadAll(force=false){
+  // ── Priorité Supabase (synchronisation multi-appareils) ──
+  if(_supaUrl && _supaKey) {
+    setLoadingText('Chargement depuis Supabase...');
+    const supa = await supaReadAll();
+    if(supa) {
+      // Employés
+      if(Array.isArray(supa.employees) && supa.employees.length > 0) {
+        S.employees = supa.employees;
+        lsSet('employees', S.employees);
+      }
+      // Planning (fusion clé par clé)
+      if(supa.planning && typeof supa.planning === 'object' && Object.keys(supa.planning).length > 0) {
+        S.planning = Object.assign({}, S.planning, supa.planning);
+        lsSet('planning', S.planning);
+      }
+      // Demandes (fusion par id)
+      if(Array.isArray(supa.requests)) {
+        S.requests = mergeParId(S.requests, supa.requests);
+        lsSet('requests', S.requests);
+      }
+      // Absences
+      if(Array.isArray(supa.absences) && supa.absences.length >= (S.absences?.length||0)) {
+        S.absences = supa.absences;
+        lsSet('absences', S.absences);
+      }
+      // Params (fusion pour garder les clés locales non syncées)
+      if(supa.params && typeof supa.params === 'object') {
+        S.params = Object.assign({}, supa.params, {
+          verrou: S.params.verrou ?? supa.params.verrou,
+          typeColors: supa.params.typeColors || S.params.typeColors || {},
+          reposFixe: supa.params.reposFixe || S.params.reposFixe || {},
+          soldesInitiaux: supa.params.soldesInitiaux || S.params.soldesInitiaux || {},
+          evInternes: supa.params.evInternes || S.params.evInternes || [],
+          murPosts: supa.params.murPosts || S.params.murPosts || [],
+        });
+        lsSet('params', S.params);
+      }
+      // Types d'événements
+      if(Array.isArray(supa.event_types) && supa.event_types.length >= (S.eventTypes?.length||0)) {
+        S.eventTypes = supa.event_types;
+        lsSet('eventTypes', S.eventTypes);
+      }
+      // Événements
+      if(Array.isArray(supa.events) && supa.events.length >= (S.events?.length||0)) {
+        S.events = supa.events;
+        lsSet('events', S.events);
+      }
+      // Couleurs magasins
+      if(supa.sc && typeof supa.sc === 'object' && Object.keys(supa.sc).length > 0) {
+        Object.keys(SC).forEach(k=>delete SC[k]);
+        Object.assign(SC, supa.sc);
+        lsSet('sc', SC);
+      }
+      console.log('✓ Données chargées depuis Supabase');
+    } else {
+      console.warn('Supabase non accessible, utilisation du cache local');
+    }
+    // Initialiser le planning si vide
+    if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
+    if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
+    if(!S.params.typeColors) S.params.typeColors={};
+    if(!S.params.reposFixe) S.params.reposFixe={};
+    // Résoudre les repos fixes par défaut
+    if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
+      S.params.reposFixe = {};
+      S.employees.forEach(emp=>{
+        const rf = S.params.reposFixeParCode[emp.code];
+        if(rf!==undefined) S.params.reposFixe[emp.id] = rf;
+      });
+      persist();
+    }
+    hideLoading();
+    restoreSession();
+    return;
+  }
+
+  // ── Fallback : Google Sheets (ancien système) ──
   if(!S.scriptUrl){
     hideLoading();
     showScr('sSetup');
@@ -3254,6 +3431,7 @@ function renderParams(){
   renderParamEvents();
   renderSoldesInitiaux();
   initVerrouUI();
+  initSupaConfigUI();
   let h='';
   const JOURS_ABBREV=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
   Object.entries(SC).forEach(([site,cfg])=>{
@@ -3843,6 +4021,80 @@ function saveScriptUrl(){
   S.scriptUrl=url;lsSet('scriptUrl',url);
   toast('✓ URL mise à jour — rechargement...');
   setTimeout(()=>location.reload(),1200);
+}
+
+// ══ CONFIGURATION SUPABASE ══
+async function saveSupaConfig(){
+  const url = document.getElementById('paramSupaUrl')?.value?.trim();
+  const key = document.getElementById('paramSupaKey')?.value?.trim();
+  if(!url || !key){toast('Remplissez l\'URL et la clé Supabase');return;}
+  // Valider l'URL
+  if(!url.includes('supabase.co') && !url.includes('supabase.io')){
+    toast('⚠️ L\'URL doit être une URL Supabase (xxxx.supabase.co)');return;
+  }
+  _supaUrl = url;
+  _supaKey = key;
+  lsSet('supaUrl', url);
+  lsSet('supaKey', key);
+  toast('✓ Configuration Supabase enregistrée — Test en cours...');
+  await testSupaConnection();
+}
+
+async function testSupaConnection(){
+  const statusEl = document.getElementById('supaStatus');
+  if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Test en cours...</span>';
+  try {
+    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?section=eq.planning&select=section`, {
+      headers: {'apikey': _supaKey, 'Authorization': `Bearer ${_supaKey}`}
+    });
+    if(r.ok){
+      if(statusEl) statusEl.innerHTML = '<span style="color:#059669;font-weight:600;">✅ Connexion Supabase réussie ! Les données seront synchronisées entre tous vos appareils.</span>';
+      toast('✅ Supabase connecté !');
+    } else {
+      const err = await r.text();
+      if(statusEl) statusEl.innerHTML = `<span style="color:#DC2626;">❌ Erreur ${r.status} — Vérifiez l'URL et la clé. Avez-vous exécuté le script SQL ?</span>`;
+      toast('❌ Échec de connexion Supabase');
+    }
+  } catch(e) {
+    if(statusEl) statusEl.innerHTML = '<span style="color:#DC2626;">❌ Impossible de joindre Supabase. Vérifiez l\'URL.</span>';
+    toast('❌ Erreur réseau Supabase');
+  }
+}
+
+// Envoyer toutes les données locales vers Supabase (migration initiale)
+async function supaUploadAll(){
+  if(!_supaUrl || !_supaKey){toast('Configurez Supabase d\'abord');return;}
+  const statusEl = document.getElementById('supaStatus');
+  if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Envoi de toutes les données vers Supabase...</span>';
+  const sections = [
+    ['employees', S.employees],
+    ['planning', S.planning],
+    ['requests', S.requests],
+    ['absences', S.absences],
+    ['params', S.params],
+    ['event_types', S.eventTypes],
+    ['events', S.events],
+    ['sc', SC],
+  ];
+  let ok = 0;
+  for(const [section, data] of sections){
+    const success = await supaWrite(section, data);
+    if(success) ok++;
+  }
+  if(statusEl) statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">✅ ${ok}/${sections.length} sections envoyées. Toutes vos données sont maintenant dans Supabase.</span>`;
+  toast(`✅ Migration vers Supabase terminée (${ok}/${sections.length})`);
+}
+
+// Initialiser les champs de config au chargement des paramètres
+function initSupaConfigUI(){
+  const urlEl = document.getElementById('paramSupaUrl');
+  const keyEl = document.getElementById('paramSupaKey');
+  if(urlEl) urlEl.value = _supaUrl || lsGet('supaUrl','');
+  if(keyEl) keyEl.value = _supaKey || lsGet('supaKey','');
+  const statusEl = document.getElementById('supaStatus');
+  if(statusEl && _supaUrl && _supaKey){
+    statusEl.innerHTML = '<span style="color:#059669;">🟢 Supabase configuré — synchronisation active</span>';
+  }
 }
 
 // ══ CONGÉS & RÈGLES ══
