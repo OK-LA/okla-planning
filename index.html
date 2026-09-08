@@ -725,6 +725,15 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
 
       <div class="param-card" style="margin-top:14px;">
+        <h3>📊 Soldes CP au 31/05 (report d'année)</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Saisissez le solde CP de chaque employé au 31 mai. Ce solde s'ajoute au quota annuel pour calculer les droits réels de la période en cours.
+        </div>
+        <div id="paramSoldesInitiaux"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveSoldesInitiaux()">✓ Enregistrer les soldes</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
         <h3>🚩 Motifs d'absence (salarié)</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
           Liste proposée aux salariés dans "Signaler une absence". Ajoutez ou supprimez des motifs selon vos besoins.
@@ -3163,6 +3172,7 @@ function renderParams(){
   renderParamMagasins();
   renderParamTypeColors();
   renderParamEvents();
+  renderSoldesInitiaux();
   initVerrouUI();
   let h='';
   const JOURS_ABBREV=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
@@ -3757,8 +3767,18 @@ function saveScriptUrl(){
 
 // ══ CONGÉS & RÈGLES ══
 
-const QUOTA_ANNUEL = 25;
+const QUOTA_ANNUEL_DEFAULT = 25;
 const JOURS_OUVRES = [1,2,3,4,5,6]; // Lun→Sam
+
+// Quota effectif (paramétrable dans Paramètres)
+function getQuotaAnnuel() {
+  return S.params?.reglesConges?.quota || QUOTA_ANNUEL_DEFAULT;
+}
+
+// Solde initial au 31/05 saisi par le gestionnaire
+function getSoldeInitial(empId) {
+  return (S.params?.soldesInitiaux || {})[empId] || 0;
+}
 
 // Période de référence : 1 juin N → 31 mai N+1
 function getPeriodeRef() {
@@ -3769,8 +3789,9 @@ function getPeriodeRef() {
 
 function countJoursOuvres(debut, fin) {
   let count = 0;
-  let cur = new Date(debut);
-  while (cur <= new Date(fin)) {
+  let cur = new Date(debut+'T12:00');
+  const finD = new Date(fin+'T12:00');
+  while (cur <= finD) {
     if (JOURS_OUVRES.includes(cur.getDay())) count++;
     cur = addDays(cur, 1);
   }
@@ -3781,24 +3802,40 @@ function getCongesEmp(empId) {
   const periode = getPeriodeRef();
   return S.requests.filter(r =>
     r.empId === empId &&
-    r.type === 'conge' &&
+    (r.type === 'conge' || r.type === 'conge_sans_solde') &&
     r.status !== 'refused' &&
     r.dateFin &&
-    new Date(r.dateDebut) >= periode.debut &&
-    new Date(r.dateFin) <= periode.fin
+    new Date(r.dateDebut+'T12:00') >= periode.debut &&
+    new Date(r.dateFin+'T12:00') <= periode.fin
   );
 }
 
 function getJoursPris(empId) {
-  return getCongesEmp(empId)
-    .filter(r => r.status === 'approved')
+  // Solde initial au 31/05 + congés payés approuvés
+  const soldeInitial = getSoldeInitial(empId);
+  const pris = getCongesEmp(empId)
+    .filter(r => r.status === 'approved' && r.type === 'conge')
     .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+  return soldeInitial + pris;
 }
 
 function getJoursEnAttente(empId) {
   return getCongesEmp(empId)
-    .filter(r => r.status === 'pending')
+    .filter(r => r.status === 'pending' && r.type === 'conge')
     .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+}
+
+// Anticiper le solde disponible à la date demandée
+function getJoursDisponiblesALaDate(empId, dateDebut) {
+  const quota = getQuotaAnnuel();
+  const soldeInitial = getSoldeInitial(empId);
+  const prisAvant = getCongesEmp(empId)
+    .filter(r => r.status === 'approved' && r.type === 'conge' && r.dateFin < dateDebut)
+    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+  const attenteAvant = getCongesEmp(empId)
+    .filter(r => r.status === 'pending' && r.type === 'conge' && r.dateFin < dateDebut)
+    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+  return quota - soldeInitial - prisAvant - attenteAvant;
 }
 
 function getJokersUtilises(empId) {
@@ -4083,9 +4120,9 @@ function renderEmpQuota() {
   if (!emp) return;
   const pris = getJoursPris(emp.id);
   const attente = getJoursEnAttente(emp.id);
-  const restants = QUOTA_ANNUEL - pris - attente;
+  const restants = getQuotaAnnuel() - pris - attente;
   const jokers = getJokersUtilises(emp.id);
-  const pct = Math.round((pris / QUOTA_ANNUEL) * 100);
+  const pct = Math.round((pris / getQuotaAnnuel()) * 100);
   const periode = getPeriodeRef();
 
   document.getElementById('empQuotaGrid').innerHTML = `
@@ -4133,7 +4170,7 @@ function renderCongesRecap(){
   let rows = S.employees.map(emp => {
     const pris = getJoursPris(emp.id);
     const attente = getJoursEnAttente(emp.id);
-    const restants = QUOTA_ANNUEL - pris - attente;
+    const restants = getQuotaAnnuel() - pris - attente;
     const jokers = getJokersUtilises(emp.id);
     const derniereDate = getDerniereDateConge(emp.id);
     return { emp, pris, attente, restants, jokers, derniereDate };
@@ -4185,9 +4222,9 @@ function renderCongesMgr() {
   S.employees.forEach(emp => {
     const pris = getJoursPris(emp.id);
     const attente = getJoursEnAttente(emp.id);
-    const restants = QUOTA_ANNUEL - pris - attente;
+    const restants = getQuotaAnnuel() - pris - attente;
     const jokers = getJokersUtilises(emp.id);
-    const pct = Math.round((pris / QUOTA_ANNUEL) * 100);
+    const pct = Math.round((pris / getQuotaAnnuel()) * 100);
     const demandes = getCongesEmp(emp.id).filter(r => r.status === 'pending');
 
     h += `<div class="quota-card">
@@ -4199,7 +4236,7 @@ function renderCongesMgr() {
         </div>
         <div style="text-align:right;font-size:12px;">
           <span style="font-weight:700;color:${restants<=3?'#DC2626':restants<=7?'#F59E0B':'#059669'}">${restants}j restants</span>
-          <div style="color:var(--muted)">${pris}/${QUOTA_ANNUEL} pris</div>
+          <div style="color:var(--muted)">${pris}/${getQuotaAnnuel()} pris</div>
         </div>
       </div>
       <div class="quota-bar-wrap"><div class="quota-bar" style="width:${pct}%;background:${pct>80?'#DC2626':pct>50?'#F59E0B':'#059669'};"></div></div>
@@ -4395,13 +4432,13 @@ async function refuserEchangeGestionnaire(id){
 async function envoyerRelances() {
   const regles = S.params.reglesConges || {};
   const empsSansConges = S.employees.filter(e => {
-    const restants = QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id);
+    const restants = getQuotaAnnuel() - getJoursPris(e.id) - getJoursEnAttente(e.id);
     return restants > 10; // Plus de 10j non posés = relance
   });
   if (!empsSansConges.length) { toast('Tous les employés ont posé leurs congés ✓'); return; }
   toast(`Envoi de ${empsSansConges.length} relance(s)...`);
   const r = await api('envoyerRelances', {employes: empsSansConges.map(e=>({id:e.id,name:e.name,email:e.email,
-    restants: QUOTA_ANNUEL - getJoursPris(e.id) - getJoursEnAttente(e.id),
+    restants: getQuotaAnnuel() - getJoursPris(e.id) - getJoursEnAttente(e.id),
     jokers: getJokersUtilises(e.id)})), managerEmail: MANAGER_EMAIL||''});
   toast(r&&r.ok ? `✓ ${empsSansConges.length} relance(s) envoyée(s)` : 'Relances envoyées localement');
 }
@@ -4414,6 +4451,47 @@ function saveReglesConges() {
   persist();
   api('saveParams', {params: S.params});
   toast('✓ Paramètres congés enregistrés');
+}
+
+// Soldes initiaux au 31/05 — utilise soldeCPManuel + soldeCPManuelDate de l'employé
+function renderSoldesInitiaux(){
+  const el=document.getElementById('paramSoldesInitiaux');
+  if(!el) return;
+  let h='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  S.employees.forEach(emp=>{
+    const solde = emp.soldeCPManuel ?? '';
+    const date = emp.soldeCPManuelDate || '';
+    const soldeProjete = calcSoldeProjete(emp.id, new Date());
+    h+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div class="avatar" style="width:24px;height:24px;font-size:9px;background:${avc(emp.id)};flex-shrink:0;">${ini(emp.name)}</div>
+      <div style="flex:1;">
+        <div style="font-size:12px;font-weight:500;">${emp.name.split(' ')[0]}</div>
+        <div style="font-size:10px;color:var(--muted);">Solde actuel : <strong style="color:${soldeProjete<3?'#DC2626':soldeProjete<8?'#F59E0B':'#059669'}">${soldeProjete.toFixed(1)}j</strong></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="number" min="0" max="50" step="0.5" id="sol_${emp.id}" value="${solde}" placeholder="0" style="width:50px;text-align:center;font-size:12px;padding:3px;border:1px solid var(--border);border-radius:4px;">
+          <span style="font-size:11px;color:var(--muted);">j au</span>
+        </div>
+        <input type="date" id="solDate_${emp.id}" value="${date}" style="font-size:11px;padding:3px;border:1px solid var(--border);border-radius:4px;">
+      </div>
+    </div>`;
+  });
+  h+='</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">💡 Renseignez le solde constaté (ex: 12j au 31/05/2026) pour chaque employé. Le système calculera l\'accrual depuis cette date.</div>';
+  el.innerHTML=h;
+}
+
+function saveSoldesInitiaux(){
+  S.employees.forEach(emp=>{
+    const solEl=document.getElementById('sol_'+emp.id);
+    const dateEl=document.getElementById('solDate_'+emp.id);
+    if(solEl&&solEl.value!=='') emp.soldeCPManuel=parseFloat(solEl.value)||0;
+    if(dateEl&&dateEl.value) emp.soldeCPManuelDate=dateEl.value;
+  });
+  persist();
+  api('saveEmployees',{employees:S.employees});
+  renderSoldesInitiaux();
+  toast('✓ Soldes CP enregistrés');
 }
 
 // Rotation samedis
