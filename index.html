@@ -231,6 +231,18 @@ tbody tr:hover td{background:#FAFAF8;}
 .quota-bar-wrap{background:var(--border);border-radius:20px;height:8px;margin:6px 0 2px;}
 .quota-bar{height:8px;border-radius:20px;transition:width .4s;}
 .quota-card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px;}
+.mur-post{background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .15s;}
+.mur-post:hover{box-shadow:0 2px 12px rgba(0,0,0,.07);}
+.mur-post-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.mur-post-body{font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+.mur-post-photo{width:100%;max-height:280px;object-fit:cover;border-radius:8px;margin-top:8px;cursor:pointer;}
+.mur-reactions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.mur-reaction-btn{background:#F3F4F6;border:none;border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;transition:background .1s;}
+.mur-reaction-btn:hover{background:#E5E7EB;}
+.mur-reaction-btn.active{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;}
+.mur-comment-input{width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;margin-top:8px;resize:none;}
+.mur-comment{display:flex;gap:8px;margin-top:6px;font-size:12px;}
+.mur-comment-body{background:#F8FAFF;border-radius:8px;padding:6px 10px;flex:1;}
 .quota-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
 .quota-stat{background:var(--bg);border-radius:8px;padding:10px;text-align:center;}
 .quota-val{font-size:20px;font-weight:700;}
@@ -425,6 +437,24 @@ tbody tr:hover td{background:#FAFAF8;}
     <div id="empTabContentComms" style="display:none;">
       <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted);">Événements et communications OK-LA</div>
       <div id="empCommsList"></div>
+
+      <!-- MUR SOCIAL côté salarié -->
+      <div style="margin-top:14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;">💬 Mur de l'équipe</div>
+        <!-- Formulaire de post salarié -->
+        <div style="background:#F8FAFF;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <textarea id="murPostTexteEmp" placeholder="Écrire un message à l'équipe..." style="width:100%;min-height:60px;border:none;background:transparent;font-size:13px;resize:vertical;outline:none;font-family:inherit;"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            <input type="url" id="murPostPhotoEmp" placeholder="URL d'une photo (optionnel)" style="flex:1;min-width:120px;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+            <div style="display:flex;gap:6px;">
+              <button onclick="murToggleEmoji('murPostTexteEmp')" style="background:#F3F4F6;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;" title="Ajouter un emoji">😊</button>
+              <button class="btn btn-primary btn-sm" onclick="murPublier('salarie')">📤 Publier</button>
+            </div>
+          </div>
+          <div id="murEmojiPickerEmp" style="display:none;flex-wrap:wrap;gap:4px;margin-top:8px;padding:8px;background:#fff;border:1px solid var(--border);border-radius:8px;"></div>
+        </div>
+        <div id="murListeEmp"></div>
+      </div>
     </div>
 
 
@@ -517,10 +547,10 @@ tbody tr:hover td{background:#FAFAF8;}
     <div style="font-size:17px;font-weight:700;">Planning OK-LA</div>
     <div style="color:var(--muted);font-size:13px;margin-top:2px;margin-bottom:16px;" id="mgrSub"></div>
     <div class="stats">
-      <div class="stat"><div class="stat-val" id="sE">—</div><div class="stat-lbl">Employés</div></div>
-      <div class="stat"><div class="stat-val" id="sM">0</div><div class="stat-lbl">Modifs</div></div>
-      <div class="stat"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
-      <div class="stat"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
+      <div class="stat" onclick="showStatDetail('employes')" style="cursor:pointer;" title="Voir les employés"><div class="stat-val" id="sE">—</div><div class="stat-lbl">Employés</div></div>
+      <div class="stat" onclick="showStatDetail('modifs')" style="cursor:pointer;" title="Voir les modifications"><div class="stat-val" id="sM">0</div><div class="stat-lbl">Modifs</div></div>
+      <div class="stat" onclick="showStatDetail('demandes')" style="cursor:pointer;" title="Voir les demandes"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
+      <div class="stat" onclick="showStatDetail('absences')" style="cursor:pointer;" title="Voir les absences"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
@@ -833,9 +863,42 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
         <div id="commPlanningList"></div>
       </div>
+
+      <!-- MUR SOCIAL -->
+      <div class="param-card" style="margin-top:14px;">
+        <h3>💬 Mur — Messages & Annonces</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Messages visibles par tous. En tant que gestionnaire, vous pouvez supprimer n'importe quel message.</div>
+        <!-- Formulaire de post -->
+        <div style="background:#F8FAFF;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <textarea id="murPostTexte" placeholder="Écrire un message pour l'équipe..." style="width:100%;min-height:70px;border:none;background:transparent;font-size:13px;resize:vertical;outline:none;font-family:inherit;"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            <input type="url" id="murPostPhoto" placeholder="URL d'une photo (optionnel)" style="flex:1;min-width:150px;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+            <div style="display:flex;gap:6px;">
+              <button onclick="murToggleEmoji('murPostTexte')" style="background:#F3F4F6;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;" title="Ajouter un emoji">😊</button>
+              <button class="btn btn-primary btn-sm" onclick="murPublier('gestionnaire')">📤 Publier</button>
+            </div>
+          </div>
+          <div id="murEmojiPicker" style="display:none;flex-wrap:wrap;gap:4px;margin-top:8px;padding:8px;background:#fff;border:1px solid var(--border);border-radius:8px;">
+            ${['😊','👍','❤️','🎉','💪','🔥','✅','📢','🛋️','🏪','📦','⭐','😄','🙏','👋','🚀'].map(e=>`<button onclick="murInsererEmoji('murPostTexte','${e}')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px;">${e}</button>`).join('')}
+          </div>
+        </div>
+        <!-- Liste des posts -->
+        <div id="murListeMgr"></div>
+      </div>
     </div>
 
     <div class="tc mt-14"><button class="btn btn-ghost btn-sm" onclick="logout()">Déconnexion</button></div>
+  </div>
+</div>
+
+<!-- MODAL DÉTAIL STATS -->
+<div class="modal-overlay" id="mStatDetail">
+  <div class="modal" style="max-width:480px;max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:15px;" id="mStatDetailTitle">Détail</h3>
+      <button class="btn btn-ghost" onclick="closeModal('mStatDetail')" style="padding:4px 10px;">✕</button>
+    </div>
+    <div id="mStatDetailContent"></div>
   </div>
 </div>
 
@@ -1651,7 +1714,7 @@ function switchEmpTab(tab){
   const commsEl=document.getElementById('empTabContentComms');
   if(commsEl) commsEl.style.display=tab==='comms'?'block':'none';
   if(tab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
-  if(tab==='comms') renderEmpComms();
+  if(tab==='comms') {renderEmpComms();renderMurListe('murListeEmp',false);}
 }
 
 // ── Toggle Semaine/Mois sur "Mon planning" ──
@@ -1840,7 +1903,7 @@ function switchTab(n){
       if(el) el.classList.add('active');
     }
   });
-  if(n==='comms'){renderCommPlanning();renderEvInternes();}
+  if(n==='comms'){renderCommPlanning();renderEvInternes();renderMurListe('murListeMgr',true);}
 }
 
 // ── Planning ──
@@ -4771,6 +4834,297 @@ function renderEmpComms(){
 
 function motDePasseOublie(){
   toast('Contactez le gestionnaire à gwen.bruchet@ok-la.fr pour récupérer votre code d\'accès');
+}
+
+// ══ DÉTAIL DES STATS ══
+function showStatDetail(type){
+  const titleEl = document.getElementById('mStatDetailTitle');
+  const contentEl = document.getElementById('mStatDetailContent');
+  if(!titleEl||!contentEl) return;
+  let title = '', html = '';
+
+  if(type==='employes'){
+    title = `👥 Employés (${S.employees.length})`;
+    const today = fmt(new Date());
+    html = S.employees.map(emp=>{
+      const expire = emp.dateFin && emp.dateFin < today;
+      const typeC = emp.dateFin ? (emp.typeContrat==='cdd'?'CDD':emp.typeContrat==='apprentissage'?'Apprentissage':'Autre') : 'CDI';
+      const sc = SC[emp.site]||SC['Ham'];
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);${expire?'background:#FEF2F2;padding:10px;border-radius:8px;margin-bottom:4px;':''}">
+        <div class="avatar" style="background:${avc(emp.id)};flex-shrink:0;">${ini(emp.name)}</div>
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:13px;">${emp.name}${expire?' <span style="color:#DC2626;font-size:10px;">⚠ EXPIRÉ</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted);">${emp.email||'—'} · ${emp.tel||'—'}</div>
+          <div style="font-size:11px;margin-top:2px;">
+            <span style="background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};border-radius:12px;padding:1px 8px;font-size:10px;font-weight:600;">${emp.site}</span>
+            <span style="font-size:10px;color:var(--muted);margin-left:6px;">${typeC}${emp.dateFin?' · fin '+emp.dateFin:''}</span>
+          </div>
+        </div>
+        <button class="btn btn-sm" onclick="closeModal('mStatDetail');switchTab('employes');setTimeout(()=>openFicheEmp('${emp.id}'),100);" style="background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE;white-space:nowrap;font-size:11px;">✏️</button>
+      </div>`;
+    }).join('');
+    if(!html) html = '<div style="text-align:center;color:var(--muted);padding:20px;">Aucun employé</div>';
+
+  } else if(type==='modifs'){
+    title = `✏️ Modifications récentes`;
+    const today = new Date();
+    const il7j = new Date(today.getTime()-7*24*60*60*1000);
+    // Récupérer les modifications récentes depuis le planning
+    const modifs = [];
+    Object.entries(S.planning||{}).forEach(([key, val])=>{
+      if(val.note && val.note.includes('Échange')) return; // Ignorer les échanges
+      const [empId, dateStr] = key.split('_');
+      if(!dateStr) return;
+      const d = new Date(dateStr+'T12:00');
+      if(d >= il7j && val.type && val.type!=='off'){
+        const emp = S.employees.find(e=>e.id===empId);
+        if(emp) modifs.push({emp, dateStr, type:val.type, site:val.site, note:val.note});
+      }
+    });
+    modifs.sort((a,b)=>b.dateStr.localeCompare(a.dateStr));
+    const top20 = modifs.slice(0,20);
+    if(!top20.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">Aucune modification récente (7 derniers jours)</div>';
+    } else {
+      html = `<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">${top20.length} modification(s) sur les 7 derniers jours</div>`;
+      html += top20.map(m=>{
+        const c = getColor(m.type, m.site);
+        const label = TYPES.find(t=>t.key===m.type)?.label||m.type;
+        const d = new Date(m.dateStr+'T12:00');
+        const jours=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <div class="avatar" style="background:${avc(m.emp.id)};flex-shrink:0;font-size:10px;">${ini(m.emp.name)}</div>
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:13px;">${m.emp.name.split(' ')[0]}</div>
+            <div style="font-size:11px;color:var(--muted);">${jours[d.getDay()]} ${d.getDate()}/${d.getMonth()+1}</div>
+          </div>
+          <span style="background:${c.bg};color:${c.color};border:1px solid ${c.border};border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600;">${label}</span>
+        </div>`;
+      }).join('');
+    }
+
+  } else if(type==='demandes'){
+    title = `📋 Demandes en attente`;
+    const pending = S.requests.filter(r=>r.status==='pending'||r.status==='pending_gestionnaire'||r.status==='pending_collegue');
+    if(!pending.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">✅ Aucune demande en attente</div>';
+    } else {
+      html = pending.map(r=>{
+        const emp = S.employees.find(e=>e.id===r.empId);
+        const typeLabels = {conge:'🏖️ Congé',conge_sans_solde:'🏖️ CSS',maladie:'🤒 Maladie',echange:'🔄 Échange',enfant_malade:'👶 Enfant malade',medical:'🏥 RDV médical',autre:'📌 Autre'};
+        const statusLabels = {pending:'En attente',pending_gestionnaire:'En attente (gestionnaire)',pending_collegue:'En attente (collègue)'};
+        const dDeb = r.dateDebut ? fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'}) : (r.date1||r.date) ? fmtFR(new Date((r.date1||r.date)+'T12:00'),{day:'numeric',month:'short'}) : '?';
+        const dFin = r.dateFin && r.dateFin!==r.dateDebut ? ' → '+fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'}) : '';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div class="avatar" style="background:${emp?avc(emp.id):'#9CA3AF'};flex-shrink:0;font-size:10px;">${emp?ini(emp.name):'?'}</div>
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:13px;">${r.empName||'?'}</div>
+            <div style="font-size:11px;color:var(--muted);">${dDeb}${dFin}</div>
+            <div style="font-size:10px;color:#F59E0B;margin-top:2px;">${statusLabels[r.status]||r.status}</div>
+          </div>
+          <span style="font-size:11px;font-weight:600;">${typeLabels[r.type]||r.type}</span>
+        </div>`;
+      }).join('');
+    }
+    html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('conges');">Gérer les congés →</button>
+      <button class="btn btn-ghost btn-sm" style="margin-left:8px;" onclick="closeModal('mStatDetail');switchTab('echanges');">Gérer les échanges →</button></div>`;
+
+  } else if(type==='absences'){
+    title = `🚩 Absences signalées`;
+    const absences = (S.absences||[]).filter(a=>a.status==='pending'||!a.status);
+    if(!absences.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">✅ Aucune absence en attente</div>';
+    } else {
+      html = absences.map(a=>{
+        const emp = S.employees.find(e=>e.id===a.empId);
+        const d = a.date ? fmtFR(new Date(a.date+'T12:00'),{weekday:'short',day:'numeric',month:'long'}) : '?';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div class="avatar" style="background:${emp?avc(emp.id):'#9CA3AF'};flex-shrink:0;font-size:10px;">${emp?ini(emp.name):'?'}</div>
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:13px;">${a.empName||'?'}</div>
+            <div style="font-size:11px;color:var(--muted);">${d}</div>
+            <div style="font-size:11px;color:var(--muted);">${a.motif||'Motif non précisé'}</div>
+          </div>
+          <button class="btn btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');" style="font-size:11px;white-space:nowrap;">Gérer →</button>
+        </div>`;
+      }).join('');
+    }
+    html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');">Gérer les remplacements →</button></div>`;
+  }
+
+  titleEl.textContent = title;
+  contentEl.innerHTML = html;
+  openModal('mStatDetail');
+}
+
+// ══ MUR SOCIAL ══
+const MUR_EMOJIS = ['😊','👍','❤️','🎉','💪','🔥','✅','📢','🛋️','🏪','📦','⭐','😄','🙏','👋','🚀'];
+const MUR_REACTIONS_DISPO = ['👍','❤️','😄','🎉','💪','🔥'];
+
+function getMurPosts(){
+  if(!S.params.murPosts) S.params.murPosts=[];
+  return S.params.murPosts;
+}
+
+function murRendrePost(post, isMgr){
+  const auteur = S.employees.find(e=>e.id===post.auteurId);
+  const initiales = auteur ? ini(auteur.name) : '?';
+  const couleur = auteur ? avc(auteur.id) : '#9CA3AF';
+  const nom = auteur ? auteur.name.split(' ')[0] : (post.auteurNom||'Inconnu');
+  const date = post.date ? fmtFR(new Date(post.date),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+  const userId = S.user?.id || 'mgr';
+
+  // Réactions
+  let reactionsHTML = '<div class="mur-reactions">';
+  MUR_REACTIONS_DISPO.forEach(emoji=>{
+    const count = (post.reactions||{})[emoji]?.length||0;
+    const jaReagi = ((post.reactions||{})[emoji]||[]).includes(userId);
+    reactionsHTML += `<button class="mur-reaction-btn${jaReagi?' active':''}" onclick="murToggleReaction('${post.id}','${emoji}')">${emoji}${count>0?` <span>${count}</span>`:''}</button>`;
+  });
+  reactionsHTML += `<button class="mur-reaction-btn" onclick="murToggleComments('${post.id}')" style="margin-left:4px;">💬 ${(post.comments||[]).length}</button>`;
+  reactionsHTML += '</div>';
+
+  // Commentaires
+  const comments = post.comments||[];
+  let commentsHTML = `<div id="murComments_${post.id}" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">`;
+  comments.forEach(c=>{
+    const ca = S.employees.find(e=>e.id===c.auteurId);
+    const cn = ca ? ca.name.split(' ')[0] : (c.auteurNom||'?');
+    commentsHTML += `<div class="mur-comment">
+      <div class="avatar" style="width:22px;height:22px;font-size:8px;background:${ca?avc(ca.id):'#9CA3AF'};flex-shrink:0;">${ca?ini(ca.name):'?'}</div>
+      <div class="mur-comment-body"><strong>${cn}</strong> ${c.texte}</div>
+    </div>`;
+  });
+  commentsHTML += `<div style="display:flex;gap:6px;margin-top:6px;">
+    <textarea id="murCommentInput_${post.id}" class="mur-comment-input" rows="1" placeholder="Ajouter un commentaire..."></textarea>
+    <button class="btn btn-sm" onclick="murAjouterCommentaire('${post.id}')" style="white-space:nowrap;">Envoyer</button>
+  </div></div>`;
+
+  const suppBtn = isMgr ? `<button onclick="murSupprimerPost('${post.id}')" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:12px;padding:0;" title="Supprimer">🗑️</button>` : '';
+
+  return `<div class="mur-post" id="murPost_${post.id}">
+    <div class="mur-post-header">
+      <div class="avatar" style="width:32px;height:32px;font-size:11px;background:${couleur};flex-shrink:0;">${initiales}</div>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;">${nom}${post.auteurRole==='gestionnaire'?' <span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;">Gestionnaire</span>':''}</div>
+        <div style="font-size:11px;color:var(--muted);">${date}</div>
+      </div>
+      ${suppBtn}
+    </div>
+    <div class="mur-post-body">${post.texte||''}</div>
+    ${post.photoUrl?`<img src="${post.photoUrl}" class="mur-post-photo" alt="photo" onerror="this.style.display='none'">` : ''}
+    ${reactionsHTML}
+    ${commentsHTML}
+  </div>`;
+}
+
+function renderMurListe(containerId, isMgr){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  const posts = getMurPosts().slice().reverse(); // Plus récent en premier
+  if(!posts.length){
+    el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;">Aucun message pour l\'instant. Soyez le premier à écrire !</div>';
+    return;
+  }
+  el.innerHTML = posts.map(p=>murRendrePost(p,isMgr)).join('');
+}
+
+function murPublier(role){
+  const isGestionnaire = role==='gestionnaire';
+  const texteId = isGestionnaire ? 'murPostTexte' : 'murPostTexteEmp';
+  const photoId = isGestionnaire ? 'murPostPhoto' : 'murPostPhotoEmp';
+  const texte = document.getElementById(texteId)?.value?.trim();
+  const photoUrl = document.getElementById(photoId)?.value?.trim();
+  if(!texte && !photoUrl){toast('Écrivez un message ou ajoutez une photo');return;}
+  const auteur = isGestionnaire ? null : S.user;
+  const post = {
+    id: Date.now().toString(),
+    auteurId: auteur?.id||'mgr',
+    auteurNom: auteur?.name||'Gestionnaire',
+    auteurRole: isGestionnaire?'gestionnaire':'salarie',
+    texte, photoUrl: photoUrl||'',
+    date: new Date().toISOString(),
+    reactions:{}, comments:[]
+  };
+  if(!S.params.murPosts) S.params.murPosts=[];
+  S.params.murPosts.push(post);
+  persist();
+  if(document.getElementById(texteId)) document.getElementById(texteId).value='';
+  if(document.getElementById(photoId)) document.getElementById(photoId).value='';
+  renderMurListe('murListeMgr', true);
+  renderMurListe('murListeEmp', false);
+  toast('✓ Message publié');
+}
+
+function murSupprimerPost(postId){
+  if(!S.params.murPosts) return;
+  S.params.murPosts = S.params.murPosts.filter(p=>p.id!==postId);
+  persist();
+  renderMurListe('murListeMgr', true);
+  renderMurListe('murListeEmp', false);
+  toast('Message supprimé');
+}
+
+function murToggleReaction(postId, emoji){
+  const post = getMurPosts().find(p=>p.id===postId);
+  if(!post) return;
+  if(!post.reactions) post.reactions={};
+  if(!post.reactions[emoji]) post.reactions[emoji]=[];
+  const userId = S.user?.id||'mgr';
+  const idx = post.reactions[emoji].indexOf(userId);
+  if(idx>=0) post.reactions[emoji].splice(idx,1);
+  else post.reactions[emoji].push(userId);
+  persist();
+  renderMurListe('murListeMgr', true);
+  renderMurListe('murListeEmp', false);
+}
+
+function murToggleComments(postId){
+  const el = document.getElementById('murComments_'+postId);
+  if(el) el.style.display = el.style.display==='none'?'block':'none';
+}
+
+function murAjouterCommentaire(postId){
+  const input = document.getElementById('murCommentInput_'+postId);
+  const texte = input?.value?.trim();
+  if(!texte) return;
+  const post = getMurPosts().find(p=>p.id===postId);
+  if(!post) return;
+  if(!post.comments) post.comments=[];
+  post.comments.push({
+    id: Date.now().toString(),
+    auteurId: S.user?.id||'mgr',
+    auteurNom: S.user?.name||'Gestionnaire',
+    texte,
+    date: new Date().toISOString()
+  });
+  persist();
+  renderMurListe('murListeMgr', true);
+  renderMurListe('murListeEmp', false);
+  // Réouvrir les commentaires de ce post
+  setTimeout(()=>{
+    const el=document.getElementById('murComments_'+postId);
+    if(el) el.style.display='block';
+  },50);
+}
+
+function murToggleEmoji(targetId){
+  const pickerId = targetId==='murPostTexte'?'murEmojiPicker':'murEmojiPickerEmp';
+  const picker = document.getElementById(pickerId);
+  if(!picker) return;
+  if(picker.innerHTML===''){
+    picker.innerHTML=MUR_EMOJIS.map(e=>`<button onclick="murInsererEmoji('${targetId}','${e}')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px;">${e}</button>`).join('');
+  }
+  picker.style.display = picker.style.display==='none'||!picker.style.display?'flex':'none';
+}
+
+function murInsererEmoji(targetId, emoji){
+  const el = document.getElementById(targetId);
+  if(!el) return;
+  const pos = el.selectionStart||el.value.length;
+  el.value = el.value.slice(0,pos)+emoji+el.value.slice(pos);
+  el.focus();
+  el.selectionStart=el.selectionEnd=pos+emoji.length;
 }
 </script>
 <!-- BARRE SÉLECTION MULTIPLE -->
