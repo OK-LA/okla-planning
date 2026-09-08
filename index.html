@@ -1265,12 +1265,16 @@ function supaBase() {
   return _supaUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
 }
 
-// Headers Supabase — compatible avec les nouvelles clés sb_publishable et les anciennes eyJ
-function supaHeaders() {
+// Headers Supabase — compatible nouvelles clés sb_publishable ET anciennes eyJ (anon)
+function supaHeaders(extra={}) {
+  const isNewKey = _supaKey.startsWith('sb_');
   return {
     'apikey': _supaKey,
     'Authorization': `Bearer ${_supaKey}`,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    // Les nouvelles clés sb_publishable nécessitent ce header supplémentaire
+    ...(isNewKey ? {'X-Client-Info': 'okla-planning'} : {}),
+    ...extra
   };
 }
 
@@ -1293,10 +1297,7 @@ async function supaWrite(section, data) {
   try {
     const r = await fetch(`${supaBase()}/rest/v1/okla_store`, {
       method: 'POST',
-      headers: {
-        ...supaHeaders(),
-        'Prefer': 'resolution=merge-duplicates'
-      },
+      headers: supaHeaders({'Prefer': 'resolution=merge-duplicates'}),
       body: JSON.stringify({ section, data })
     });
     if(!r.ok) {
