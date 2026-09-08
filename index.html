@@ -351,6 +351,9 @@ tbody tr:hover td{background:#FAFAF8;}
           style="text-transform:uppercase;font-size:22px;letter-spacing:4px;text-align:center;" maxlength="8">
       </div>
       <button class="btn btn-primary btn-full" onclick="doLogin()">Voir mon planning →</button>
+      <div style="text-align:center;margin-top:8px;">
+        <a href="#" onclick="motDePasseOublie();return false;" style="font-size:12px;color:var(--muted);text-decoration:underline;">Code oublié ?</a>
+      </div>
       <div class="divider"><span>Gestionnaire ?</span></div>
       <button class="btn btn-ghost btn-full" onclick="loginMgr()">Accès gestionnaire</button>
     </div>
@@ -375,6 +378,7 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="tabs">
       <button class="tab active" id="empTabPerso" onclick="switchEmpTab('perso')">Mon planning</button>
       <button class="tab" id="empTabMagasin" onclick="switchEmpTab('magasin')">👥 Mon magasin</button>
+      <button class="tab" id="empTabComms" onclick="switchEmpTab('comms')">📣 Communications</button>
     </div>
 
     <!-- MON PLANNING (vue perso) -->
@@ -415,6 +419,12 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
       <div id="empMagasinView"></div>
       <div class="legend mt-10" id="empLegMagasin"></div>
+    </div>
+
+    <!-- COMMUNICATIONS (vue salarié) -->
+    <div id="empTabContentComms" style="display:none;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted);">Événements et communications OK-LA</div>
+      <div id="empCommsList"></div>
     </div>
 
 
@@ -519,6 +529,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="tab" onclick="switchTab('echanges')">Échanges</button>
       <button class="tab" onclick="switchTab('employes')">Employés</button>
       <button class="tab" onclick="switchTab('params')">Paramètres</button>
+      <button class="tab" onclick="switchTab('comms')">📣 Communications</button>
     </div>
 
     <div class="tab-content active" id="tab-planning">
@@ -778,6 +789,43 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
     </div>
 
+    <!-- ONGLET COMMUNICATIONS -->
+    <div class="tab-content" id="tab-comms">
+      <div class="param-card" style="margin-bottom:14px;">
+        <h3>📋 Événements internes</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Réunions, formations, livraisons — visibles par tous les salariés dans leur onglet Communications.</div>
+        <div id="evInternesList"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <select id="evInterneType" style="flex:1;min-width:120px;">
+            <option value="reunion">🤝 Réunion</option>
+            <option value="formation">🎓 Formation</option>
+            <option value="livraison">🚚 Livraison</option>
+            <option value="autre">📌 Autre</option>
+          </select>
+          <input type="date" id="evInterneDate" style="flex:1;min-width:120px;">
+          <input type="text" id="evInterneLabel" placeholder="Description..." style="flex:2;min-width:150px;">
+          <button class="btn btn-primary btn-sm" onclick="ajouterEvInterne()">+ Ajouter</button>
+        </div>
+      </div>
+      <div class="param-card">
+        <h3>📣 Planning Communication OK-LA</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Événements marketing et commerciaux issus du planning communication 2026/2027.</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <select id="commFiltreAnnee" onchange="renderCommPlanning()" style="flex:1;">
+            <option value="2026">2026</option><option value="2027">2027</option>
+          </select>
+          <select id="commFiltreMois" onchange="renderCommPlanning()" style="flex:1;">
+            <option value="">Tous les mois</option>
+            <option value="1">Janvier</option><option value="2">Février</option><option value="3">Mars</option>
+            <option value="4">Avril</option><option value="5">Mai</option><option value="6">Juin</option>
+            <option value="7">Juillet</option><option value="8">Août</option><option value="9">Septembre</option>
+            <option value="10">Octobre</option><option value="11">Novembre</option><option value="12">Décembre</option>
+          </select>
+        </div>
+        <div id="commPlanningList"></div>
+      </div>
+    </div>
+
     <div class="tc mt-14"><button class="btn btn-ghost btn-sm" onclick="logout()">Déconnexion</button></div>
   </div>
 </div>
@@ -1007,6 +1055,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <select id="ficheTypeContrat">
           <option value="">CDI (pas de date de fin)</option>
           <option value="cdd">CDD</option>
+          <option value="apprentissage">Apprentissage</option>
           <option value="autre">Autre (intérim, saisonnier...)</option>
         </select>
       </div>
@@ -1586,9 +1635,14 @@ function switchEmpTab(tab){
   S.empTab=tab;
   document.getElementById('empTabPerso').classList.toggle('active',tab==='perso');
   document.getElementById('empTabMagasin').classList.toggle('active',tab==='magasin');
+  const commsBtn=document.getElementById('empTabComms');
+  if(commsBtn) commsBtn.classList.toggle('active',tab==='comms');
   document.getElementById('empTabContentPerso').style.display=tab==='perso'?'block':'none';
   document.getElementById('empTabContentMagasin').style.display=tab==='magasin'?'block':'none';
+  const commsEl=document.getElementById('empTabContentComms');
+  if(commsEl) commsEl.style.display=tab==='comms'?'block':'none';
   if(tab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
+  if(tab==='comms') renderEmpComms();
 }
 
 // ── Toggle Semaine/Mois sur "Mon planning" ──
@@ -1766,18 +1820,18 @@ function renderMgr(){
     document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
-  // Scopé à #sMgr : la vue salarié (#sEmp) a aussi des boutons ".tab" (Mon planning / Mon magasin)
-  // — sans ce scope, un document.querySelectorAll('.tab') global les comptait aussi et décalait
-  // l'index de tous les onglets gestionnaire (ex: cliquer "Paramètres" surlignait "Échanges").
   const mgrScreen = document.getElementById('sMgr');
   mgrScreen.querySelectorAll('.tab').forEach(btn=>btn.classList.remove('active'));
   mgrScreen.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  ['planning','conges','remplace','echanges','employes','params'].forEach((x,i)=>{
+  ['planning','conges','remplace','echanges','employes','params','comms'].forEach((x,i)=>{
     if(x===n){
-      mgrScreen.querySelectorAll('.tab')[i].classList.add('active');
-      document.getElementById('tab-'+x).classList.add('active');
+      const tabs = mgrScreen.querySelectorAll('.tab');
+      if(tabs[i]) tabs[i].classList.add('active');
+      const el=document.getElementById('tab-'+x);
+      if(el) el.classList.add('active');
     }
   });
+  if(n==='comms'){renderCommPlanning();renderEvInternes();}
 }
 
 // ── Planning ──
@@ -4365,6 +4419,7 @@ function saveReglesConges() {
 // Rotation samedis
 function renderParamRotation() {
   const rot = S.params.rotationSamedis || {};
+  const samSpeciaux = S.params.samSpeciaux || {premiers:true, soldes:true};
   let h = '';
   Object.keys(SC).forEach(site => {
     h += `<div class="rotation-row">
@@ -4379,6 +4434,17 @@ function renderParamRotation() {
       </div>
     </div>`;
   });
+  h += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">Samedis avec effectif plein obligatoire :</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:6px;">
+      <input type="checkbox" id="samPremiers" ${samSpeciaux.premiers?'checked':''} style="width:auto;accent-color:#3B82F6;">
+      1ers samedis du mois (fort trafic)
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+      <input type="checkbox" id="samSoldes" ${samSpeciaux.soldes?'checked':''} style="width:auto;accent-color:#F59E0B;">
+      Samedis pendant les périodes de soldes
+    </label>
+  </div>`;
   const el = document.getElementById('paramRotation');
   if (el) el.innerHTML = h;
 }
@@ -4389,6 +4455,10 @@ function saveRotation() {
     const el = document.getElementById('rot_'+site.replace(/[^a-zA-Z]/g,'_'));
     if (el) S.params.rotationSamedis[site] = parseInt(el.value) || 2;
   });
+  S.params.samSpeciaux = {
+    premiers: document.getElementById('samPremiers')?.checked ?? true,
+    soldes: document.getElementById('samSoldes')?.checked ?? true
+  };
   persist();
   api('saveParams', {params: S.params});
   toast('✓ Rotation samedis enregistrée');
@@ -4492,11 +4562,138 @@ document.addEventListener('visibilitychange', () => {
   if (Date.now() - lastVisibilitySync < 5000) return;
   resyncIfPossible();
 });
-// Sondage périodique : deux appareils ouverts en continu (sans jamais changer d'onglet ni recharger)
-// ne se resynchroniseraient sinon jamais entre eux — on vérifie donc aussi toutes les 30 secondes.
 setInterval(() => {
   if (document.visibilityState === 'visible') resyncIfPossible();
 }, 30000);
+
+// ══ PLANNING COMMUNICATION ══
+const PLANNING_COM_DATA = [
+  {"date":"2026-01-02","label":"INVENTAIRE?"},{"date":"2026-01-04","label":"VIP"},
+  {"date":"2026-01-05","label":"INVENTAIRE?"},{"date":"2026-01-07","label":"SOLDES D'HIVER"},
+  {"date":"2026-02-14","label":"ST VALENTIN"},{"date":"2026-02-17","label":"MARDI GRAS"},
+  {"date":"2026-03-01","label":"GRAND MERE"},{"date":"2026-03-28","label":"PLEIN AIR"},
+  {"date":"2026-03-31","label":"FDC"},{"date":"2026-04-01","label":"FETE DES CLIENTS"},
+  {"date":"2026-04-05","label":"FDC"},{"date":"2026-04-29","label":"FRENCH DAYS"},
+  {"date":"2026-05-02","label":"FRENCH DAYS"},{"date":"2026-05-31","label":"MERES"},
+  {"date":"2026-06-21","label":"VIP/PERES"},{"date":"2026-07-01","label":"SOLDES D'ÉTÉ"},
+  {"date":"2026-09-24","label":"FRENCH DAYS"},{"date":"2026-10-01","label":"REPRISE DE CANAPES"},
+  {"date":"2026-10-31","label":"NOEL"},{"date":"2026-11-27","label":"BLACK FRIDAY"},
+  {"date":"2026-12-01","label":"CALENDRIER DE L'AVENT"},
+  {"date":"2027-01-03","label":"VIP"},{"date":"2027-01-04","label":"INVENTAIRE"},
+  {"date":"2027-01-06","label":"EPIPHANIE"},{"date":"2027-01-07","label":"SOLDES D'HIVER"},
+  {"date":"2027-01-30","label":"J. AMITIE"},{"date":"2027-02-02","label":"CHANDELEUR"},
+  {"date":"2027-02-09","label":"MARDI GRAS"},{"date":"2027-02-14","label":"ST VALENTIN / SUPERBOWL"},
+  {"date":"2027-03-07","label":"GRAND MERES"},{"date":"2027-03-08","label":"J. DES FEMMES"},
+  {"date":"2027-03-17","label":"SAINT PATRICK"},{"date":"2027-03-21","label":"PRINTEMPS"},
+  {"date":"2027-03-28","label":"PAQUES"},{"date":"2027-03-31","label":"PLEIN AIR"},
+  {"date":"2027-04-01","label":"POISSON D'AVRIL"},{"date":"2027-04-05","label":"FETE DES CLIENTS"},
+  {"date":"2027-04-28","label":"FRENCH DAYS"},{"date":"2027-05-30","label":"FETE DES MERES"},
+  {"date":"2027-05-22","label":"BLACK FRIDAY"},{"date":"2027-06-01","label":"J. DES PARENTS"},
+  {"date":"2027-06-20","label":"VIP / PERES"},{"date":"2027-06-21","label":"MUSIQUE / ÉTÉ"},
+  {"date":"2027-06-23","label":"SOLDES D'ÉTÉ"},{"date":"2027-11-28","label":"BLACK FRIDAY"},
+  {"date":"2027-12-01","label":"CALENDRIER DE L'AVENT"},{"date":"2027-12-07","label":"TELETHON"}
+];
+
+const MOIS_FR=['','Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const EV_INTERNE_ICONS={reunion:'🤝',formation:'🎓',livraison:'🚚',autre:'📌'};
+
+function renderCommPlanning(){
+  const el=document.getElementById('commPlanningList');
+  if(!el) return;
+  const annee=parseInt(document.getElementById('commFiltreAnnee')?.value||2026);
+  const mois=parseInt(document.getElementById('commFiltreMois')?.value||0);
+  let evs=PLANNING_COM_DATA.filter(e=>new Date(e.date+'T12:00').getFullYear()===annee);
+  if(mois) evs=evs.filter(e=>new Date(e.date+'T12:00').getMonth()+1===mois);
+  evs.sort((a,b)=>a.date.localeCompare(b.date));
+  if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0;">Aucun événement pour cette période.</div>';return;}
+  const parMois={};
+  evs.forEach(e=>{const m=new Date(e.date+'T12:00').getMonth()+1;if(!parMois[m])parMois[m]=[];parMois[m].push(e);});
+  let h='';
+  const jours=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+  Object.keys(parMois).sort((a,b)=>a-b).forEach(m=>{
+    h+=`<div style="margin-bottom:12px;"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">${MOIS_FR[m]}</div>`;
+    parMois[m].forEach(e=>{
+      const d=new Date(e.date+'T12:00');
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;border-left:3px solid #3B82F6;">
+        <div style="font-size:12px;font-weight:700;color:#3B82F6;white-space:nowrap;">${jours[d.getDay()]} ${d.getDate()}</div>
+        <div style="font-size:12px;font-weight:600;">${e.label}</div>
+      </div>`;
+    });
+    h+='</div>';
+  });
+  el.innerHTML=h;
+}
+
+function renderEvInternes(){
+  const el=document.getElementById('evInternesList');
+  if(!el) return;
+  const evs=(S.params.evInternes||[]).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun événement interne ajouté.</div>';return;}
+  el.innerHTML=evs.map((e,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;">
+    <span style="font-size:14px;">${EV_INTERNE_ICONS[e.type]||'📌'}</span>
+    <div style="flex:1;font-size:12px;"><strong>${e.label}</strong><br><span style="color:var(--muted);">${fmtFR(new Date(e.date+'T12:00'),{weekday:'short',day:'numeric',month:'long',year:'numeric'})}</span></div>
+    <button class="btn-del" onclick="supprimerEvInterne(${i})" title="Supprimer">✕</button>
+  </div>`).join('');
+}
+
+function ajouterEvInterne(){
+  const type=document.getElementById('evInterneType')?.value||'autre';
+  const date=document.getElementById('evInterneDate')?.value;
+  const label=document.getElementById('evInterneLabel')?.value?.trim();
+  if(!date||!label){toast('Remplissez la date et la description');return;}
+  if(!S.params.evInternes) S.params.evInternes=[];
+  S.params.evInternes.push({type,date,label,id:Date.now()});
+  S.params.evInternes.sort((a,b)=>a.date.localeCompare(b.date));
+  persist();
+  document.getElementById('evInterneLabel').value='';
+  renderEvInternes();
+  toast('✓ Événement ajouté');
+}
+
+function supprimerEvInterne(i){
+  if(!S.params.evInternes) return;
+  S.params.evInternes.splice(i,1);
+  persist();
+  renderEvInternes();
+  renderEmpComms();
+}
+
+function renderEmpComms(){
+  const el=document.getElementById('empCommsList');
+  if(!el) return;
+  const maintenant=fmt(new Date());
+  const evInternes=(S.params.evInternes||[]).filter(e=>e.date>=maintenant).slice(0,20);
+  const evCom=PLANNING_COM_DATA.filter(e=>e.date>=maintenant).slice(0,15);
+  let h='';
+  if(evInternes.length){
+    h+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Événements internes</div>`;
+    evInternes.forEach(e=>{
+      const d=new Date(e.date+'T12:00');
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#F0FDF4;border-radius:8px;margin-bottom:6px;border-left:3px solid #059669;">
+        <span style="font-size:16px;">${EV_INTERNE_ICONS[e.type]||'📌'}</span>
+        <div><div style="font-size:13px;font-weight:600;">${e.label}</div>
+        <div style="font-size:11px;color:var(--muted);">${fmtFR(d,{weekday:'long',day:'numeric',month:'long'})}</div></div>
+      </div>`;
+    });
+  }
+  if(evCom.length){
+    h+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px;">Événements commerciaux à venir</div>`;
+    evCom.forEach(e=>{
+      const d=new Date(e.date+'T12:00');
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#EFF6FF;border-radius:8px;margin-bottom:6px;border-left:3px solid #3B82F6;">
+        <span style="font-size:16px;">📣</span>
+        <div><div style="font-size:13px;font-weight:600;">${e.label}</div>
+        <div style="font-size:11px;color:var(--muted);">${fmtFR(d,{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div></div>
+      </div>`;
+    });
+  }
+  if(!h) h='<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center;">Aucun événement à venir</div>';
+  el.innerHTML=h;
+}
+
+function motDePasseOublie(){
+  toast('Contactez le gestionnaire à gwen.bruchet@ok-la.fr pour récupérer votre code d\'accès');
+}
 </script>
 <!-- BARRE SÉLECTION MULTIPLE -->
 <div id="selBar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1E293B;color:#fff;padding:12px 20px;z-index:9999;display:none;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 -4px 20px rgba(0,0,0,.25);">
