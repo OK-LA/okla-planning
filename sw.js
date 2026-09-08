@@ -5,7 +5,7 @@
 
 // Le numéro de version doit être incrémenté à CHAQUE mise à jour du code
 // pour forcer le navigateur à détecter le changement et activer la nouvelle version.
-const APP_VERSION = 'okla-v4.3';
+const APP_VERSION = 'okla-v4.4';
 const CACHE_NAME = APP_VERSION;
 
 const FILES_TO_CACHE = [
