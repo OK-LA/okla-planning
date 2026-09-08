@@ -1260,16 +1260,26 @@ const SUPA_KEY = lsGet('supaKey', '');
 let _supaUrl = SUPA_URL;
 let _supaKey = SUPA_KEY;
 
+// Normalise l'URL de base (enlève /rest/v1/ si présent)
+function supaBase() {
+  return _supaUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+}
+
+// Headers Supabase — compatible avec les nouvelles clés sb_publishable et les anciennes eyJ
+function supaHeaders() {
+  return {
+    'apikey': _supaKey,
+    'Authorization': `Bearer ${_supaKey}`,
+    'Content-Type': 'application/json'
+  };
+}
+
 // Lecture d'une section depuis Supabase
 async function supaRead(section) {
   if(!_supaUrl || !_supaKey) return null;
   try {
-    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?section=eq.${section}&select=data`, {
-      headers: {
-        'apikey': _supaKey,
-        'Authorization': `Bearer ${_supaKey}`,
-        'Content-Type': 'application/json'
-      }
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store?section=eq.${section}&select=data`, {
+      headers: supaHeaders()
     });
     if(!r.ok) return null;
     const j = await r.json();
@@ -1281,16 +1291,18 @@ async function supaRead(section) {
 async function supaWrite(section, data) {
   if(!_supaUrl || !_supaKey) return false;
   try {
-    const r = await fetch(`${_supaUrl}/rest/v1/okla_store`, {
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store`, {
       method: 'POST',
       headers: {
-        'apikey': _supaKey,
-        'Authorization': `Bearer ${_supaKey}`,
-        'Content-Type': 'application/json',
+        ...supaHeaders(),
         'Prefer': 'resolution=merge-duplicates'
       },
       body: JSON.stringify({ section, data })
     });
+    if(!r.ok) {
+      const err = await r.text();
+      console.warn('supaWrite error', r.status, err);
+    }
     return r.ok;
   } catch(e) { console.warn('supaWrite error', e); return false; }
 }
@@ -1299,12 +1311,8 @@ async function supaWrite(section, data) {
 async function supaReadAll() {
   if(!_supaUrl || !_supaKey) return null;
   try {
-    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?select=section,data`, {
-      headers: {
-        'apikey': _supaKey,
-        'Authorization': `Bearer ${_supaKey}`,
-        'Content-Type': 'application/json'
-      }
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store?select=section,data`, {
+      headers: supaHeaders()
     });
     if(!r.ok) return null;
     const rows = await r.json();
@@ -4025,18 +4033,14 @@ function saveScriptUrl(){
 
 // ══ CONFIGURATION SUPABASE ══
 async function saveSupaConfig(){
-  const url = document.getElementById('paramSupaUrl')?.value?.trim();
+  const url = document.getElementById('paramSupaUrl')?.value?.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
   const key = document.getElementById('paramSupaKey')?.value?.trim();
   if(!url || !key){toast('Remplissez l\'URL et la clé Supabase');return;}
-  // Valider l'URL
-  if(!url.includes('supabase.co') && !url.includes('supabase.io')){
-    toast('⚠️ L\'URL doit être une URL Supabase (xxxx.supabase.co)');return;
-  }
   _supaUrl = url;
   _supaKey = key;
   lsSet('supaUrl', url);
   lsSet('supaKey', key);
-  toast('✓ Configuration Supabase enregistrée — Test en cours...');
+  toast('✓ Configuration enregistrée — Test en cours...');
   await testSupaConnection();
 }
 
@@ -4044,28 +4048,29 @@ async function testSupaConnection(){
   const statusEl = document.getElementById('supaStatus');
   if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Test en cours...</span>';
   try {
-    const r = await fetch(`${_supaUrl}/rest/v1/okla_store?section=eq.planning&select=section`, {
-      headers: {'apikey': _supaKey, 'Authorization': `Bearer ${_supaKey}`}
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store?section=eq.planning&select=section`, {
+      headers: supaHeaders()
     });
     if(r.ok){
+      const j = await r.json();
       if(statusEl) statusEl.innerHTML = '<span style="color:#059669;font-weight:600;">✅ Connexion Supabase réussie ! Les données seront synchronisées entre tous vos appareils.</span>';
       toast('✅ Supabase connecté !');
     } else {
       const err = await r.text();
-      if(statusEl) statusEl.innerHTML = `<span style="color:#DC2626;">❌ Erreur ${r.status} — Vérifiez l'URL et la clé. Avez-vous exécuté le script SQL ?</span>`;
-      toast('❌ Échec de connexion Supabase');
+      console.error('Supabase test error:', r.status, err);
+      if(statusEl) statusEl.innerHTML = `<span style="color:#DC2626;">❌ Erreur ${r.status} — ${err.slice(0,100)}</span>`;
+      toast('❌ Échec connexion Supabase — voir les détails');
     }
   } catch(e) {
-    if(statusEl) statusEl.innerHTML = '<span style="color:#DC2626;">❌ Impossible de joindre Supabase. Vérifiez l\'URL.</span>';
+    if(statusEl) statusEl.innerHTML = `<span style="color:#DC2626;">❌ Erreur réseau : ${e.message}</span>`;
     toast('❌ Erreur réseau Supabase');
   }
 }
 
-// Envoyer toutes les données locales vers Supabase (migration initiale)
 async function supaUploadAll(){
   if(!_supaUrl || !_supaKey){toast('Configurez Supabase d\'abord');return;}
   const statusEl = document.getElementById('supaStatus');
-  if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Envoi de toutes les données vers Supabase...</span>';
+  if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Envoi en cours...</span>';
   const sections = [
     ['employees', S.employees],
     ['planning', S.planning],
@@ -4076,13 +4081,19 @@ async function supaUploadAll(){
     ['events', S.events],
     ['sc', SC],
   ];
-  let ok = 0;
+  let ok = 0, errors = [];
   for(const [section, data] of sections){
     const success = await supaWrite(section, data);
     if(success) ok++;
+    else errors.push(section);
   }
-  if(statusEl) statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">✅ ${ok}/${sections.length} sections envoyées. Toutes vos données sont maintenant dans Supabase.</span>`;
-  toast(`✅ Migration vers Supabase terminée (${ok}/${sections.length})`);
+  if(ok === sections.length){
+    if(statusEl) statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">✅ ${ok}/${sections.length} sections envoyées. Toutes vos données sont dans Supabase.</span>`;
+    toast(`✅ Migration Supabase terminée (${ok}/${sections.length})`);
+  } else {
+    if(statusEl) statusEl.innerHTML = `<span style="color:#DC2626;">⚠️ ${ok}/${sections.length} OK. Erreurs sur : ${errors.join(', ')}. Vérifiez que le SQL a bien été exécuté dans Supabase.</span>`;
+    toast(`⚠️ ${ok}/${sections.length} sections envoyées`);
+  }
 }
 
 // Initialiser les champs de config au chargement des paramètres
