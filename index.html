@@ -1295,16 +1295,25 @@ async function supaRead(section) {
 async function supaWrite(section, data) {
   if(!_supaUrl || !_supaKey) return false;
   try {
-    const r = await fetch(`${supaBase()}/rest/v1/okla_store`, {
-      method: 'POST',
-      headers: supaHeaders({'Prefer': 'resolution=merge-duplicates'}),
-      body: JSON.stringify({ section, data })
+    // Utiliser PATCH (UPDATE) sur la ligne existante plutôt que POST (INSERT)
+    // Les 9 sections sont déjà créées par le SQL setup → on met à jour, jamais on insère
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store?section=eq.${encodeURIComponent(section)}`, {
+      method: 'PATCH',
+      headers: supaHeaders({'Prefer': 'return=minimal'}),
+      body: JSON.stringify({ data })
     });
     if(!r.ok) {
       const err = await r.text();
-      console.warn('supaWrite error', r.status, err);
+      console.warn('supaWrite PATCH error', r.status, err);
+      // Fallback : essayer POST avec upsert si PATCH échoue
+      const r2 = await fetch(`${supaBase()}/rest/v1/okla_store`, {
+        method: 'POST',
+        headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+        body: JSON.stringify({ section, data })
+      });
+      return r2.ok;
     }
-    return r.ok;
+    return true;
   } catch(e) { console.warn('supaWrite error', e); return false; }
 }
 
