@@ -1294,10 +1294,15 @@ async function supaRead(section) {
 // Écriture d'une section dans Supabase (upsert)
 async function supaWrite(section, data) {
   if(!_supaUrl || !_supaKey) return false;
-  // Les employés sont désormais synchronisés vers une vraie table relationnelle
-  // (voir supaWriteEmployees) plutôt que le blob JSON okla_store — corrige le bug
-  // où un remplacement en bloc pouvait effacer un employé créé sur un autre appareil.
+  // Ces sections sont désormais synchronisées vers de vraies tables relationnelles
+  // plutôt que le blob JSON okla_store — corrige le bug où un remplacement en bloc
+  // pouvait effacer des données créées sur un autre appareil entre-temps.
   if (section === 'employees') return supaWriteEmployees(data);
+  if (section === 'planning') return supaWritePlanning(data);
+  if (section === 'requests') return supaWriteRequests(data);
+  if (section === 'absences') return supaWriteAbsences(data);
+  if (section === 'event_types') return supaWriteEventTypes(data);
+  if (section === 'events') return supaWriteEvents(data);
   try {
     // Utiliser PATCH (UPDATE) sur la ligne existante plutôt que POST (INSERT)
     // Les 9 sections sont déjà créées par le SQL setup → on met à jour, jamais on insère
@@ -1391,6 +1396,228 @@ async function supaReadEmployees() {
   } catch(e) { console.warn('supaReadEmployees error', e); return null; }
 }
 
+// Écriture du planning dans `planning_entries` (upsert + suppression des entrées qui
+// ne sont plus présentes, parmi les employés actuellement concernés par cet envoi).
+async function supaWritePlanning(planning) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const entries = Object.entries(planning || {});
+    if (!entries.length) return true; // garde-fou : jamais vider sur une map vide
+    const empIds = [...new Set(entries.map(([key]) => key.slice(0, -11)))];
+    const idList = empIds.map(id => encodeURIComponent(id)).join(',');
+    const rDel = await fetch(`${supaBase()}/rest/v1/planning_entries?employee_id=in.(${idList})`, {
+      method: 'DELETE',
+      headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDel.ok) console.warn('supaWritePlanning delete error', rDel.status, await rDel.text());
+    const rows = entries.map(([key, val]) => ({
+      employee_id: key.slice(0, -11),
+      entry_date: key.slice(-10),
+      type: val.type,
+      site: val.site || null,
+      note: val.note || null,
+    }));
+    const r = await fetch(`${supaBase()}/rest/v1/planning_entries?on_conflict=employee_id,entry_date`, {
+      method: 'POST',
+      headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r.ok) { console.warn('supaWritePlanning upsert error', r.status, await r.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWritePlanning error', e); return false; }
+}
+
+// Lecture du planning depuis `planning_entries`, reconstruit sous forme de map
+// `${employeeId}_${date}` -> {type, site, note} identique au format S.planning.
+// Paginé (Range) : PostgREST plafonne par défaut à 1000 lignes par requête,
+// et le planning en contient plusieurs milliers.
+async function supaReadPlanning() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    let allRows = [], from = 0;
+    const pageSize = 1000;
+    while (true) {
+      const r = await fetch(`${supaBase()}/rest/v1/planning_entries?select=*&order=employee_id,entry_date`, {
+        headers: supaHeaders({ 'Range-Unit': 'items', 'Range': `${from}-${from + pageSize - 1}` })
+      });
+      if(!r.ok) return null;
+      const page = await r.json();
+      allRows = allRows.concat(page);
+      if (page.length < pageSize) break;
+      from += pageSize;
+    }
+    const out = {};
+    allRows.forEach(row => { out[`${row.employee_id}_${row.entry_date}`] = { type: row.type, site: row.site, note: row.note || '' }; });
+    return out;
+  } catch(e) { console.warn('supaReadPlanning error', e); return null; }
+}
+
+// Écriture des demandes (congés, échanges...) dans `requests`.
+async function supaWriteRequests(requests) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (requests || []).map(r => r.id).filter(v => v != null);
+    if (!ids.length) return true;
+    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
+    const rDel = await fetch(`${supaBase()}/rest/v1/requests?id=not.in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDel.ok) console.warn('supaWriteRequests delete error', rDel.status, await rDel.text());
+    const rows = requests.map(r => ({
+      id: r.id,
+      type: r.type,
+      status: r.status,
+      emp_id: r.empId,
+      emp_name: r.empName || null,
+      emp_email: r.empEmail || null,
+      date_debut: r.dateDebut || null,
+      date_fin: r.dateFin || null,
+      date_a: r.dateA || null,
+      date_b: r.dateB || null,
+      cible_id: r.cibleId || null,
+      cible_name: r.cibleName || null,
+      cible_email: r.cibleEmail || null,
+      jours_ouvres: (r.joursOuvres === '' || r.joursOuvres == null) ? null : r.joursOuvres,
+      note: r.note || null,
+    }));
+    const r2 = await fetch(`${supaBase()}/rest/v1/requests?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r2.ok) { console.warn('supaWriteRequests upsert error', r2.status, await r2.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteRequests error', e); return false; }
+}
+
+async function supaReadRequests() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/requests?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({
+      id: row.id, type: row.type, status: row.status, empId: row.emp_id, empName: row.emp_name,
+      empEmail: row.emp_email, dateDebut: row.date_debut, dateFin: row.date_fin,
+      dateA: row.date_a, dateB: row.date_b, cibleId: row.cible_id, cibleName: row.cible_name,
+      cibleEmail: row.cible_email, joursOuvres: row.jours_ouvres, note: row.note,
+      date: row.date_debut,
+    }));
+  } catch(e) { console.warn('supaReadRequests error', e); return null; }
+}
+
+// Écriture des absences dans `absences`.
+async function supaWriteAbsences(absences) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (absences || []).map(a => a.id).filter(v => v != null);
+    if (!ids.length) return true;
+    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
+    const rDel = await fetch(`${supaBase()}/rest/v1/absences?id=not.in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDel.ok) console.warn('supaWriteAbsences delete error', rDel.status, await rDel.text());
+    const rows = absences.map(a => ({
+      id: a.id,
+      emp_id: a.empId,
+      emp_name: a.empName || null,
+      emp_site: a.empSite || null,
+      emp_tel: a.empTel || null,
+      date_str: a.dateStr,
+      motif: a.motif || null,
+      note: a.note || null,
+      resolved: !!a.resolved,
+      remp_id: a.rempId || null,
+      remp_name: a.rempName || null,
+      source: a.source || null,
+    }));
+    const r2 = await fetch(`${supaBase()}/rest/v1/absences?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r2.ok) { console.warn('supaWriteAbsences upsert error', r2.status, await r2.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteAbsences error', e); return false; }
+}
+
+async function supaReadAbsences() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/absences?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({
+      id: row.id, empId: row.emp_id, empName: row.emp_name, empSite: row.emp_site, empTel: row.emp_tel,
+      dateStr: row.date_str, motif: row.motif, note: row.note, resolved: row.resolved,
+      rempId: row.remp_id, rempName: row.remp_name, source: row.source,
+    }));
+  } catch(e) { console.warn('supaReadAbsences error', e); return null; }
+}
+
+// Écriture des types d'événements dans `event_types`.
+async function supaWriteEventTypes(eventTypes) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (eventTypes || []).map(t => t.id).filter(Boolean);
+    if (!ids.length) return true;
+    const idList = ids.map(id => encodeURIComponent(id)).join(',');
+    const rDel = await fetch(`${supaBase()}/rest/v1/event_types?id=not.in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDel.ok) console.warn('supaWriteEventTypes delete error', rDel.status, await rDel.text());
+    const rows = eventTypes.map(t => ({ id: t.id, label: t.label, color: t.color, is_vacances: !!t.isVacances }));
+    const r2 = await fetch(`${supaBase()}/rest/v1/event_types?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r2.ok) { console.warn('supaWriteEventTypes upsert error', r2.status, await r2.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteEventTypes error', e); return false; }
+}
+
+async function supaReadEventTypes() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/event_types?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({ id: row.id, label: row.label, color: row.color, isVacances: row.is_vacances }));
+  } catch(e) { console.warn('supaReadEventTypes error', e); return null; }
+}
+
+// Écriture des événements (plages colorées) dans `events`.
+async function supaWriteEvents(events) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (events || []).map(e => e.id).filter(v => v != null);
+    if (!ids.length) return true;
+    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
+    const rDel = await fetch(`${supaBase()}/rest/v1/events?id=not.in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDel.ok) console.warn('supaWriteEvents delete error', rDel.status, await rDel.text());
+    const rows = events.map(ev => ({
+      id: ev.id, type_id: ev.typeId, date_debut: ev.dateDebut, date_fin: ev.dateFin,
+      portee: ev.portee, cible: ev.cible || null,
+    }));
+    const r2 = await fetch(`${supaBase()}/rest/v1/events?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r2.ok) { console.warn('supaWriteEvents upsert error', r2.status, await r2.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteEvents error', e); return false; }
+}
+
+async function supaReadEvents() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/events?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({ id: row.id, typeId: row.type_id, dateDebut: row.date_debut, dateFin: row.date_fin, portee: row.portee, cible: row.cible }));
+  } catch(e) { console.warn('supaReadEvents error', e); return null; }
+}
+
 // Lecture de toutes les sections en une seule requête
 async function supaReadAll() {
   if(!_supaUrl || !_supaKey) return null;
@@ -1402,9 +1629,16 @@ async function supaReadAll() {
     const rows = await r.json();
     const result = {};
     rows.forEach(row => { result[row.section] = row.data; });
-    // Employés : source de vérité = table relationnelle (repli sur okla_store si indisponible)
-    const empRows = await supaReadEmployees();
+    // Ces sections : source de vérité = tables relationnelles (repli sur okla_store si indisponible)
+    const [empRows, planningRows, requestRows, absenceRows, eventTypeRows, eventRows] = await Promise.all([
+      supaReadEmployees(), supaReadPlanning(), supaReadRequests(), supaReadAbsences(), supaReadEventTypes(), supaReadEvents(),
+    ]);
     if (empRows) result.employees = empRows;
+    if (planningRows) result.planning = planningRows;
+    if (requestRows) result.requests = requestRows;
+    if (absenceRows) result.absences = absenceRows;
+    if (eventTypeRows) result.event_types = eventTypeRows;
+    if (eventRows) result.events = eventRows;
     return result;
   } catch(e) { console.warn('supaReadAll error', e); return null; }
 }
@@ -1594,18 +1828,19 @@ async function loadAll(force=false){
         S.employees = supa.employees;
         lsSet('employees', S.employees);
       }
-      // Planning (fusion clé par clé)
-      if(supa.planning && typeof supa.planning === 'object' && Object.keys(supa.planning).length > 0) {
-        S.planning = Object.assign({}, S.planning, supa.planning);
+      // Planning — remplacement direct : chaque ligne vient désormais de sa propre
+      // table (upsert + suppression par employé à l'écriture), plus besoin de fusion.
+      if(supa.planning && typeof supa.planning === 'object') {
+        S.planning = supa.planning;
         lsSet('planning', S.planning);
       }
-      // Demandes (fusion par id)
+      // Demandes — idem, remplacement direct (plus de mergeParId nécessaire).
       if(Array.isArray(supa.requests)) {
-        S.requests = mergeParId(S.requests, supa.requests);
+        S.requests = supa.requests;
         lsSet('requests', S.requests);
       }
-      // Absences
-      if(Array.isArray(supa.absences) && supa.absences.length >= (S.absences?.length||0)) {
+      // Absences — idem.
+      if(Array.isArray(supa.absences)) {
         S.absences = supa.absences;
         lsSet('absences', S.absences);
       }
@@ -1621,13 +1856,13 @@ async function loadAll(force=false){
         });
         lsSet('params', S.params);
       }
-      // Types d'événements
-      if(Array.isArray(supa.event_types) && supa.event_types.length >= (S.eventTypes?.length||0)) {
+      // Types d'événements — remplacement direct.
+      if(Array.isArray(supa.event_types)) {
         S.eventTypes = supa.event_types;
         lsSet('eventTypes', S.eventTypes);
       }
-      // Événements
-      if(Array.isArray(supa.events) && supa.events.length >= (S.events?.length||0)) {
+      // Événements — remplacement direct.
+      if(Array.isArray(supa.events)) {
         S.events = supa.events;
         lsSet('events', S.events);
       }

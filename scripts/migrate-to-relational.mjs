@@ -9,12 +9,20 @@
 //   ... avec --core-only pour ne migrer que employees + site_settings + app_settings
 //       (app pas encore en production : planning/requests/absences/events/mur_posts
 //       repoussés à une 2e passe sur des données plus propres — décision 2026-09-08)
+//   ... avec --skip-core pour la 2e passe : employees/site_settings/app_settings déjà
+//       migrés le 2026-09-08, on ne les réinsère pas (éviterait un conflit de PK)
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DRY_RUN = process.argv.includes('--dry-run');
 const RESET = process.argv.includes('--reset');
 const CORE_ONLY = process.argv.includes('--core-only');
+const SKIP_CORE = process.argv.includes('--skip-core');
+
+// Anciens ids numériques connus, remappés vers l'id réel actuel de l'employé avant
+// toute détection d'orphelins — décision validée avec Antoine le 2026-09-10 (Gwen
+// Bruchet avait plusieurs enregistrements réels encore sous son ancien id "9").
+const LEGACY_ID_REMAP = { '9': 'BG01' };
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error('❌ Variables manquantes : SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY doivent être définies dans l\'environnement.');
@@ -47,15 +55,21 @@ async function restInsert(table, rows) {
   return { table, count: rows.length };
 }
 
+// PostgREST exige un filtre sur DELETE — colonne non-nullable à utiliser par table
+// (les tables à clé composite n'ont pas de colonne 'id').
+const RESET_FILTER_COLUMN = {
+  planning_entries: 'employee_id',
+  employee_leave_jokers: 'employee_id',
+  mur_post_reactions: 'post_id',
+};
 async function restReset(table) {
   if (DRY_RUN) return;
-  // DELETE sans filtre = vide la table entière (PostgREST l'autorise, RLS désactivée sur ces tables).
-  const r = await fetch(`${REST}/${table}?id=not.is.null`, { method: 'DELETE', headers: HEADERS })
-    .catch(() => null);
-  // Certaines tables ont une PK composite sans colonne 'id' -> filtre générique alternatif.
-  if (!r || !r.ok) {
-    await fetch(`${REST}/${table}`, { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } });
-  }
+  const col = RESET_FILTER_COLUMN[table] || 'id';
+  const r = await fetch(`${REST}/${table}?${col}=not.is.null`, {
+    method: 'DELETE',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+  });
+  if (!r.ok) console.warn(`restReset ${table} error`, r.status, await r.text());
 }
 
 async function restCount(table) {
@@ -89,13 +103,45 @@ async function main() {
   }
 
   const employees = sections.employees || [];
-  const planning = sections.planning || {};
-  const requests = sections.requests || [];
-  const absences = sections.absences || [];
+  let planning = sections.planning || {};
+  let requests = sections.requests || [];
+  let absences = sections.absences || [];
   const eventTypes = sections.event_types || [];
   const events = sections.events || [];
   const sc = sections.sc || {};
   const params = sections.params || {};
+
+  // ── Remap des anciens ids avant toute autre logique ──
+  if (Object.keys(LEGACY_ID_REMAP).length) {
+    const remappedPlanning = {};
+    let planningRemapped = 0, planningRemapSkipped = 0;
+    for (const [key, val] of Object.entries(planning)) {
+      const { empId, date } = planningKeyParts(key);
+      const realId = LEGACY_ID_REMAP[empId] || empId;
+      const newKey = `${realId}_${date}`;
+      if (realId !== empId && planning[newKey] !== undefined) {
+        // l'employé a déjà une entrée ce jour-là sous son id actuel : on garde
+        // celle-ci et on abandonne le doublon sous l'ancien id.
+        planningRemapSkipped++;
+        continue;
+      }
+      if (realId !== empId) planningRemapped++;
+      remappedPlanning[newKey] = val;
+    }
+    planning = remappedPlanning;
+    requests = requests.map(r => ({
+      ...r,
+      empId: LEGACY_ID_REMAP[r.empId] || r.empId,
+      cibleId: r.cibleId ? (LEGACY_ID_REMAP[r.cibleId] || r.cibleId) : r.cibleId,
+    }));
+    absences = absences.map(a => ({
+      ...a,
+      empId: LEGACY_ID_REMAP[a.empId] || a.empId,
+      rempId: a.rempId ? (LEGACY_ID_REMAP[a.rempId] || a.rempId) : a.rempId,
+    }));
+    console.log(`\n--- Remap d'anciens ids (${JSON.stringify(LEGACY_ID_REMAP)}) ---`);
+    console.log(`planning : ${planningRemapped} lignes remappées, ${planningRemapSkipped} doublons abandonnés (l'employé avait déjà une entrée ce jour-là sous son id actuel)`);
+  }
 
   const empIds = new Set(employees.map(e => e.id));
 
@@ -136,9 +182,11 @@ async function main() {
   for (const a of absences) {
     if ((a.empId && !empIds.has(a.empId)) || (a.rempId && !empIds.has(a.rempId))) absenceOrphanIds.add(a.id);
   }
+  const eventTypeIds = new Set(eventTypes.map(t => t.id));
   const eventOrphanIds = new Set();
   for (const ev of events) {
     if (ev.portee === 'employe' && ev.cible && !empIds.has(ev.cible)) eventOrphanIds.add(ev.id);
+    if (ev.typeId && !eventTypeIds.has(ev.typeId)) eventOrphanIds.add(ev.id);
   }
   const murPostOrphanIds = new Set();
   for (const p of (params.murPosts || [])) {
@@ -163,11 +211,13 @@ async function main() {
   }
 
   // ── Reset optionnel ──
-  const targetTables = [
+  const coreTables = ['site_settings', 'employees'];
+  const nonCoreTables = [
     'mur_post_comments', 'mur_post_reactions', 'mur_posts',
     'employee_leave_jokers', 'internal_events', 'events', 'event_types',
-    'absences', 'requests', 'planning_entries', 'site_settings', 'employees',
+    'absences', 'requests', 'planning_entries',
   ];
+  const targetTables = CORE_ONLY ? coreTables : SKIP_CORE ? nonCoreTables : [...nonCoreTables, ...coreTables];
   if (RESET) {
     console.log('\n--reset : purge des nouvelles tables avant réinsertion...');
     for (const t of targetTables) await restReset(t);
@@ -176,35 +226,40 @@ async function main() {
   // ── Reshape + insertion (ordre FK-safe) ──
   console.log('\n--- Écriture ---');
 
-  const employeeRows = employees.map(e => ({
-    id: e.id,
-    code: e.code || '',
-    name: e.name || '',
-    email: e.email || null,
-    tel: e.tel || null,
-    addr: e.addr || null,
-    site: e.site || '',
-    slot: e.slot || null,
-    has_children: !!e.hasChildren,
-    enfants: e.enfants || [],
-    contrat_type: e.typeContrat || null,
-    date_fin: e.dateFin || null,
-    solde_cp_manuel: e.soldeCPManuel ?? null,
-    solde_cp_manuel_date: e.soldeCPManuelDate || null,
-    repos_fixe_weekday: (params.reposFixe && params.reposFixe[e.id] != null) ? params.reposFixe[e.id] : null,
-  }));
-  console.log(await restInsert('employees', employeeRows));
+  let employeeRows = [], siteSettingsRows = [];
+  if (SKIP_CORE) {
+    console.log('--skip-core : employees / site_settings / app_settings non retouchés (déjà migrés).');
+  } else {
+    employeeRows = employees.map(e => ({
+      id: e.id,
+      code: e.code || '',
+      name: e.name || '',
+      email: e.email || null,
+      tel: e.tel || null,
+      addr: e.addr || null,
+      site: e.site || '',
+      slot: e.slot || null,
+      has_children: !!e.hasChildren,
+      enfants: e.enfants || [],
+      contrat_type: e.typeContrat || null,
+      date_fin: e.dateFin || null,
+      solde_cp_manuel: e.soldeCPManuel ?? null,
+      solde_cp_manuel_date: e.soldeCPManuelDate || null,
+      repos_fixe_weekday: (params.reposFixe && params.reposFixe[e.id] != null) ? params.reposFixe[e.id] : null,
+    }));
+    console.log(await restInsert('employees', employeeRows));
 
-  const siteSettingsRows = Object.keys(sc).map(site => ({
-    site,
-    color: sc[site]?.color || '#000000',
-    bg: sc[site]?.bg || '#ffffff',
-    border: sc[site]?.border || '#000000',
-    min_staff: (params.minStaff && params.minStaff[site]) || 1,
-    adresse: (params.adresses && params.adresses[site]) || null,
-    rotation_samedis_weeks: (params.rotationSamedis && params.rotationSamedis[site]) || 2,
-  }));
-  console.log(await restInsert('site_settings', siteSettingsRows));
+    siteSettingsRows = Object.keys(sc).map(site => ({
+      site,
+      color: sc[site]?.color || '#000000',
+      bg: sc[site]?.bg || '#ffffff',
+      border: sc[site]?.border || '#000000',
+      min_staff: (params.minStaff && params.minStaff[site]) || 1,
+      adresse: (params.adresses && params.adresses[site]) || null,
+      rotation_samedis_weeks: (params.rotationSamedis && params.rotationSamedis[site]) || 2,
+    }));
+    console.log(await restInsert('site_settings', siteSettingsRows));
+  }
 
   let planningRows = [], requestRows = [], absenceRows = [], eventTypeRows = [],
     eventRows = [], internalEventRows = [], jokerRows = [], murPostRows = [],
@@ -235,7 +290,7 @@ async function main() {
       cible_id: r.cibleId || null,
       cible_name: r.cibleName || null,
       cible_email: r.cibleEmail || null,
-      jours_ouvres: r.joursOuvres ?? null,
+      jours_ouvres: (r.joursOuvres === '' || r.joursOuvres == null) ? null : r.joursOuvres,
       note: r.note || null,
     }));
     console.log(await restInsert('requests', requestRows));
@@ -326,30 +381,45 @@ async function main() {
   }
 
   // ── app_settings (ligne unique, update plutôt qu'insert) ──
-  const appSettingsBody = {
-    verrou: !!params.verrou,
-    type_colors: params.typeColors || {},
-    motifs_absence: params.motifsAbsence || [],
-    regles_enfant_malade: params.reglesEnfantMalade || {},
-    samedis_pleins: params.samedisPleins || {},
-    regles_conges_quota: (params.reglesConges && params.reglesConges.quota) || 25,
-    sam_speciaux: params.samSpeciaux || { premiers: true, soldes: true },
-  };
-  if (!DRY_RUN) {
-    const r = await fetch(`${REST}/app_settings?id=eq.true`, {
-      method: 'PATCH',
-      headers: { ...HEADERS, Prefer: 'return=minimal' },
-      body: JSON.stringify(appSettingsBody),
-    });
-    if (!r.ok) throw new Error(`PATCH app_settings → ${r.status} ${await r.text()}`);
+  if (SKIP_CORE) {
+    console.log({ table: 'app_settings', skipped: true });
+  } else {
+    const appSettingsBody = {
+      verrou: !!params.verrou,
+      type_colors: params.typeColors || {},
+      motifs_absence: params.motifsAbsence || [],
+      regles_enfant_malade: params.reglesEnfantMalade || {},
+      samedis_pleins: params.samedisPleins || {},
+      regles_conges_quota: (params.reglesConges && params.reglesConges.quota) || 25,
+      sam_speciaux: params.samSpeciaux || { premiers: true, soldes: true },
+    };
+    if (!DRY_RUN) {
+      const r = await fetch(`${REST}/app_settings?id=eq.true`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify(appSettingsBody),
+      });
+      if (!r.ok) throw new Error(`PATCH app_settings → ${r.status} ${await r.text()}`);
+    }
+    console.log({ table: 'app_settings', count: 1 });
   }
-  console.log({ table: 'app_settings', count: 1 });
 
   // ── Post-vol : recomptage ──
   console.log('\n--- Vérification post-écriture ---');
   const checks = CORE_ONLY ? [
     ['employees', employeeRows.length],
     ['site_settings', siteSettingsRows.length],
+  ] : SKIP_CORE ? [
+    ['planning_entries', planningRows.length],
+    ['requests', requestRows.length],
+    ['absences', absenceRows.length],
+    ['event_types', eventTypeRows.length],
+    ['events', eventRows.length],
+    ['internal_events', internalEventRows.length],
+    ['employee_leave_jokers', jokerRows.length],
+    ['mur_posts', murPostRows.length],
+    ['mur_post_reactions', reactionRows.length],
+    ['mur_post_comments', commentRows.length],
   ] : [
     ['employees', employeeRows.length],
     ['planning_entries', planningRows.length],
