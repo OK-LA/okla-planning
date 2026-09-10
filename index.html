@@ -295,6 +295,7 @@ tbody tr:hover td{background:#FAFAF8;}
 
 .mt-10{margin-top:10px;}.mt-14{margin-top:14px;}.tc{text-align:center;}.muted{color:var(--muted);font-size:12px;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -814,6 +815,27 @@ tbody tr:hover td{background:#FAFAF8;}
           Importe les vrais plannings de tes 5 sites (Breteuil, Entrepôt, Ham, Longueau, Roye) basés sur tes fichiers Excel. <strong>Cette action remplace</strong> toutes les données de planning existantes du 29 décembre 2025 au 3 janvier 2027, et ajoute les jours fériés détectés. Synchronisé automatiquement avec Supabase.
         </div>
         <button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" onclick="importPlanningReel()">⚠️ Importer et remplacer (déc 2025 - jan 2027)</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>📤 Mettre à jour depuis un fichier Excel</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Pour utiliser Excel au quotidien puis synchroniser régulièrement l'application : dépose le fichier planning d'un magasin, l'appli compare avec le planning déjà enregistré et ne modifie <strong>que les cases qui ont changé</strong>, sans toucher aux dates déjà passées ni aux jours non renseignés dans le fichier.
+        </div>
+        <div class="fg"><label>Magasin concerné par ce fichier</label>
+          <select id="excelImportSite">
+            <option value="">— Choisir —</option>
+            <option value="Breteuil">Breteuil</option>
+            <option value="Entrepôt">Entrepôt</option>
+            <option value="Ham">Ham</option>
+            <option value="Longueau">Longueau</option>
+            <option value="Roye">Roye</option>
+          </select>
+        </div>
+        <div class="fg">
+          <input type="file" id="excelImportFile" accept=".xlsx,.xls" onchange="handleExcelFile(this)">
+        </div>
+        <div id="excelImportPreview"></div>
       </div>
 
       <div class="param-card" style="margin-top:14px;">
@@ -4682,6 +4704,161 @@ async function importPlanningReel(){
   persist();
   refreshActiveView();
   toast(`✓ Planning importé : ${applied} jour(s) appliqué(s)${skipped?`, ${skipped} ignoré(s) (code inconnu)`:''}${ferieAdded?`, ${ferieAdded} jour(s) férié(s) ajouté(s)`:''}`);
+}
+
+// ══ IMPORT EXCEL RÉCURRENT (fichier planning réel, mise à jour périodique) ══
+// Correspondance nom de fichier / cellule A1 -> site de l'appli (CORBIE = ancien nom de Longueau)
+const EXCEL_SITE_TOKENS = {BRETEUIL:'Breteuil', ENTREPOT:'Entrepôt', HAM:'Ham', LONGUEAU:'Longueau', CORBIE:'Longueau', ROYE:'Roye'};
+function stripAccents(s){ return String(s).normalize('NFD').replace(/[̀-ͯ]/g,''); }
+
+let _excelImportStaging = null;
+
+function handleExcelFile(input){
+  const file = input.files?.[0];
+  if(!file) return;
+  const site = document.getElementById('excelImportSite').value;
+  if(!site){ toast('⚠️ Choisis d\'abord le magasin concerné par ce fichier'); input.value=''; return; }
+  if(typeof XLSX==='undefined'){ toast('❌ La librairie de lecture Excel ne s\'est pas chargée (vérifie ta connexion internet)'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+      analyzeExcelImport(wb, site);
+    } catch(err) {
+      console.error(err);
+      toast('❌ Erreur de lecture du fichier : '+err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Traduit une valeur de cellule Excel en type de case de planning.
+// type:null = présence normale (on garde le créneau habituel de l'employé).
+// skip:true = valeur volontairement ignorée (ex: FERIE, déjà calculé par l'appli).
+function mapExcelCellValue(rawValue, site, empFirstName){
+  const raw = String(rawValue).trim();
+  const v = stripAccents(raw).toUpperCase();
+  if(!v) return null;
+  if(v.includes('MALADIE')) return {type:'maladie'};
+  if(v.includes('FERIE')) return {skip:true};
+  // X<SITE> : renfort de cette personne sur un autre magasin ce jour-là
+  if(v.includes('X')){
+    for(const token of Object.keys(EXCEL_SITE_TOKENS)){
+      const targetSite = EXCEL_SITE_TOKENS[token];
+      if(targetSite!==site && v.includes(token)) return {type:'remplacement', site:targetSite};
+    }
+  }
+  if(v.includes('VIP')) return {type:'vip'};
+  if(v.includes('COURS')) return {type:'formation'};
+  if(v.includes('CP')) return {type:'conge'};
+  if(v==='BF' || v==='FDC') return {type:null, assumption:'BF/FDC'}; // jour d'événement commercial : traité comme présence normale
+  if(site==='Entrepôt' && v.replace(/\s/g,'').includes('10H')) return {type:'entrepotB'};
+  if(v==='X') return {type:null};
+  if(empFirstName && v===stripAccents(empFirstName).toUpperCase()) return {type:null}; // prénom de la personne dans sa propre colonne = présence normale
+  // Un seul mot alphabétique = très probablement le prénom de la personne qui a remplacé/couvert ce jour-là
+  if(/^[A-Z]{2,20}$/.test(v)) return {type:'off', note:`Remplacé(e) par ${raw}`, assumption:'prenom'};
+  return null; // vraiment pas reconnu
+}
+
+function analyzeExcelImport(wb, site){
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+  let headerRowIdx = -1;
+  for(let i=0;i<rows.length;i++){
+    if(String(rows[i]?.[0]||'').trim().toUpperCase()==='DATES'){ headerRowIdx=i; break; }
+  }
+  if(headerRowIdx===-1){ document.getElementById('excelImportPreview').innerHTML='<div style="color:#DC2626;font-size:12px;margin-top:8px;">❌ Format non reconnu : impossible de trouver la ligne "DATES". Ce fichier suit-il le même modèle que les plannings habituels ?</div>'; return; }
+  let nameRowIdx = headerRowIdx;
+  if(!rows[headerRowIdx].slice(3).some(v=>v && String(v).trim()) && rows[headerRowIdx-1]) nameRowIdx = headerRowIdx-1;
+  const nameRow = rows[nameRowIdx];
+
+  const siteEmps = activeEmployees().filter(e=>e.site===site);
+  const colMap = {};
+  for(let c=3;c<nameRow.length;c++){
+    const raw = nameRow[c];
+    if(!raw) continue;
+    const name = String(raw).trim();
+    if(!name) continue;
+    if(name.toUpperCase()==='EXTRA'){ colMap[c]={isExtra:true}; continue; }
+    const match = siteEmps.find(e=>stripAccents(e.name.split(' ')[0]).toUpperCase()===stripAccents(name).toUpperCase());
+    colMap[c] = match ? {empId:match.id, label:match.name, firstName:match.name.split(' ')[0]} : {unmatched:true, label:name};
+  }
+
+  const todayStr = fmt(new Date());
+  const changes=[], unrecognized=[], unmatchedCols=new Set(), assumptionsUsed=new Set();
+  for(let r=headerRowIdx+1;r<rows.length;r++){
+    const row = rows[r];
+    if(!row) continue;
+    const dateVal = row[0];
+    if(!(dateVal instanceof Date)) continue;
+    const dateStr = fmt(dateVal);
+    if(dateStr < todayStr) continue; // on ne touche jamais aux dates déjà passées
+    for(const cStr of Object.keys(colMap)){
+      const info = colMap[cStr];
+      const raw = row[Number(cStr)];
+      if(raw==null || String(raw).trim()==='') continue; // case vide dans le fichier -> on ne touche à rien
+      if(info.isExtra) continue; // colonne "EXTRA" : renfort ponctuel non rattaché à un employé de l'appli, non importé
+      if(info.unmatched){ unmatchedCols.add(info.label); continue; }
+      const mapped = mapExcelCellValue(raw, site, info.firstName);
+      if(!mapped){ unrecognized.push({dateStr, col:info.label, value:String(raw).trim()}); continue; }
+      if(mapped.skip) continue;
+      if(mapped.assumption) assumptionsUsed.add(mapped.assumption);
+      const finalType = mapped.type===null ? (S.employees.find(e=>e.id===info.empId)?.slot||'magasin') : mapped.type;
+      const finalSite = mapped.site || site;
+      const finalNote = mapped.note || '';
+      const cur = S.planning[`${info.empId}_${dateStr}`];
+      const curType = cur?.type || 'off', curSite = cur?.site || site, curNote = cur?.note || '';
+      if(finalType===curType && finalSite===curSite && finalNote===curNote) continue; // déjà à jour
+      changes.push({empId:info.empId, dateStr, empLabel:info.label, oldType:curType, oldSite:curSite, newType:finalType, newSite:finalSite, newNote:finalNote});
+    }
+  }
+  _excelImportStaging = {site, changes};
+  renderExcelImportPreview(changes, unrecognized, [...unmatchedCols], [...assumptionsUsed]);
+}
+
+function renderExcelImportPreview(changes, unrecognized, unmatchedCols, assumptions){
+  const el = document.getElementById('excelImportPreview');
+  let h = `<div style="margin-top:12px;padding:12px;background:#F8FAFF;border-radius:8px;border:1px solid #DBEAFE;">`;
+  h += `<div style="font-size:13px;font-weight:700;margin-bottom:8px;">${changes.length} case(s) seront modifiée(s)</div>`;
+  if(changes.length){
+    h += `<div style="max-height:220px;overflow-y:auto;font-size:11px;margin-bottom:10px;">`;
+    changes.slice(0,200).forEach(c=>{
+      const oldLbl = TYPES.find(t=>t.key===c.oldType)?.label || c.oldType;
+      const newLbl = TYPES.find(t=>t.key===c.newType)?.label || c.newType;
+      h += `<div style="padding:3px 0;border-bottom:1px solid #EEF2FF;">${fmtFR(new Date(c.dateStr+'T12:00'),{day:'numeric',month:'short'})} — <strong>${c.empLabel}</strong> : ${oldLbl}${c.oldSite&&c.oldType==='remplacement'?' ('+c.oldSite+')':''} → ${newLbl}${c.newSite&&c.newType==='remplacement'?' ('+c.newSite+')':''}${c.newNote?' — note : '+c.newNote:''}</div>`;
+    });
+    if(changes.length>200) h += `<div style="padding:4px 0;color:var(--muted);">… et ${changes.length-200} de plus</div>`;
+    h += `</div>`;
+    h += `<button class="btn btn-primary btn-sm" onclick="confirmExcelImport()">✓ Appliquer ces ${changes.length} changement(s)</button>`;
+  }
+  if(assumptions.length){
+    h += `<div style="font-size:11px;color:#B45309;margin-top:10px;">⚠️ Hypothèses appliquées à vérifier : ${assumptions.includes('BF/FDC')?'"BF"/"FDC" traités comme une présence normale (pas de type dédié dans l\'appli). ':''}${assumptions.includes('prenom')?'Un prénom seul dans une case a été traité comme "remplacé(e) par cette personne" (note ajoutée, case marquée repos).':''}</div>`;
+  }
+  if(unmatchedCols.length){
+    h += `<div style="font-size:11px;color:#DC2626;margin-top:8px;">⚠️ Colonne(s) non reconnue(s) (aucun employé actif de ce magasin ne correspond) : ${unmatchedCols.join(', ')} — vérifie l'orthographe ou ajoute/réactive cet employé.</div>`;
+  }
+  if(unrecognized.length){
+    h += `<div style="font-size:11px;color:#DC2626;margin-top:8px;">⚠️ ${unrecognized.length} valeur(s) non reconnue(s), ignorée(s) : ${unrecognized.slice(0,15).map(u=>`"${u.value}" (${u.col}, ${fmtFR(new Date(u.dateStr+'T12:00'),{day:'numeric',month:'short'})})`).join(' · ')}${unrecognized.length>15?' …':''}</div>`;
+  }
+  if(!changes.length && !unmatchedCols.length && !unrecognized.length){
+    h += `<div style="font-size:12px;color:var(--muted);">Rien à mettre à jour : le planning enregistré correspond déjà à ce fichier (dates futures uniquement).</div>`;
+  }
+  h += `</div>`;
+  el.innerHTML = h;
+}
+
+function confirmExcelImport(){
+  if(!_excelImportStaging || !_excelImportStaging.changes.length) return;
+  const {changes} = _excelImportStaging;
+  changes.forEach(c=>{
+    S.planning[`${c.empId}_${c.dateStr}`] = {type:c.newType, site:c.newSite, note:c.newNote};
+  });
+  persist();
+  refreshActiveView();
+  toast(`✓ ${changes.length} case(s) de planning mise(s) à jour`);
+  document.getElementById('excelImportPreview').innerHTML='';
+  document.getElementById('excelImportFile').value='';
+  _excelImportStaging = null;
 }
 
 // ══ CONFIGURATION SUPABASE ══
