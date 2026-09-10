@@ -761,6 +761,16 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
 
       <div class="param-card" style="margin-top:14px;">
+        <h3>📄 Types de contrat</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Proposés à la création et sur la fiche employé, en plus de "CDI" (toujours disponible, sans date de fin).
+        </div>
+        <div id="paramTypesContrat"></div>
+        <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterTypeContrat()">+ Ajouter un type</button>
+        <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveTypesContrat()">✓ Enregistrer</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
         <h3>👶 Règles "Enfant malade"</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
           Nombre de jours accordés par an selon le nombre d'enfants du salarié (renseigné dans sa fiche). Le seuil le plus élevé atteint s'applique.
@@ -1064,7 +1074,11 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label>Prénom et Nom</label><input type="text" id="aeName" placeholder="Marie Martin"></div>
     <div class="fg"><label>Email</label><input type="email" id="aeEmail" placeholder="marie@ok-la.fr"></div>
     <div class="fg"><label>Téléphone</label><input type="tel" id="aeTel" placeholder="06 12 34 56 78"></div>
-    <div class="fg"><label>Adresse domicile</label><input type="text" id="aeAddr" placeholder="12 rue de la Paix, 80400 Ham"></div>
+    <div class="fg"><label>Adresse domicile</label><input type="text" id="aeAddr" placeholder="12 rue de la Paix"></div>
+    <div style="display:flex;gap:8px;">
+      <div class="fg" style="flex:1;"><label>Code postal</label><input type="text" id="aeCodePostal" placeholder="80400" maxlength="10"></div>
+      <div class="fg" style="flex:2;"><label>Ville</label><input type="text" id="aeVille" placeholder="Ham"></div>
+    </div>
     <div class="fg"><label>Magasin principal</label>
       <select id="aeSite"><option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option></select>
     </div>
@@ -1079,9 +1093,13 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
       <input type="checkbox" id="aeChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
     </label></div>
+    <div class="fg"><label>Date d'arrivée dans l'entreprise</label><input type="date" id="aeDateEmbauche"></div>
+    <div class="fg"><label>Type de contrat</label>
+      <select id="aeTypeContrat"></select>
+    </div>
     <div class="fg"><label>Date de fin de contrat (optionnel)</label>
       <input type="date" id="aeDateFin">
-      <div class="muted" style="margin-top:4px;">Laisser vide pour un contrat sans fin prévue. Les jours après cette date seront grisés sur le planning.</div>
+      <div class="muted" style="margin-top:4px;">Laisser vide pour un contrat sans fin prévue (CDI). Les jours après cette date seront grisés sur le planning.</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mEmp')">Annuler</button>
@@ -1105,6 +1123,10 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="fg"><label>Email</label><input type="email" id="ficheEmail"></div>
       <div class="fg"><label>Téléphone</label><input type="tel" id="ficheTel"></div>
       <div class="fg"><label>Adresse</label><input type="text" id="ficheAddr"></div>
+      <div style="display:flex;gap:8px;">
+        <div class="fg" style="flex:1;"><label>Code postal</label><input type="text" id="ficheCodePostal" maxlength="10"></div>
+        <div class="fg" style="flex:2;"><label>Ville</label><input type="text" id="ficheVille"></div>
+      </div>
       <div class="fg"><label>Code employé</label><input type="text" id="ficheCode" readonly style="background:#f9f9f9;color:var(--muted);cursor:not-allowed;"></div>
       <div class="fg"><label>Site principal</label>
         <select id="ficheSite">
@@ -1135,14 +1157,10 @@ tbody tr:hover td{background:#FAFAF8;}
     <!-- Contrat -->
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Contrat</div>
+      <div class="fg"><label>Date d'arrivée dans l'entreprise</label><input type="date" id="ficheDateEmbauche"></div>
       <div class="fg">
         <label>Type de contrat</label>
-        <select id="ficheTypeContrat">
-          <option value="">CDI (pas de date de fin)</option>
-          <option value="cdd">CDD</option>
-          <option value="apprentissage">Apprentissage</option>
-          <option value="autre">Autre (intérim, saisonnier...)</option>
-        </select>
+        <select id="ficheTypeContrat"></select>
       </div>
       <div class="fg" id="ficheDateFinWrap" style="display:none;">
         <label>Date de fin de contrat</label>
@@ -1353,6 +1371,9 @@ async function supaWriteEmployees(employees) {
       solde_cp_manuel_date: e.soldeCPManuelDate || null,
       repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
       active: e.active !== false,
+      ville: e.ville || null,
+      code_postal: e.codePostal || null,
+      date_embauche: e.dateEmbauche || null,
     }));
     const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
       method: 'POST',
@@ -1387,6 +1408,9 @@ async function supaReadEmployees() {
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
       active: row.active !== false,
+      ville: row.ville,
+      codePostal: row.code_postal,
+      dateEmbauche: row.date_embauche,
       _reposFixeWeekday: row.repos_fixe_weekday,
     }));
   } catch(e) { console.warn('supaReadEmployees error', e); return null; }
@@ -1680,6 +1704,7 @@ async function supaWriteParams(params) {
       verrou: !!params.verrou,
       type_colors: params.typeColors || {},
       motifs_absence: params.motifsAbsence || [],
+      types_contrat: params.typesContrat || [],
       regles_enfant_malade: params.reglesEnfantMalade || {},
       samedis_pleins: params.samedisPleins || {},
       regles_conges_quota: (params.reglesConges && params.reglesConges.quota) || 25,
@@ -1886,6 +1911,7 @@ async function supaReadParams(empRows) {
       verrou: app.verrou,
       typeColors: app.type_colors || {},
       motifsAbsence: app.motifs_absence || [],
+      typesContrat: app.types_contrat || [],
       reglesEnfantMalade: app.regles_enfant_malade || {},
       samedisPleins: app.samedis_pleins || {},
       reglesConges: { quota: app.regles_conges_quota, dateAlerte: app.regles_conges_date_alerte || '' },
@@ -1979,6 +2005,14 @@ const S={
       {id:'enfant_malade',label:'Enfant malade',classification:'neutre'},
       {id:'absent',label:'Absence imprévue',classification:'neutre'},
       {id:'autre',label:'Autre',classification:'neutre'},
+    ],
+    // Types de contrat à durée déterminée, configurables par le gestionnaire (Paramètres).
+    // "CDI" n'y figure pas : c'est la valeur par défaut fixe (pas de date de fin), toujours
+    // proposée en premier dans le select, indépendamment de cette liste.
+    typesContrat:[
+      {id:'cdd',label:'CDD'},
+      {id:'apprentissage',label:'Apprentissage'},
+      {id:'autre',label:'Autre (intérim, saisonnier...)'},
     ],
     // Quota "enfant malade" (jours/an) selon le nombre d'enfants, + majoration si un enfant a moins d'1 an.
     reglesEnfantMalade:{
@@ -2559,7 +2593,7 @@ async function sendReq(){
 function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();
+  buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
 }
 function switchTab(n){
   const mgrScreen = document.getElementById('sMgr');
@@ -3712,6 +3746,8 @@ function openFicheEmp(empId){
   document.getElementById('ficheEmail').value = emp.email||'';
   document.getElementById('ficheTel').value = emp.tel||'';
   document.getElementById('ficheAddr').value = emp.addr||'';
+  document.getElementById('ficheCodePostal').value = emp.codePostal||'';
+  document.getElementById('ficheVille').value = emp.ville||'';
   document.getElementById('ficheCode').value = emp.code||'';
   document.getElementById('ficheSite').value = emp.site||'Ham';
   document.getElementById('ficheSlot').value = emp.slot||'magasin';
@@ -3720,6 +3756,8 @@ function openFicheEmp(empId){
   editingEnfants = JSON.parse(JSON.stringify(emp.enfants||[]));
   renderFicheEnfants();
   // Contrat
+  document.getElementById('ficheDateEmbauche').value = emp.dateEmbauche||'';
+  populerSelectTypeContrat('ficheTypeContrat');
   const typeC = emp.typeContrat||'';
   document.getElementById('ficheTypeContrat').value = typeC;
   document.getElementById('ficheDateFin').value = emp.dateFin||'';
@@ -3854,6 +3892,9 @@ async function saveFicheEmp(){
   emp.email = document.getElementById('ficheEmail').value.trim();
   emp.tel = document.getElementById('ficheTel').value.trim();
   emp.addr = document.getElementById('ficheAddr').value.trim();
+  emp.codePostal = document.getElementById('ficheCodePostal').value.trim();
+  emp.ville = document.getElementById('ficheVille').value.trim();
+  emp.dateEmbauche = document.getElementById('ficheDateEmbauche').value||null;
   emp.site = document.getElementById('ficheSite').value;
   emp.slot = document.getElementById('ficheSlot').value;
   emp.hasChildren = document.getElementById('ficheChildren').checked;
@@ -3918,7 +3959,7 @@ async function deleteEmp(){
   closeModal('mFicheEmp');
   toast(`✓ ${emp.name} archivé(e)`);
 }
-function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
+function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCodePostal','aeVille','aeCode','aeDateEmbauche','aeDateFin'].forEach(id=>document.getElementById(id).value='');populerSelectTypeContrat('aeTypeContrat');openModal('mEmp');}
 document.getElementById('aeName').addEventListener('input',function(){
   const p=this.value.trim().split(' ');
   if(p.length>=2){const c=(p[0].substring(0,3)+p[1].substring(0,2)).toUpperCase().replace(/[^A-Z]/g,'');
@@ -3935,7 +3976,11 @@ async function saveNewEmp(){
   const emp={id:'E'+String(_nextENum).padStart(2,'0'),
     code:document.getElementById('aeCode').value,name,email,
     tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
+    codePostal:document.getElementById('aeCodePostal').value.trim(),
+    ville:document.getElementById('aeVille').value.trim(),
     site,slot,hasChildren:document.getElementById('aeChildren').checked,
+    dateEmbauche:document.getElementById('aeDateEmbauche').value||null,
+    typeContrat:document.getElementById('aeTypeContrat').value,
     dateFin:document.getElementById('aeDateFin').value||null};
   S.employees.push(emp);
   // Initialiser le planning sur 3 mois
@@ -4194,6 +4239,62 @@ async function saveMotifsAbsence(){
   populerMotifsAbsenceEmp();
   toast('✓ Motifs enregistrés');
 }
+
+// ── Types de contrat configurables (en plus de "CDI", toujours fixe/sans date de fin) ──
+function renderParamTypesContrat(){
+  const el = document.getElementById('paramTypesContrat');
+  if(!el) return;
+  const types = S.params.typesContrat || [];
+  el.innerHTML = types.map((t,i)=>`
+    <div class="magasin-row" id="typeContratRow_${i}" style="flex-wrap:wrap;gap:6px;">
+      <input type="text" class="magasin-name-input" id="typeContratLabel_${i}" value="${t.label}" placeholder="Nom du type" style="flex:1;min-width:120px;">
+      <button class="btn-del" onclick="supprimerTypeContrat(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun type configuré</div>';
+}
+function ajouterTypeContrat(){
+  const nom = prompt('Nom du nouveau type de contrat (ex : Alternance, Stage...) :');
+  if(!nom || !nom.trim()) return;
+  if(!S.params.typesContrat) S.params.typesContrat=[];
+  S.params.typesContrat.push({id:'contrat_'+Date.now(), label:nom.trim()});
+  persist();
+  renderParamTypesContrat();
+  toast(`✓ ${nom.trim()} ajouté`);
+}
+function supprimerTypeContrat(idx){
+  const t = S.params.typesContrat[idx];
+  if(!t) return;
+  if(!confirm(`Supprimer le type "${t.label}" ?`)) return;
+  S.params.typesContrat.splice(idx,1);
+  persist();
+  renderParamTypesContrat();
+  toast(`✓ ${t.label} supprimé`);
+}
+function saveTypesContrat(){
+  S.params.typesContrat.forEach((t,i)=>{
+    const labelEl = document.getElementById('typeContratLabel_'+i);
+    if(labelEl) t.label = labelEl.value.trim() || t.label;
+  });
+  persist();
+  renderParamTypesContrat();
+  populerSelectsTypeContrat();
+  toast('✓ Types de contrat enregistrés');
+}
+// Remplit un select "type de contrat" : option CDI fixe en premier + liste configurable.
+// Utilisé à la création (aeTypeContrat) et sur la fiche (ficheTypeContrat).
+function populerSelectTypeContrat(selectId){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const current = sel.value;
+  const types = S.params.typesContrat || [];
+  sel.innerHTML = '<option value="">CDI (pas de date de fin)</option>' +
+    types.map(t=>`<option value="${t.id}">${t.label}</option>`).join('');
+  if(current==='' || types.some(t=>t.id===current)) sel.value = current;
+}
+function populerSelectsTypeContrat(){
+  populerSelectTypeContrat('aeTypeContrat');
+  populerSelectTypeContrat('ficheTypeContrat');
+}
+
 // Remplit dynamiquement un select de motifs d'absence à partir de la liste configurable
 // (Réglages → Motifs d'absence) — utilisé côté salarié ET côté gestionnaire pour qu'ils
 // restent toujours synchronisés avec la même liste.
