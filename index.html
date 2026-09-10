@@ -510,11 +510,11 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
       <div id="echangeFields" style="display:none;">
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue d'échanger vos jours de travail : vous prenez sa place le jour choisi, il/elle prend la vôtre.</div>
-        <div class="fg"><label>Ma date à céder</label><input type="date" id="rEchangeDate"></div>
+        <div class="fg"><label>Jour de repos souhaité</label><input type="date" id="rEchangeDate"></div>
         <div class="fg"><label>Collègue</label>
           <select id="rEchangeCollegue" onchange="updEchangeCollegueInfo()"><option value="">Choisir un collègue...</option></select>
         </div>
-        <div class="fg"><label>Sa date que je récupère</label><input type="date" id="rEchangeDateCollegue"></div>
+        <div class="fg"><label>Date de repos prévu</label><input type="date" id="rEchangeDateCollegue"></div>
         <div id="echangeCheck" style="margin-bottom:10px;font-size:12px;"></div>
       </div>
       <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
@@ -1111,6 +1111,14 @@ tbody tr:hover td{background:#FAFAF8;}
           <option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option>
         </select>
       </div>
+      <div class="fg"><label>Créneau habituel</label>
+        <select id="ficheSlot">
+          <option value="magasin">Magasin</option>
+          <option value="entrepotA">Entrepôt A</option>
+          <option value="entrepotB">Entrepôt B</option>
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Type de journée pré-rempli par défaut pour cet employé.</div>
+      </div>
       <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
         <input type="checkbox" id="ficheChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
       </label></div>
@@ -1434,8 +1442,12 @@ async function supaReadPlanning() {
       if (page.length < pageSize) break;
       from += pageSize;
     }
+    // 'repos' est un alias hérité de l'import Excel initial — le vrai type est 'off' (TYPES ne
+    // connaît que 'off'). Normalisé ici en lecture pour que ce genre de valeur orpheline, d'où
+    // qu'elle vienne, ne fausse plus jamais les calculs d'effectif (un salarié en 'repos' était
+    // compté comme présent, puisque seul 'off' est exclu partout dans le code).
     const out = {};
-    allRows.forEach(row => { out[`${row.employee_id}_${row.entry_date}`] = { type: row.type, site: row.site, note: row.note || '' }; });
+    allRows.forEach(row => { out[`${row.employee_id}_${row.entry_date}`] = { type: row.type==='repos'?'off':row.type, site: row.site, note: row.note || '' }; });
     return out;
   } catch(e) { console.warn('supaReadPlanning error', e); return null; }
 }
@@ -2189,6 +2201,13 @@ function getMon(d){const x=new Date(d);const day=x.getDay();x.setDate(x.getDate(
 // différent selon le jour (ex: samedi renforcé). Lecture rétro-compatible.
 function getMinStaff(site, date){
   const v = S.params.minStaff?.[site];
+  if(date.getDay()===0){
+    // Dimanche : pas de vérification par défaut (magasins normalement fermés) — seule une
+    // valeur explicitement définie pour ce jour (Paramètres → Effectif minimum) déclenche une
+    // alerte, utile pour les "Dimanche exceptionnel" (VIP). Un réglage "même effectif tous les
+    // jours" (nombre simple, hérité) ne s'applique volontairement pas au dimanche.
+    return (v && typeof v==='object') ? (v[0] ?? 0) : 0;
+  }
   if(v==null) return 1;
   if(typeof v === 'object') return (v[date.getDay()] ?? 1);
   return v;
@@ -2795,10 +2814,10 @@ function checkEffectifAlerts(mon) {
 
   for (let i = 0; i < 7; i++) {
     const d = addDays(mon, i);
-    if (d.getDay() === 0) continue; // dimanche skip
     const dateStr = fmt(d);
     Object.keys(SC).forEach(site => {
       const minStaff = getMinStaffEffectif(site, d);
+      if (d.getDay() === 0 && minStaff === 0) return; // dimanche normal (fermé), pas de minimum configuré
       const presents = activeEmployees().filter(e => {
         const sh = S.planning[`${e.id}_${dateStr}`];
         const siteEffectifJour = sh?.site || e.site;
@@ -3695,6 +3714,7 @@ function openFicheEmp(empId){
   document.getElementById('ficheAddr').value = emp.addr||'';
   document.getElementById('ficheCode').value = emp.code||'';
   document.getElementById('ficheSite').value = emp.site||'Ham';
+  document.getElementById('ficheSlot').value = emp.slot||'magasin';
   document.getElementById('ficheChildren').checked = !!emp.hasChildren;
   // Enfants (pour le quota "enfant malade")
   editingEnfants = JSON.parse(JSON.stringify(emp.enfants||[]));
@@ -3829,12 +3849,30 @@ async function saveFicheEmp(){
   const empId = document.getElementById('mFicheEmp').dataset.empId;
   const emp = S.employees.find(e=>e.id===empId);
   if(!emp) return;
+  const ancienSite = emp.site;
   emp.name = document.getElementById('ficheNom').value.trim()||emp.name;
   emp.email = document.getElementById('ficheEmail').value.trim();
   emp.tel = document.getElementById('ficheTel').value.trim();
   emp.addr = document.getElementById('ficheAddr').value.trim();
   emp.site = document.getElementById('ficheSite').value;
+  emp.slot = document.getElementById('ficheSlot').value;
   emp.hasChildren = document.getElementById('ficheChildren').checked;
+  // Transfert de magasin : chaque case de planning porte son propre `site` (utilisé pour les
+  // calculs d'effectif), qui ne se mettait jamais à jour tout seul — l'employé semblait
+  // "transféré" dans la fiche mais son ancien magasin continuait de le compter comme présent.
+  // On aligne les jours à venir sur le nouveau site (le passé reste inchangé, pour l'historique).
+  // Les cases 'remplacement' sont volontairement exclues : leur site diffère du site d'origine par nature.
+  if(emp.site !== ancienSite){
+    const today = fmt(new Date());
+    Object.keys(S.planning).forEach(key=>{
+      if(!key.startsWith(empId+'_')) return;
+      const dateStr = key.slice(-10);
+      if(dateStr < today) return;
+      const sh = S.planning[key];
+      if(sh.type==='remplacement') return;
+      if(sh.site===ancienSite) sh.site = emp.site;
+    });
+  }
   // Enfants : relit les dates de naissance saisies, ignore les lignes vides
   editingEnfants.forEach((e,i)=>{
     const dateEl = document.getElementById('enfantDate_'+i);
