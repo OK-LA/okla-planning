@@ -1033,7 +1033,7 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label>Employé absent</label><select id="absEmpSel"></select></div>
     <div class="fg"><label>Date</label><input type="date" id="absDate"></div>
     <div class="fg"><label>Motif</label>
-      <select id="absMot"><option value="maladie">Arrêt maladie</option><option value="absent">Absence imprévue</option><option value="autre">Autre</option></select>
+      <select id="absMot"></select>
     </div>
     <div class="fg"><label>Note</label><input type="text" id="absNote" placeholder="Précisions..."></div>
     <div class="modal-actions">
@@ -1963,10 +1963,10 @@ const S={
     reposFixe:{}, // rempli automatiquement à l'init à partir de reposFixeParCode (clé = id employé)
     // Motifs disponibles dans "Signaler une absence" (salarié) — configurable par le gestionnaire.
     motifsAbsence:[
-      {id:'maladie',label:'Maladie'},
-      {id:'enfant_malade',label:'Enfant malade'},
-      {id:'absent',label:'Absence imprévue'},
-      {id:'autre',label:'Autre'},
+      {id:'maladie',label:'Maladie',classification:'neutre'},
+      {id:'enfant_malade',label:'Enfant malade',classification:'neutre'},
+      {id:'absent',label:'Absence imprévue',classification:'neutre'},
+      {id:'autre',label:'Autre',classification:'neutre'},
     ],
     // Quota "enfant malade" (jours/an) selon le nombre d'enfants, + majoration si un enfant a moins d'1 an.
     reglesEnfantMalade:{
@@ -3299,7 +3299,30 @@ function openAbsModal(){
   document.getElementById('absEmpSel').innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   document.getElementById('absDate').value=fmt(new Date());
   document.getElementById('absNote').value='';
+  populerSelectMotifs('absMot');
   openModal('mAbs');
+}
+// Détermine le type de planning à appliquer pour une absence selon la classification du motif
+// choisi (Réglages → Motifs d'absence). 'maladie' reste un cas spécial figé (type dédié, jamais
+// de décompte). Pour un motif classé "Décompte CP", crée en arrière-plan une demande de congé
+// déjà approuvée pour que le solde CP de l'employé reflète réellement l'absence.
+function appliquerMotifAbsence(motifId, empId, dateStr){
+  if(motifId==='maladie') return 'maladie';
+  const motifDef=(S.params.motifsAbsence||[]).find(m=>m.id===motifId);
+  const classification=motifDef?.classification || 'neutre';
+  if(classification==='sans_solde') return 'congeSansSolde';
+  if(classification==='cp'){
+    const emp=S.employees.find(e=>e.id===empId);
+    S.requests.push({
+      id:Date.now(), type:'conge', status:'approved', empId,
+      empName:emp?.name||'', empEmail:emp?.email||'',
+      dateDebut:dateStr, dateFin:dateStr, date:dateStr,
+      note:'Absence déclarée — décompte CP automatique',
+      joursOuvres:countJoursOuvresReels(dateStr,dateStr),
+    });
+    return 'conge';
+  }
+  return 'off';
 }
 async function saveAbsence(){
   const empId=document.getElementById('absEmpSel').value;
@@ -3308,7 +3331,8 @@ async function saveAbsence(){
   const note=document.getElementById('absNote').value;
   if(!dateStr){toast('Sélectionnez une date');return;}
   const emp=S.employees.find(e=>e.id===empId);
-  S.planning[`${empId}_${dateStr}`]={type:motif==='maladie'?'maladie':'off',site:emp.site,note:`Absent: ${note||motif}`};
+  const type=appliquerMotifAbsence(motif,empId,dateStr);
+  S.planning[`${empId}_${dateStr}`]={type,site:emp.site,note:`Absent: ${note||motif}`};
   S.mods.push({empId,dl:fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'}),det:'Absence',seen:false});
   const absId=Date.now();
   const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
@@ -3343,7 +3367,7 @@ async function saveAbsenceEmp(){
   if(motif==='autre'&&!motifLibre){toast('Précisez le motif');return;}
   const motifFinal = motif==='autre' ? motifLibre : motif;
   // Mettre à jour le planning du salarié pour ce jour
-  const typePlanning=(motif==='maladie')?'maladie':'off';
+  const typePlanning=appliquerMotifAbsence(motif,emp.id,dateStr);
   S.planning[`${emp.id}_${dateStr}`]={type:typePlanning,site:emp.site,note:`Absent: ${note||motifFinal}`};
   const absId=Date.now();
   const motifLabels={maladie:'Maladie',enfant_malade:'Enfant malade',absent:'Absence imprévue',autre:'Autre'};
@@ -4084,6 +4108,11 @@ async function saveEventTypes(){
 }
 
 // ── Motifs d'absence configurables (salarié → "Signaler une absence") ──
+// Chaque motif a une classification qui détermine son impact sur le solde CP quand il est
+// utilisé pour déclarer une absence : 'neutre' (aucun impact, comportement historique),
+// 'sans_solde' (congé sans solde, hors quota), 'cp' (décompte réellement le solde de congés
+// payés — crée une demande de congé approuvée en arrière-plan, voir saveAbsence/saveAbsenceEmp).
+const MOTIF_CLASSIFICATIONS = {neutre:'Neutre (aucun impact)', sans_solde:'Sans solde', cp:'Décompte CP'};
 function renderParamMotifsAbsence(){
   const el = document.getElementById('paramMotifsAbsence');
   if(!el) return;
@@ -4091,6 +4120,9 @@ function renderParamMotifsAbsence(){
   el.innerHTML = motifs.map((m,i)=>`
     <div class="magasin-row" id="motifRow_${i}" style="flex-wrap:wrap;gap:6px;">
       <input type="text" class="magasin-name-input" id="motifLabel_${i}" value="${m.label}" placeholder="Nom du motif" style="flex:1;min-width:120px;">
+      <select id="motifClass_${i}" style="min-width:150px;">
+        ${Object.entries(MOTIF_CLASSIFICATIONS).map(([k,l])=>`<option value="${k}" ${(m.classification||'neutre')===k?'selected':''}>${l}</option>`).join('')}
+      </select>
       <button class="btn-del" onclick="supprimerMotifAbsence(${i})" title="Supprimer">✕</button>
     </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun motif configuré</div>';
 }
@@ -4098,10 +4130,10 @@ function ajouterMotifAbsence(){
   const nom = prompt('Nom du nouveau motif (ex : Rendez-vous médical, Panne de voiture...) :');
   if(!nom || !nom.trim()) return;
   if(!S.params.motifsAbsence) S.params.motifsAbsence=[];
-  S.params.motifsAbsence.push({id:'motif_'+Date.now(), label:nom.trim()});
+  S.params.motifsAbsence.push({id:'motif_'+Date.now(), label:nom.trim(), classification:'neutre'});
   persist();
   renderParamMotifsAbsence();
-  toast(`✓ ${nom.trim()} ajouté`);
+  toast(`✓ ${nom.trim()} ajouté — classé "Neutre", modifiable ci-dessous`);
 }
 function supprimerMotifAbsence(idx){
   const m = S.params.motifsAbsence[idx];
@@ -4116,20 +4148,28 @@ async function saveMotifsAbsence(){
   S.params.motifsAbsence.forEach((m,i)=>{
     const labelEl = document.getElementById('motifLabel_'+i);
     if(labelEl) m.label = labelEl.value.trim() || m.label;
+    const classEl = document.getElementById('motifClass_'+i);
+    if(classEl) m.classification = classEl.value;
   });
   persist();
   renderParamMotifsAbsence();
   populerMotifsAbsenceEmp();
   toast('✓ Motifs enregistrés');
 }
-// Remplit dynamiquement le select du modal "Signaler une absence" côté salarié
-function populerMotifsAbsenceEmp(){
-  const sel = document.getElementById('absEmpMotif');
+// Remplit dynamiquement un select de motifs d'absence à partir de la liste configurable
+// (Réglages → Motifs d'absence) — utilisé côté salarié ET côté gestionnaire pour qu'ils
+// restent toujours synchronisés avec la même liste.
+function populerSelectMotifs(selectId){
+  const sel = document.getElementById(selectId);
   if(!sel) return;
   const motifs = S.params.motifsAbsence || [];
   const current = sel.value;
   sel.innerHTML = motifs.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
   if(motifs.some(m=>m.id===current)) sel.value = current;
+}
+// Remplit dynamiquement le select du modal "Signaler une absence" côté salarié
+function populerMotifsAbsenceEmp(){
+  populerSelectMotifs('absEmpMotif');
 }
 
 // ── Règles "Enfant malade" (jours/an selon nombre d'enfants) ──
