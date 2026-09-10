@@ -843,7 +843,7 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="tab-content" id="tab-comms">
       <div class="param-card" style="margin-bottom:14px;">
         <h3>📋 Événements internes</h3>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Réunions, formations, livraisons — visibles par tous les salariés dans leur onglet Communications.</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Réunions, formations, livraisons — visibles dans l'onglet Communications et notées sur le planning des participants concernés (ou de tous, si aucun participant précis n'est choisi).</div>
         <div id="evInternesList"></div>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
           <select id="evInterneType" style="flex:1;min-width:120px;">
@@ -854,8 +854,12 @@ tbody tr:hover td{background:#FAFAF8;}
           </select>
           <input type="date" id="evInterneDate" style="flex:1;min-width:120px;">
           <input type="text" id="evInterneLabel" placeholder="Description..." style="flex:2;min-width:150px;">
-          <button class="btn btn-primary btn-sm" onclick="ajouterEvInterne()">+ Ajouter</button>
         </div>
+        <div class="fg" style="margin-top:8px;">
+          <label>Participants (laisser vide = tous les employés)</label>
+          <select id="evInterneParticipants" multiple size="5" style="height:auto;"></select>
+        </div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="ajouterEvInterne()">+ Ajouter</button>
       </div>
       <div class="param-card">
         <h3>📣 Planning Communication OK-LA</h3>
@@ -1773,7 +1777,7 @@ async function supaWriteParams(params) {
         method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
       });
       if(!rDelIe.ok) console.warn('supaWriteParams internal_events delete error', rDelIe.status, await rDelIe.text());
-      const ieRows = evInternes.map(ie => ({ id: ie.id, type: ie.type, event_date: ie.date, label: ie.label || null }));
+      const ieRows = evInternes.map(ie => ({ id: ie.id, type: ie.type, event_date: ie.date, label: ie.label || null, participants: ie.participants || [] }));
       const rIe = await fetch(`${supaBase()}/rest/v1/internal_events?on_conflict=id`, {
         method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
         body: JSON.stringify(ieRows)
@@ -1918,7 +1922,7 @@ async function supaReadParams(empRows) {
       reglesConges: { quota: app.regles_conges_quota, dateAlerte: app.regles_conges_date_alerte || '' },
       samSpeciaux: app.sam_speciaux || { premiers: true, soldes: true },
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
-      evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label })),
+      evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [] })),
       murPosts: murPostsResult,
     };
   } catch(e) { console.warn('supaReadParams error', e); return null; }
@@ -2186,6 +2190,13 @@ function getEvenementsDuJour(dateStr){
   if(!Array.isArray(S.events)) return [];
   return S.events.filter(e=>e && dateStr>=e.dateDebut && dateStr<=e.dateFin);
 }
+// Événements internes (réunion/formation/livraison/autre) concernant CET employé à CETTE date —
+// "participants" vide ou absent = tout le monde (comportement historique préservé).
+function getEvInternesDuJourPourEmp(empId, dateStr){
+  return (S.params.evInternes||[]).filter(e=>
+    e.date===dateStr && (!e.participants || !e.participants.length || e.participants.includes(empId))
+  );
+}
 function renderPastillesDate(dateStr){
   const evs=getEvenementsDuJour(dateStr);
   if(!evs.length) return '';
@@ -2404,8 +2415,10 @@ function renderEmpWeek(){
     const sh=S.planning[`${emp.id}_${fmt(d)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
     const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};"></div>`;
+    const evInternesJourW=getEvInternesDuJourPourEmp(emp.id,fmt(d));
+    const evBadgeW=evInternesJourW.length?`<div style="font-size:13px;margin-left:6px;" title="${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]||'📌').join('')}</div>`:'';
     h+=`<div class="day-row${isT?' today-row':''}">
-      <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}
+      <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${evBadgeW}
     </div>`;
   }
   document.getElementById('empDays').innerHTML=h;
@@ -2457,8 +2470,10 @@ function renderEmpMonth(){
     const sh=S.planning[`${emp.id}_${fmt(cur)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
     let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
-    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}">
-      <div class="cnum">${cur.getDate()}</div>${bar}</div>`;
+    const evInternesJourEM=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
+    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;" title="${evInternesJourEM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourEM[0].type]||'📌'}</div>`:'';
+    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;">
+      <div class="cnum">${cur.getDate()}</div>${bar}${evBadgeEM}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('empCalBody').innerHTML=h;
@@ -2964,7 +2979,11 @@ function renderWeek(){
           :type==='off'
           ?`<div class="sb empty${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" onclick="openShiftMod('${emp.id}','${dStr}')"></div>`
           :`<div class="sb${type==='vip'?' vip':''}${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
-        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}">${cell}</td>`;
+        const evInternesJour=getEvInternesDuJourPourEmp(emp.id,dStr);
+        const evInterneBadge=evInternesJour.length
+          ?`<div style="position:absolute;top:1px;right:1px;font-size:9px;line-height:1;pointer-events:none;" title="${evInternesJour.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJour[0].type]||'📌'}</div>`
+          :'';
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}position:relative;">${cell}${evInterneBadge}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
         const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
         const vacScoJour=isDateVacances(dStr);
@@ -3132,10 +3151,14 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
           :'';
         cell=`<div class="mblock${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
         // Compte comme "présent ici" seulement si effectivement sur place ce jour-là :
-        // pas en congé/maladie, et pas parti en renfort ailleurs (site effectif différent).
-        if(type!=='conge' && type!=='maladie' && site2===site) count++;
+        // pas en congé/maladie/formation, et pas parti en renfort ailleurs (site effectif différent).
+        if(type!=='conge' && type!=='maladie' && type!=='formation' && site2===site) count++;
       }
-      tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);">${cell}</td>`;
+      const evInternesJourM=getEvInternesDuJourPourEmp(emp.id,dStr);
+      const evInterneBadgeM=evInternesJourM.length
+        ?`<div style="position:absolute;top:0;right:1px;font-size:8px;line-height:1;pointer-events:none;" title="${evInternesJourM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourM[0].type]||'📌'}</div>`
+        :'';
+      tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);position:relative;">${cell}${evInterneBadgeM}</td>`;
     });
     // Cellule renfort partagée : qui que ce soit, on affiche son/leurs prénom(s) ici.
     if(renforts.length){
@@ -3205,8 +3228,10 @@ function renderMonthEmp(ref,today){
     const sh=S.planning[`${emp.id}_${fmt(cur)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
     let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
-    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
-      <div class="cnum">${cur.getDate()}</div>${bar}</div>`;
+    const evInternesJourE=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
+    const evBadgeE=evInternesJourE.length?`<div style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;" title="${evInternesJourE.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourE[0].type]||'📌'}</div>`:'';
+    h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
+      <div class="cnum">${cur.getDate()}</div>${bar}${evBadgeE}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('calBody').innerHTML=h;
@@ -3506,7 +3531,7 @@ function renderEmpEchanges(){
   if(envoyes.length){
     cardEnvoyes.style.display='block';
     document.getElementById('empEchangesEnvoyesList').innerHTML = envoyes.map(r=>{
-      const labels={pending_collegue:['En attente de '+r.cibleName.split(' ')[0],'cs-pending'],pending_gestionnaire:['En attente du gestionnaire','cs-pending'],approved:['Validé','cs-ok'],refused:['Refusé','cs-refused']};
+      const labels={pending_collegue:['En attente de '+(r.cibleName?.split(' ')[0]||'?'),'cs-pending'],pending_gestionnaire:['En attente du gestionnaire','cs-pending'],approved:['Validé','cs-ok'],refused:['Refusé','cs-refused']};
       const [lbl,cls]=labels[r.status]||['—','cs-pending'];
       return `<div class="conge-item">
         <div style="flex:1">
@@ -5647,12 +5672,20 @@ function renderEvInternes(){
   const el=document.getElementById('evInternesList');
   if(!el) return;
   const evs=(S.params.evInternes||[]).sort((a,b)=>a.date.localeCompare(b.date));
+  const partSel=document.getElementById('evInterneParticipants');
+  if(partSel) partSel.innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun événement interne ajouté.</div>';return;}
-  el.innerHTML=evs.map((e,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;">
+  el.innerHTML=evs.map((e,i)=>{
+    const parts=e.participants||[];
+    const partLabel=parts.length
+      ? parts.map(id=>S.employees.find(emp=>emp.id===id)?.name.split(' ')[0]).filter(Boolean).join(', ')
+      : 'Tous les employés';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;">
     <span style="font-size:14px;">${EV_INTERNE_ICONS[e.type]||'📌'}</span>
-    <div style="flex:1;font-size:12px;"><strong>${e.label}</strong><br><span style="color:var(--muted);">${fmtFR(new Date(e.date+'T12:00'),{weekday:'short',day:'numeric',month:'long',year:'numeric'})}</span></div>
+    <div style="flex:1;font-size:12px;"><strong>${e.label}</strong><br><span style="color:var(--muted);">${fmtFR(new Date(e.date+'T12:00'),{weekday:'short',day:'numeric',month:'long',year:'numeric'})} · ${partLabel}</span></div>
     <button class="btn-del" onclick="supprimerEvInterne(${i})" title="Supprimer">✕</button>
-  </div>`).join('');
+  </div>`;
+  }).join('');
 }
 
 function ajouterEvInterne(){
@@ -5660,12 +5693,16 @@ function ajouterEvInterne(){
   const date=document.getElementById('evInterneDate')?.value;
   const label=document.getElementById('evInterneLabel')?.value?.trim();
   if(!date||!label){toast('Remplissez la date et la description');return;}
+  const partSel=document.getElementById('evInterneParticipants');
+  const participants=partSel?[...partSel.selectedOptions].map(o=>o.value):[];
   if(!S.params.evInternes) S.params.evInternes=[];
-  S.params.evInternes.push({type,date,label,id:Date.now()});
+  S.params.evInternes.push({type,date,label,participants,id:Date.now()});
   S.params.evInternes.sort((a,b)=>a.date.localeCompare(b.date));
   persist();
   document.getElementById('evInterneLabel').value='';
+  if(partSel) [...partSel.options].forEach(o=>o.selected=false);
   renderEvInternes();
+  refreshActiveView();
   toast('✓ Événement ajouté');
 }
 
@@ -5675,13 +5712,17 @@ function supprimerEvInterne(i){
   persist();
   renderEvInternes();
   renderEmpComms();
+  refreshActiveView();
 }
 
 function renderEmpComms(){
   const el=document.getElementById('empCommsList');
   if(!el) return;
   const maintenant=fmt(new Date());
-  const evInternes=(S.params.evInternes||[]).filter(e=>e.date>=maintenant).slice(0,20);
+  const empId=S.user?.id;
+  const evInternes=(S.params.evInternes||[])
+    .filter(e=>e.date>=maintenant && (!e.participants || !e.participants.length || e.participants.includes(empId)))
+    .slice(0,20);
   const evCom=PLANNING_COM_DATA.filter(e=>e.date>=maintenant).slice(0,15);
   let h='';
   if(evInternes.length){
