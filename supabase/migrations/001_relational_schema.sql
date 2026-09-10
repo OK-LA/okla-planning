@@ -151,6 +151,7 @@ create table if not exists app_settings (
   regles_enfant_malade       jsonb not null default '{}',    -- {seuils:[...], joursSiMoinsUnAn}
   samedis_pleins             jsonb not null default '{}',    -- exceptions date -> bool
   regles_conges_quota        int not null default 25,
+  regles_conges_date_alerte  date,
   sam_speciaux               jsonb not null default '{"premiers":true,"soldes":true}',
   updated_at                 timestamptz not null default now()
 );

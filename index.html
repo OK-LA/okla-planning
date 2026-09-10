@@ -1303,6 +1303,8 @@ async function supaWrite(section, data) {
   if (section === 'absences') return supaWriteAbsences(data);
   if (section === 'event_types') return supaWriteEventTypes(data);
   if (section === 'events') return supaWriteEvents(data);
+  if (section === 'sc') return supaWriteSiteColors(data);
+  if (section === 'params') return supaWriteParams(data);
   try {
     // Utiliser PATCH (UPDATE) sur la ligne existante plutôt que POST (INSERT)
     // Les 9 sections sont déjà créées par le SQL setup → on met à jour, jamais on insère
@@ -1392,6 +1394,7 @@ async function supaReadEmployees() {
       dateFin: row.date_fin,
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
+      _reposFixeWeekday: row.repos_fixe_weekday,
     }));
   } catch(e) { console.warn('supaReadEmployees error', e); return null; }
 }
@@ -1618,6 +1621,285 @@ async function supaReadEvents() {
   } catch(e) { console.warn('supaReadEvents error', e); return null; }
 }
 
+// Écriture des couleurs de sites dans `site_settings` (colonnes color/bg/border
+// uniquement — min_staff/adresse/rotation_samedis_weeks viennent de supaWriteParams
+// et sont préservés car absents du corps envoyé ici, PostgREST ne modifie que les
+// colonnes présentes dans le JSON lors d'un upsert).
+// Met à jour uniquement les colonnes fournies pour un site (PATCH — ne touche pas
+// aux autres colonnes, contrairement à un upsert qui exigerait toutes les colonnes
+// NOT NULL). Si le site n'existe pas encore, on l'insère avec des valeurs par défaut
+// pour les colonnes non fournies.
+async function supaUpsertSitePartial(site, fields, insertDefaults) {
+  const rPatch = await fetch(`${supaBase()}/rest/v1/site_settings?site=eq.${encodeURIComponent(site)}`, {
+    method: 'PATCH', headers: supaHeaders({'Prefer': 'return=representation'}),
+    body: JSON.stringify(fields)
+  });
+  if(!rPatch.ok) { console.warn('supaUpsertSitePartial PATCH error', site, rPatch.status, await rPatch.text()); return false; }
+  const updated = await rPatch.json();
+  if (updated.length > 0) return true;
+  const rInsert = await fetch(`${supaBase()}/rest/v1/site_settings`, {
+    method: 'POST', headers: supaHeaders({'Prefer': 'return=minimal'}),
+    body: JSON.stringify({ site, ...insertDefaults, ...fields })
+  });
+  if(!rInsert.ok) console.warn('supaUpsertSitePartial INSERT error', site, rInsert.status, await rInsert.text());
+  return rInsert.ok;
+}
+
+async function supaWriteSiteColors(sc) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const sites = Object.keys(sc || {});
+    if (!sites.length) return true;
+    const results = await Promise.all(sites.map(site => supaUpsertSitePartial(
+      site,
+      { color: sc[site]?.color || '#000000', bg: sc[site]?.bg || '#ffffff', border: sc[site]?.border || '#000000' },
+      { min_staff: 1, adresse: null, rotation_samedis_weeks: 2 }
+    )));
+    return results.every(Boolean);
+  } catch(e) { console.warn('supaWriteSiteColors error', e); return false; }
+}
+
+// Lecture brute de `site_settings` — réutilisée pour reconstruire à la fois `sc`
+// (couleurs) et les champs de params (minStaff, adresses, rotationSamedis).
+async function supaReadSiteSettingsRaw() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/site_settings?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    return await r.json();
+  } catch(e) { console.warn('supaReadSiteSettingsRaw error', e); return null; }
+}
+
+// Écriture du bloc `params` : la plupart des sous-clés vivent désormais dans des
+// tables dédiées plutôt que dans un seul blob JSON. Une seule fonction fan-out car
+// persist() n'envoie params qu'en un seul appel (pas de section séparée par sous-clé).
+async function supaWriteParams(params) {
+  if(!_supaUrl || !_supaKey) return false;
+  if(!params) return true;
+  let ok = true;
+  try {
+    // app_settings (ligne unique)
+    const appSettingsBody = {
+      verrou: !!params.verrou,
+      type_colors: params.typeColors || {},
+      motifs_absence: params.motifsAbsence || [],
+      regles_enfant_malade: params.reglesEnfantMalade || {},
+      samedis_pleins: params.samedisPleins || {},
+      regles_conges_quota: (params.reglesConges && params.reglesConges.quota) || 25,
+      regles_conges_date_alerte: (params.reglesConges && params.reglesConges.dateAlerte) || null,
+      sam_speciaux: params.samSpeciaux || { premiers: true, soldes: true },
+    };
+    const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
+      method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
+      body: JSON.stringify(appSettingsBody)
+    });
+    if(!rApp.ok) { console.warn('supaWriteParams app_settings error', rApp.status, await rApp.text()); ok = false; }
+
+    // site_settings — uniquement les colonnes issues de params (min_staff/adresse/rotation),
+    // via PATCH pour ne pas toucher aux couleurs (gérées par supaWriteSiteColors).
+    if (params.minStaff || params.adresses || params.rotationSamedis) {
+      const sites = new Set([
+        ...Object.keys(params.minStaff || {}),
+        ...Object.keys(params.adresses || {}),
+        ...Object.keys(params.rotationSamedis || {}),
+      ]);
+      const results = await Promise.all([...sites].map(site => supaUpsertSitePartial(
+        site,
+        {
+          min_staff: (params.minStaff && params.minStaff[site]) || 1,
+          adresse: (params.adresses && params.adresses[site]) || null,
+          rotation_samedis_weeks: (params.rotationSamedis && params.rotationSamedis[site]) || 2,
+        },
+        { color: '#000000', bg: '#ffffff', border: '#000000' }
+      )));
+      if (!results.every(Boolean)) ok = false;
+    }
+
+    // employee_leave_jokers — upsert + suppression de ce qui n'est plus présent
+    const jokerEntries = Object.entries(params.jokers || {});
+    if (jokerEntries.length) {
+      const empIdList = jokerEntries.map(([empId]) => encodeURIComponent(empId)).join(',');
+      const rDelJ = await fetch(`${supaBase()}/rest/v1/employee_leave_jokers?employee_id=in.(${empIdList})`, {
+        method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+      });
+      if(!rDelJ.ok) console.warn('supaWriteParams jokers delete error', rDelJ.status, await rDelJ.text());
+      const jokerRows = jokerEntries.flatMap(([empId, val]) => {
+        if (val && typeof val === 'object' && val.annee !== undefined && val.count !== undefined) {
+          return [{ employee_id: empId, periode_key: String(val.annee), count: val.count }];
+        }
+        return Object.entries(val || {}).map(([periode, v]) => ({
+          employee_id: empId, periode_key: String(periode),
+          count: (v && typeof v === 'object') ? (v.count ?? 0) : v,
+        }));
+      });
+      if (jokerRows.length) {
+        const rJ = await fetch(`${supaBase()}/rest/v1/employee_leave_jokers?on_conflict=employee_id,periode_key`, {
+          method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+          body: JSON.stringify(jokerRows)
+        });
+        if(!rJ.ok) { console.warn('supaWriteParams jokers upsert error', rJ.status, await rJ.text()); ok = false; }
+      }
+    }
+
+    // internal_events (evInternes) — upsert + suppression
+    const evInternes = params.evInternes || [];
+    const ieIds = evInternes.map(ie => ie.id).filter(v => v != null);
+    if (ieIds.length) {
+      const idList = ieIds.map(id => encodeURIComponent(String(id))).join(',');
+      const rDelIe = await fetch(`${supaBase()}/rest/v1/internal_events?id=not.in.(${idList})`, {
+        method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+      });
+      if(!rDelIe.ok) console.warn('supaWriteParams internal_events delete error', rDelIe.status, await rDelIe.text());
+      const ieRows = evInternes.map(ie => ({ id: ie.id, type: ie.type, event_date: ie.date, label: ie.label || null }));
+      const rIe = await fetch(`${supaBase()}/rest/v1/internal_events?on_conflict=id`, {
+        method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+        body: JSON.stringify(ieRows)
+      });
+      if(!rIe.ok) { console.warn('supaWriteParams internal_events upsert error', rIe.status, await rIe.text()); ok = false; }
+    }
+
+    // Mur social — posts + réactions + commentaires
+    const murOk = await supaWriteMurPosts(params.murPosts || []);
+    if (!murOk) ok = false;
+
+    return ok;
+  } catch(e) { console.warn('supaWriteParams error', e); return false; }
+}
+
+// Mur social : upsert + suppression des posts absents, réactions/commentaires
+// reconstruits à neuf pour chaque post encore présent (volume faible, simple et sûr).
+async function supaWriteMurPosts(murPosts) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (murPosts || []).map(p => String(p.id)).filter(Boolean);
+    if (!ids.length) return true;
+    const idList = ids.map(id => encodeURIComponent(id)).join(',');
+    const rDelPosts = await fetch(`${supaBase()}/rest/v1/mur_posts?id=not.in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDelPosts.ok) console.warn('supaWriteMurPosts delete posts error', rDelPosts.status, await rDelPosts.text());
+    const rDelReact = await fetch(`${supaBase()}/rest/v1/mur_post_reactions?post_id=in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDelReact.ok) console.warn('supaWriteMurPosts delete reactions error', rDelReact.status, await rDelReact.text());
+    const rDelComments = await fetch(`${supaBase()}/rest/v1/mur_post_comments?post_id=in.(${idList})`, {
+      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
+    });
+    if(!rDelComments.ok) console.warn('supaWriteMurPosts delete comments error', rDelComments.status, await rDelComments.text());
+
+    const postRows = murPosts.map(p => ({
+      id: String(p.id), auteur_id: p.auteurId || null, auteur_nom: p.auteurNom || null,
+      auteur_role: p.auteurRole || null, texte: p.texte || null, photo_url: p.photoUrl || null,
+    }));
+    const rPosts = await fetch(`${supaBase()}/rest/v1/mur_posts?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(postRows)
+    });
+    if(!rPosts.ok) { console.warn('supaWriteMurPosts upsert posts error', rPosts.status, await rPosts.text()); return false; }
+
+    const reactionRows = murPosts.flatMap(p =>
+      Object.entries(p.reactions || {}).flatMap(([emoji, userIds]) =>
+        (userIds || []).map(uid => ({ post_id: String(p.id), emoji, employee_id: uid }))
+      )
+    );
+    if (reactionRows.length) {
+      const rReact = await fetch(`${supaBase()}/rest/v1/mur_post_reactions?on_conflict=post_id,emoji,employee_id`, {
+        method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+        body: JSON.stringify(reactionRows)
+      });
+      if(!rReact.ok) console.warn('supaWriteMurPosts upsert reactions error', rReact.status, await rReact.text());
+    }
+
+    const commentRows = murPosts.flatMap(p =>
+      (p.comments || []).map(c => ({
+        id: String(c.id), post_id: String(p.id), auteur_id: c.auteurId || null,
+        auteur_nom: c.auteurNom || null, texte: c.texte || null,
+      }))
+    );
+    if (commentRows.length) {
+      const rComments = await fetch(`${supaBase()}/rest/v1/mur_post_comments?on_conflict=id`, {
+        method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+        body: JSON.stringify(commentRows)
+      });
+      if(!rComments.ok) console.warn('supaWriteMurPosts upsert comments error', rComments.status, await rComments.text());
+    }
+    return true;
+  } catch(e) { console.warn('supaWriteMurPosts error', e); return false; }
+}
+
+async function supaReadMurPosts() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const [postsR, reactR, commentsR] = await Promise.all([
+      fetch(`${supaBase()}/rest/v1/mur_posts?select=*&order=created_at`, { headers: supaHeaders() }),
+      fetch(`${supaBase()}/rest/v1/mur_post_reactions?select=*`, { headers: supaHeaders() }),
+      fetch(`${supaBase()}/rest/v1/mur_post_comments?select=*&order=created_at`, { headers: supaHeaders() }),
+    ]);
+    if(!postsR.ok || !reactR.ok || !commentsR.ok) return null;
+    const [posts, reactions, comments] = await Promise.all([postsR.json(), reactR.json(), commentsR.json()]);
+    return posts.map(p => {
+      const reactMap = {};
+      reactions.filter(r => r.post_id === p.id).forEach(r => {
+        if (!reactMap[r.emoji]) reactMap[r.emoji] = [];
+        reactMap[r.emoji].push(r.employee_id);
+      });
+      const postComments = comments.filter(c => c.post_id === p.id).map(c => ({
+        id: c.id, auteurId: c.auteur_id, auteurNom: c.auteur_nom, texte: c.texte, date: c.created_at,
+      }));
+      return {
+        id: p.id, auteurId: p.auteur_id, auteurNom: p.auteur_nom, auteurRole: p.auteur_role,
+        texte: p.texte, photoUrl: p.photo_url, date: p.created_at,
+        reactions: reactMap, comments: postComments,
+      };
+    });
+  } catch(e) { console.warn('supaReadMurPosts error', e); return null; }
+}
+
+// Reconstruit l'objet `params` complet à partir des tables relationnelles.
+// `empRows` : résultat déjà chargé de supaReadEmployees (pour reposFixe).
+async function supaReadParams(empRows) {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const [appR, siteRows, jokerR, ieR, murPostsResult] = await Promise.all([
+      fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true&select=*`, { headers: supaHeaders() }),
+      supaReadSiteSettingsRaw(),
+      fetch(`${supaBase()}/rest/v1/employee_leave_jokers?select=*`, { headers: supaHeaders() }),
+      fetch(`${supaBase()}/rest/v1/internal_events?select=*`, { headers: supaHeaders() }),
+      supaReadMurPosts(),
+    ]);
+    if(!appR.ok || !ieR.ok || !jokerR.ok || siteRows === null || murPostsResult === null) return null;
+    const app = (await appR.json())[0] || {};
+    const jokerRows = await jokerR.json();
+    const ieRows = await ieR.json();
+
+    const minStaff = {}, adresses = {}, rotationSamedis = {};
+    (siteRows || []).forEach(row => {
+      minStaff[row.site] = row.min_staff;
+      adresses[row.site] = row.adresse;
+      rotationSamedis[row.site] = row.rotation_samedis_weeks;
+    });
+
+    const jokers = {};
+    jokerRows.forEach(row => { jokers[row.employee_id] = { annee: row.periode_key, count: row.count }; });
+
+    const reposFixe = {};
+    (empRows || []).forEach(e => { if (e._reposFixeWeekday != null) reposFixe[e.id] = e._reposFixeWeekday; });
+
+    return {
+      verrou: app.verrou,
+      typeColors: app.type_colors || {},
+      motifsAbsence: app.motifs_absence || [],
+      reglesEnfantMalade: app.regles_enfant_malade || {},
+      samedisPleins: app.samedis_pleins || {},
+      reglesConges: { quota: app.regles_conges_quota, dateAlerte: app.regles_conges_date_alerte || '' },
+      samSpeciaux: app.sam_speciaux || { premiers: true, soldes: true },
+      minStaff, adresses, rotationSamedis, jokers, reposFixe,
+      evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label })),
+      murPosts: murPostsResult,
+    };
+  } catch(e) { console.warn('supaReadParams error', e); return null; }
+}
+
 // Lecture de toutes les sections en une seule requête
 async function supaReadAll() {
   if(!_supaUrl || !_supaKey) return null;
@@ -1639,6 +1921,18 @@ async function supaReadAll() {
     if (absenceRows) result.absences = absenceRows;
     if (eventTypeRows) result.event_types = eventTypeRows;
     if (eventRows) result.events = eventRows;
+
+    // sc + params dépendent des employés (reposFixe) déjà chargés ci-dessus.
+    const [siteRows, paramsResult] = await Promise.all([
+      supaReadSiteSettingsRaw(), supaReadParams(empRows),
+    ]);
+    if (siteRows) {
+      const sc = {};
+      siteRows.forEach(row => { sc[row.site] = { color: row.color, bg: row.bg, border: row.border }; });
+      result.sc = sc;
+    }
+    if (paramsResult) result.params = paramsResult;
+
     return result;
   } catch(e) { console.warn('supaReadAll error', e); return null; }
 }
@@ -1844,16 +2138,13 @@ async function loadAll(force=false){
         S.absences = supa.absences;
         lsSet('absences', S.absences);
       }
-      // Params (fusion pour garder les clés locales non syncées)
+      // Params — remplacement direct : chaque sous-partie vient désormais de sa
+      // propre table (app_settings, site_settings, jokers, événements internes, mur
+      // social), plus besoin de fusion "le local gagne" sur certaines clés.
+      // reposFixeParCode (seed statique) et soldesInitiaux (code mort, jamais écrit)
+      // ne sont plus reconduits — reposFixe réel vient des employés, déjà résolu.
       if(supa.params && typeof supa.params === 'object') {
-        S.params = Object.assign({}, supa.params, {
-          verrou: S.params.verrou ?? supa.params.verrou,
-          typeColors: supa.params.typeColors || S.params.typeColors || {},
-          reposFixe: supa.params.reposFixe || S.params.reposFixe || {},
-          soldesInitiaux: supa.params.soldesInitiaux || S.params.soldesInitiaux || {},
-          evInternes: supa.params.evInternes || S.params.evInternes || [],
-          murPosts: supa.params.murPosts || S.params.murPosts || [],
-        });
+        S.params = Object.assign({}, S.params, supa.params);
         lsSet('params', S.params);
       }
       // Types d'événements — remplacement direct.
@@ -1866,7 +2157,7 @@ async function loadAll(force=false){
         S.events = supa.events;
         lsSet('events', S.events);
       }
-      // Couleurs magasins
+      // Couleurs magasins — remplacement direct.
       if(supa.sc && typeof supa.sc === 'object' && Object.keys(supa.sc).length > 0) {
         Object.keys(SC).forEach(k=>delete SC[k]);
         Object.assign(SC, supa.sc);
