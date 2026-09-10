@@ -3,7 +3,7 @@ name: Déployer OK-LA Planning
 on:
   push:
     branches:
-      - principal
+      - main
   workflow_dispatch:
 
 jobs:
