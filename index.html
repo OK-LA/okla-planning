@@ -659,6 +659,12 @@ tbody tr:hover td{background:#FAFAF8;}
         <button class="btn btn-primary btn-sm" onclick="openAddEmp()">+ Ajouter</button>
       </div>
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;" id="empListMgr"></div>
+      <div style="margin-top:18px;">
+        <div style="font-weight:600;font-size:13px;color:var(--muted);margin-bottom:8px;cursor:pointer;" onclick="toggleArchivesEmp()">
+          <span id="archivesToggleIcon">▶</span> Employés partis <span id="archivesCount"></span>
+        </div>
+        <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;display:none;" id="empListArchives"></div>
+      </div>
     </div>
 
     <div class="tab-content" id="tab-params">
@@ -1170,7 +1176,7 @@ tbody tr:hover td{background:#FAFAF8;}
     </div>
 
     <div class="modal-actions" style="justify-content:space-between;">
-      <button class="btn btn-ghost" style="color:#DC2626;" onclick="deleteEmp()">🗑️ Supprimer cet employé</button>
+      <button class="btn btn-ghost" style="color:#DC2626;" onclick="deleteEmp()">📤 Marquer comme parti</button>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="closeModal('mFicheEmp')">Annuler</button>
         <button class="btn btn-save" onclick="saveFicheEmp()">✓ Enregistrer</button>
@@ -1338,6 +1344,7 @@ async function supaWriteEmployees(employees) {
       solde_cp_manuel: e.soldeCPManuel ?? null,
       solde_cp_manuel_date: e.soldeCPManuelDate || null,
       repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
+      active: e.active !== false,
     }));
     const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
       method: 'POST',
@@ -1371,6 +1378,7 @@ async function supaReadEmployees() {
       dateFin: row.date_fin,
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
+      active: row.active !== false,
       _reposFixeWeekday: row.repos_fixe_weekday,
     }));
   } catch(e) { console.warn('supaReadEmployees error', e); return null; }
@@ -2019,7 +2027,7 @@ function restoreSession(){
   if(sessionValide&&session.role==='mgr'){
     S.user=MGR;S.role='mgr';showScr('sMgr');renderMgr();
   } else if(sessionValide&&session.role==='emp'){
-    const emp=S.employees.find(e=>e.id===session.empId);
+    const emp=activeEmployees().find(e=>e.id===session.empId);
     if(emp){S.user=emp;S.role='emp';showScr('sEmp');renderEmp();}
     else{lsSet('session',null);showScr('sLogin');}
   } else {
@@ -2167,6 +2175,7 @@ function isHorsContrat(emp, dateStr){
 // (ses jours après dateFin sont déjà grisés par isHorsContrat), puis disparaît complètement
 // des vues à partir du mois suivant — sans jamais être supprimé de la fiche employés.
 function estVisibleDansPlanning(emp, refDate){
+  if(emp.active===false) return false;
   if(!emp.dateFin) return true;
   const fin = new Date(emp.dateFin+'T12:00:00');
   const finKey = fin.getFullYear()*12+fin.getMonth();
@@ -2202,7 +2211,7 @@ function estSamediEffectifPlein(dateStr){
 // requis ce jour-là, ex: soldes ou 1er samedi du mois).
 function getMinStaffEffectif(site, date){
   if(estSamediEffectifPlein(fmt(date))){
-    return S.employees.filter(e=>e.site===site).length;
+    return activeEmployees().filter(e=>e.site===site).length;
   }
   return getMinStaff(site, date);
 }
@@ -2237,7 +2246,7 @@ function buildTypeLegend(id){
   el.innerHTML = h;
 }
 function updStats(){
-  document.getElementById('sE').textContent=S.employees.length;
+  document.getElementById('sE').textContent=activeEmployees().length;
   document.getElementById('sM').textContent=S.mods.length;
   document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending'||r.status==='pending_gestionnaire').length;
   document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
@@ -2256,9 +2265,14 @@ function saveSetup(){
 }
 
 // ══ LOGIN ══
+// Employés actifs uniquement — utilisé partout où on affiche/sélectionne des employés
+// (planning, listes, connexion...). S.employees reste la liste complète (actifs + partis)
+// pour que la synchro Supabase (upsert + suppression) ne perde jamais l'historique.
+function activeEmployees(){ return S.employees.filter(e=>e.active!==false); }
+
 function doLogin(){
   const code=document.getElementById('loginCode').value.trim().toUpperCase();
-  const emp=S.employees.find(e=>e.code===code);
+  const emp=activeEmployees().find(e=>e.code===code);
   if(emp){
     S.user=emp;S.role='emp';
     lsSet('session',{role:'emp',empId:emp.id,ts:Date.now()});
@@ -2745,7 +2759,7 @@ function renderChipsEmpsContainer(containerId, sectionId, empsVisibles) {
 }
 
 function renderChipsEmps() {
-  const empsVisibles = S.employees.filter(e => S.filtresSites.includes(e.site));
+  const empsVisibles = activeEmployees().filter(e => S.filtresSites.includes(e.site));
   renderChipsEmpsContainer('chipsEmps', 'filterEmpSection', empsVisibles);
   renderChipsEmpsContainer('chipsEmpsMois', 'filterEmpSectionMois', empsVisibles);
   renderChipsEmpsContainer('chipsEmpsAnnee', 'filterEmpSectionAnnee', empsVisibles);
@@ -2768,7 +2782,7 @@ function resetFiltresEmps() {
 }
 
 function getEmpsFiltres() {
-  let emps = S.employees.filter(e => S.filtresSites.includes(e.site));
+  let emps = activeEmployees().filter(e => S.filtresSites.includes(e.site));
   if (S.filtresEmps.length > 0) emps = emps.filter(e => S.filtresEmps.includes(e.id));
   return emps;
 }
@@ -2785,13 +2799,13 @@ function checkEffectifAlerts(mon) {
     const dateStr = fmt(d);
     Object.keys(SC).forEach(site => {
       const minStaff = getMinStaffEffectif(site, d);
-      const presents = S.employees.filter(e => {
+      const presents = activeEmployees().filter(e => {
         const sh = S.planning[`${e.id}_${dateStr}`];
         const siteEffectifJour = sh?.site || e.site;
         if (siteEffectifJour !== site) return false;
         return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie';
       }).length;
-      const total = S.employees.filter(e => e.site === site).length;
+      const total = activeEmployees().filter(e => e.site === site).length;
       if (total > 0) {
         if (presents < minStaff) {
           alertes.push(`${JOURS_C[i]} ${d.getDate()}/${d.getMonth()+1} — ${site} : ${presents}/${total} présent(s), minimum requis : ${minStaff}`);
@@ -2912,7 +2926,7 @@ function renderWeek(){
     // visible uniquement les jours où il est effectivement en remplacement sur CE site.
     const renfortsIds=[...new Set(
       Array.from({length:7},(_,i)=>fmt(addDays(mon,i))).flatMap(dStr=>
-        S.employees.filter(e=>{
+        activeEmployees().filter(e=>{
           const sh=S.planning[`${e.id}_${dStr}`];
           return sh&&sh.type==='remplacement'&&sh.site===site;
         }).map(e=>e.id)
@@ -2946,13 +2960,13 @@ function renderWeek(){
       const dStr2=fmt(d);
       const minStaff = getMinStaffEffectif(site, d);
       // Compte les employés DU SITE qui travaillent + les renforts venus d'autres magasins ce jour-là
-      const presents=S.employees.filter(e=>{
+      const presents=activeEmployees().filter(e=>{
         const sh=S.planning[`${e.id}_${dStr2}`];
         const siteEffectifJour = sh?.site || e.site;
         if(siteEffectifJour!==site)return false;
         return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie';
       }).length;
-      const total=S.employees.filter(e=>e.site===site).length;
+      const total=activeEmployees().filter(e=>e.site===site).length;
       const cls=presents<minStaff?'eff-ko':presents===minStaff?'eff-warn':'eff-ok';
       tb+=`<td class="${cls}">${d.getDay()===0?'—':presents+'/'+'<span style="opacity:.5">'+total+'</span>'}</td>`;
     }
@@ -2963,7 +2977,7 @@ function renderWeek(){
 }
 
 function buildSelects(){
-  document.getElementById('moEmpSel').innerHTML=S.employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('moEmpSel').innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
 }
 
 function renderMonth(){
@@ -2997,7 +3011,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
   const renfortsIds=[...new Set(
     days.flatMap(d=>{
       const dStr=fmt(d);
-      return S.employees.filter(e=>{
+      return activeEmployees().filter(e=>{
         if(e.site===site) return false; // pas les employés du site lui-même
         const sh=S.planning[`${e.id}_${dStr}`];
         return sh&&sh.type==='remplacement'&&sh.site===site;
@@ -3282,7 +3296,7 @@ async function saveShiftPeriode(){
 
 // ── Absences ──
 function openAbsModal(){
-  document.getElementById('absEmpSel').innerHTML=S.employees.map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
+  document.getElementById('absEmpSel').innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   document.getElementById('absDate').value=fmt(new Date());
   document.getElementById('absNote').value='';
   openModal('mAbs');
@@ -3460,14 +3474,14 @@ function findReplacements(absentId,dateStr,targetSite){
   // Calcule, pour un magasin donné à une date donnée, le nombre de présents et la marge par rapport au minimum requis
   function effectifDuJour(site){
     const minStaff=getMinStaffEffectif(site, new Date(dateStr+'T12:00:00'));
-    const presents=S.employees.filter(e=>{
+    const presents=activeEmployees().filter(e=>{
       const s=S.planning[`${e.id}_${dateStr}`];
       return s&&s.type!=='off'&&s.type!=='conge'&&s.type!=='maladie'&&s.site===site;
     }).length;
     return {presents,minStaff,marge:presents-minStaff};
   }
 
-  const candidats=S.employees.filter(emp=>emp.id!==absentId).map(emp=>{
+  const candidats=activeEmployees().filter(emp=>emp.id!==absentId).map(emp=>{
     const sh=S.planning[`${emp.id}_${dateStr}`];
     const enRepos=!sh||sh.type==='off';
     let canLeave=true, staffOnDay=0, minStaff=0, source='repos';
@@ -3511,7 +3525,7 @@ function openRempModal(absId){
     </div>`;
   });
   document.getElementById('rempSugge').innerHTML=sh;
-  const opts=cands.length?cands:S.employees.filter(e=>e.id!==abs.empId).map(e=>({emp:e}));
+  const opts=cands.length?cands:activeEmployees().filter(e=>e.id!==abs.empId).map(e=>({emp:e}));
   document.getElementById('rempChoisi').innerHTML=`<option value="">— Sélectionner —</option>`+opts.map(c=>`<option value="${c.emp.id}">${c.emp.name} (${c.emp.site})</option>`).join('');
   openModal('mRemp');
 }
@@ -3584,17 +3598,18 @@ function moveEmpInSite(empId,dir){
 }
 function renderEmpList(){
   const today=fmt(new Date());
-  document.getElementById('empListMgr').innerHTML=S.employees.map((emp,i)=>{
+  const actifs=activeEmployees();
+  document.getElementById('empListMgr').innerHTML=actifs.map((emp,i)=>{
     const expire = emp.dateFin && emp.dateFin < today;
     const typeC = emp.dateFin ? (emp.typeContrat==='cdd'?'CDD':'Autre') : 'CDI';
     const contratLabel = emp.dateFin
       ? `${typeC} · Fin : <strong>${emp.dateFin}</strong>${expire?' <span style="color:#DC2626;font-weight:700;">⚠ EXPIRÉ</span>':''}`
       : '<span style="color:#059669;">CDI</span>';
     const reposLabel = S.params?.reposFixe?.[emp.id] ? ['','Lun','Mar','Mer','Jeu','Ven','Sam'][parseInt(S.params.reposFixe[emp.id])]||'—' : '—';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<S.employees.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
+    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<actifs.length-1?'1px solid var(--border)':'none'};${expire?'background:#FEF2F2;':''}">
       <div style="display:flex;flex-direction:column;gap:2px;">
         <button class="btn btn-sm" title="Monter" ${i===0?'disabled':''} onclick="moveEmp('${emp.id}',-1)" style="padding:2px 6px;line-height:1;${i===0?'opacity:.3;cursor:default;':''}">▲</button>
-        <button class="btn btn-sm" title="Descendre" ${i===S.employees.length-1?'disabled':''} onclick="moveEmp('${emp.id}',1)" style="padding:2px 6px;line-height:1;${i===S.employees.length-1?'opacity:.3;cursor:default;':''}">▼</button>
+        <button class="btn btn-sm" title="Descendre" ${i===actifs.length-1?'disabled':''} onclick="moveEmp('${emp.id}',1)" style="padding:2px 6px;line-height:1;${i===actifs.length-1?'opacity:.3;cursor:default;':''}">▼</button>
       </div>
       <div class="avatar" style="background:${avc(emp.id)};cursor:pointer;" onclick="openFicheEmp('${emp.id}')">${ini(emp.name)}</div>
       <div style="flex:1;cursor:pointer;" onclick="openFicheEmp('${emp.id}')">
@@ -3606,6 +3621,44 @@ function renderEmpList(){
       ${sPill(emp.site)}
     </div>`;
   }).join('');
+
+  const archives=S.employees.filter(e=>e.active===false);
+  const countEl=document.getElementById('archivesCount');
+  if(countEl) countEl.textContent=archives.length?`(${archives.length})`:'';
+  const archEl=document.getElementById('empListArchives');
+  if(archEl){
+    archEl.innerHTML=archives.length
+      ? archives.map((emp,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:${i<archives.length-1?'1px solid var(--border)':'none'};opacity:.7;">
+          <div class="avatar" style="background:${avc(emp.id)};">${ini(emp.name)}</div>
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:13px;">${emp.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${emp.email||'—'} · Code : <strong>${emp.code}</strong></div>
+          </div>
+          <button class="btn btn-sm" onclick="reactiverEmp('${emp.id}')" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;white-space:nowrap;">↩️ Réactiver</button>
+          ${sPill(emp.site)}
+        </div>`).join('')
+      : `<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px;">Aucun employé parti</div>`;
+  }
+}
+
+function toggleArchivesEmp(){
+  const el=document.getElementById('empListArchives');
+  const icon=document.getElementById('archivesToggleIcon');
+  if(!el) return;
+  const open=el.style.display!=='none';
+  el.style.display=open?'none':'block';
+  if(icon) icon.textContent=open?'▶':'▼';
+}
+
+function reactiverEmp(empId){
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  emp.active=true;
+  persist();
+  renderEmpList();
+  buildSelects();
+  refreshActiveView();
+  toast(`✓ ${emp.name} réactivé(e)`);
 }
 
 function openFicheEmp(empId){
@@ -3786,20 +3839,22 @@ async function saveFicheEmp(){
 }
 
 // Supprime définitivement un employé (fiche + planning + repos fixe associés).
+// Archive l'employé (statut inactif) plutôt que de le supprimer : il disparaît des vues actives
+// (planning, sélecteurs, connexion) mais son historique (planning passé, congés, absences) reste
+// intact et consultable — évite de perdre des données comme ce fut le cas pour un ancien salarié
+// supprimé avant la mise en place de ce statut.
 async function deleteEmp(){
   const empId = document.getElementById('mFicheEmp').dataset.empId;
   const emp = S.employees.find(e=>e.id===empId);
   if(!emp) return;
-  if(!confirm(`Supprimer définitivement ${emp.name} ? Cette action retire aussi son historique de planning. Continuer ?`)) return;
-  S.employees = S.employees.filter(e=>e.id!==empId);
-  Object.keys(S.planning).forEach(key=>{ if(key.startsWith(empId+'_')) delete S.planning[key]; });
-  if(S.params.reposFixe) delete S.params.reposFixe[empId];
+  if(!confirm(`Marquer ${emp.name} comme parti ? Son historique (planning, congés, absences) reste consultable dans les employés archivés. Continuer ?`)) return;
+  emp.active = false;
   persist();
   renderEmpList();
   buildSelects();
   refreshActiveView();
   closeModal('mFicheEmp');
-  toast(`✓ ${emp.name} supprimé(e)`);
+  toast(`✓ ${emp.name} archivé(e)`);
 }
 function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
 document.getElementById('aeName').addEventListener('input',function(){
@@ -4163,7 +4218,7 @@ function openEventModal(){
   document.getElementById('evDateDebut').value = fmt(new Date());
   document.getElementById('evDateFin').value = fmt(new Date());
   document.getElementById('evMagasinSel').innerHTML = Object.keys(SC).map(s=>`<option value="${s}">${s}</option>`).join('');
-  document.getElementById('evEmployeSel').innerHTML = S.employees.map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
+  document.getElementById('evEmployeSel').innerHTML = activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   document.getElementById('evPortee').value = 'tous';
   toggleEvPortee();
   renderEvListeExistants();
@@ -4238,7 +4293,7 @@ function renderParamMagasins(){
   let h = '';
   sites.forEach((site,i) => {
     const cfg = SC[site];
-    const nbEmps = S.employees.filter(e=>e.site===site).length;
+    const nbEmps = activeEmployees().filter(e=>e.site===site).length;
     h += `<div class="magasin-row" id="magRow_${i}">
       <input type="color" class="color-picker" id="magColor_${i}" value="${cfg.color}" title="Couleur">
       <input type="text" class="magasin-name-input" id="magName_${i}" value="${site}" placeholder="Nom du magasin">
@@ -4741,7 +4796,7 @@ function verifierRegleConges(empId, dateDebut, dateFin) {
     while (cur <= new Date(dateFin)) {
       const dateStr = fmt(cur);
       if (cur.getDay() !== 0) {
-        const absents = S.employees.filter(e => {
+        const absents = activeEmployees().filter(e => {
           if (e.id === empId || e.site !== emp.site) return false;
           const sh = S.planning[`${e.id}_${dateStr}`];
           const req = S.requests.find(r =>
@@ -4909,7 +4964,7 @@ function setTriConges(mode){
 function renderCongesRecap(){
   const tbody = document.getElementById('congesRecapTable');
   if (!tbody) return;
-  let rows = S.employees.map(emp => {
+  let rows = activeEmployees().map(emp => {
     const pris = getJoursPris(emp.id);
     const attente = getJoursEnAttente(emp.id);
     const restants = getQuotaAnnuel() - pris - attente;
@@ -5487,9 +5542,9 @@ function showStatDetail(type){
   let title = '', html = '';
 
   if(type==='employes'){
-    title = `👥 Employés (${S.employees.length})`;
+    title = `👥 Employés (${activeEmployees().length})`;
     const today = fmt(new Date());
-    html = S.employees.map(emp=>{
+    html = activeEmployees().map(emp=>{
       const expire = emp.dateFin && emp.dateFin < today;
       const typeC = emp.dateFin ? (emp.typeContrat==='cdd'?'CDD':emp.typeContrat==='apprentissage'?'Apprentissage':'Autre') : 'CDI';
       const sc = SC[emp.site]||SC['Ham'];
