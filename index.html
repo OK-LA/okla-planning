@@ -1294,6 +1294,10 @@ async function supaRead(section) {
 // Écriture d'une section dans Supabase (upsert)
 async function supaWrite(section, data) {
   if(!_supaUrl || !_supaKey) return false;
+  // Les employés sont désormais synchronisés vers une vraie table relationnelle
+  // (voir supaWriteEmployees) plutôt que le blob JSON okla_store — corrige le bug
+  // où un remplacement en bloc pouvait effacer un employé créé sur un autre appareil.
+  if (section === 'employees') return supaWriteEmployees(data);
   try {
     // Utiliser PATCH (UPDATE) sur la ligne existante plutôt que POST (INSERT)
     // Les 9 sections sont déjà créées par le SQL setup → on met à jour, jamais on insère
@@ -1317,6 +1321,76 @@ async function supaWrite(section, data) {
   } catch(e) { console.warn('supaWrite error', e); return false; }
 }
 
+// Écriture des employés dans la table relationnelle `employees` (upsert + suppression
+// de ceux qui ne sont plus présents, puisque persist() envoie toujours la liste complète).
+async function supaWriteEmployees(employees) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (employees || []).map(e => e.id).filter(Boolean);
+    // Garde-fou : ne jamais vider la table sur une liste vide (protège contre un bug
+    // ailleurs qui viderait S.employees par accident).
+    if (ids.length) {
+      const idList = ids.map(id => encodeURIComponent(id)).join(',');
+      const rDel = await fetch(`${supaBase()}/rest/v1/employees?id=not.in.(${idList})`, {
+        method: 'DELETE',
+        headers: supaHeaders({'Prefer': 'return=minimal'})
+      });
+      if(!rDel.ok) console.warn('supaWriteEmployees delete error', rDel.status, await rDel.text());
+    }
+    if (!ids.length) return true;
+    const rows = employees.map(e => ({
+      id: e.id,
+      code: e.code || '',
+      name: e.name || '',
+      email: e.email || null,
+      tel: e.tel || null,
+      addr: e.addr || null,
+      site: e.site || '',
+      slot: e.slot || null,
+      has_children: !!e.hasChildren,
+      enfants: e.enfants || [],
+      contrat_type: e.typeContrat || null,
+      date_fin: e.dateFin || null,
+      solde_cp_manuel: e.soldeCPManuel ?? null,
+      solde_cp_manuel_date: e.soldeCPManuelDate || null,
+      repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
+    }));
+    const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
+      method: 'POST',
+      headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r.ok) { console.warn('supaWriteEmployees upsert error', r.status, await r.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteEmployees error', e); return false; }
+}
+
+// Lecture des employés depuis la table relationnelle `employees`.
+async function supaReadEmployees() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/employees?select=*`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      email: row.email,
+      tel: row.tel,
+      addr: row.addr,
+      site: row.site,
+      slot: row.slot,
+      hasChildren: row.has_children,
+      enfants: row.enfants || [],
+      typeContrat: row.contrat_type,
+      dateFin: row.date_fin,
+      soldeCPManuel: row.solde_cp_manuel,
+      soldeCPManuelDate: row.solde_cp_manuel_date,
+    }));
+  } catch(e) { console.warn('supaReadEmployees error', e); return null; }
+}
+
 // Lecture de toutes les sections en une seule requête
 async function supaReadAll() {
   if(!_supaUrl || !_supaKey) return null;
@@ -1328,6 +1402,9 @@ async function supaReadAll() {
     const rows = await r.json();
     const result = {};
     rows.forEach(row => { result[row.section] = row.data; });
+    // Employés : source de vérité = table relationnelle (repli sur okla_store si indisponible)
+    const empRows = await supaReadEmployees();
+    if (empRows) result.employees = empRows;
     return result;
   } catch(e) { console.warn('supaReadAll error', e); return null; }
 }
@@ -3422,7 +3499,9 @@ async function saveNewEmp(){
   if(!name||!email){toast('Remplissez nom et email');return;}
   const site=document.getElementById('aeSite').value;
   const slot=document.getElementById('aeSlot').value;
-  const emp={id:'E'+String(S.employees.length+1).padStart(2,'0'),
+  const _existingENums=S.employees.map(e=>{const m=/^E(\d+)$/.exec(e.id);return m?parseInt(m[1],10):0;});
+  const _nextENum=(_existingENums.length?Math.max(..._existingENums):0)+1;
+  const emp={id:'E'+String(_nextENum).padStart(2,'0'),
     code:document.getElementById('aeCode').value,name,email,
     tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
     site,slot,hasChildren:document.getElementById('aeChildren').checked,
