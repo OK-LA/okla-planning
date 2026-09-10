@@ -1234,6 +1234,7 @@ const TYPES=[
   {key:'conge',     label:'Congé',         info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
   {key:'congeSansSolde', label:'Congé sans solde', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
   {key:'maladie',   label:'Maladie',       info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
+  {key:'formation', label:'Formation',     info:'Apprenti en centre de formation', color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
   {key:'off',       label:'Repos',         info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
 ];
 const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
@@ -2856,7 +2857,7 @@ function checkEffectifAlerts(mon) {
         const sh = S.planning[`${e.id}_${dateStr}`];
         const siteEffectifJour = sh?.site || e.site;
         if (siteEffectifJour !== site) return false;
-        return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie';
+        return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie' && sh.type !== 'formation';
       }).length;
       const total = activeEmployees().filter(e => e.site === site).length;
       if (total > 0) {
@@ -3017,7 +3018,7 @@ function renderWeek(){
         const sh=S.planning[`${e.id}_${dStr2}`];
         const siteEffectifJour = sh?.site || e.site;
         if(siteEffectifJour!==site)return false;
-        return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie';
+        return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie'&&sh.type!=='formation';
       }).length;
       const total=activeEmployees().filter(e=>e.site===site).length;
       const cls=presents<minStaff?'eff-ko':presents===minStaff?'eff-warn':'eff-ok';
@@ -3553,7 +3554,7 @@ function findReplacements(absentId,dateStr,targetSite){
     const minStaff=getMinStaffEffectif(site, new Date(dateStr+'T12:00:00'));
     const presents=activeEmployees().filter(e=>{
       const s=S.planning[`${e.id}_${dateStr}`];
-      return s&&s.type!=='off'&&s.type!=='conge'&&s.type!=='maladie'&&s.site===site;
+      return s&&s.type!=='off'&&s.type!=='conge'&&s.type!=='maladie'&&s.type!=='formation'&&s.site===site;
     }).length;
     return {presents,minStaff,marge:presents-minStaff};
   }
