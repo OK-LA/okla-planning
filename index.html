@@ -1230,17 +1230,23 @@ const SC=Object.assign({
 }, lsGet('sc',{}));
 const AVC=['#DBEAFE','#D1FAE5','#FEF3C7','#FCE7F3','#EDE9FE','#FFE4E6','#FEF9C3','#E0E7FF','#ECFDF5'];
 const TYPES=[
-  {key:'magasin',   label:'Magasin',      info:'10h–12h / 14h–19h'},
-  {key:'entrepotA', label:'Entrepôt A',   info:'9h–12h / 13h30–17h30'},
-  {key:'entrepotB', label:'Entrepôt B',   info:'10h–12h / 13h30–18h30'},
-  {key:'remplacement', label:'Remplacement', info:'Renfort dans un autre magasin', color:'#0EA5E9',bg:'#EFF6FF',border:'#BFDBFE'},
-  {key:'vip',       label:'★ VIP',        info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
-  {key:'conge',     label:'Congé',         info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
-  {key:'congeSansSolde', label:'Congé sans solde', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
-  {key:'maladie',   label:'Maladie',       info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
-  {key:'formation', label:'Formation',     info:'Apprenti en centre de formation', color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
-  {key:'off',       label:'Repos',         info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
+  {key:'magasin',   label:'Magasin',      short:'',       info:'10h–12h / 14h–19h'},
+  {key:'entrepotA', label:'Entrepôt A',   short:'',       info:'9h–12h / 13h30–17h30'},
+  {key:'entrepotB', label:'Entrepôt B',   short:'B',      info:'10h–12h / 13h30–18h30'},
+  {key:'remplacement', label:'Remplacement', short:'',    info:'Renfort dans un autre magasin', color:'#0EA5E9',bg:'#EFF6FF',border:'#BFDBFE'},
+  {key:'vip',       label:'★ VIP',        short:'VIP',    info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
+  {key:'conge',     label:'Congé',         short:'CP',    info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
+  {key:'congeSansSolde', label:'Congé sans solde', short:'CSS', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
+  {key:'maladie',   label:'Maladie',       short:'Malad.', info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
+  {key:'formation', label:'Formation',     short:'Form.',  info:'Apprenti en centre de formation', color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
+  {key:'off',       label:'Repos',         short:'',       info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
 ];
+// Libellé court affiché en clair sur les cases de planning (remplacement = site cible, dynamique)
+function cellShortLabel(type,site){
+  if(type==='remplacement') return site||'';
+  return TYPES.find(t=>t.key===type)?.short||'';
+}
+const EV_INTERNE_LABELS={reunion:'Réunion',formation:'Formation',livraison:'Livraison',autre:'Autre'};
 const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const MGR={code:'ADMIN',name:'Gestionnaire'};
 
@@ -2414,9 +2420,10 @@ function renderEmpWeek(){
     const d=addDays(mon,i);const isT=fmt(d)===fmt(today);
     const sh=S.planning[`${emp.id}_${fmt(d)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
-    const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};"></div>`;
+    const dLbl=cellShortLabel(type,site);
+    const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};display:flex;align-items:center;justify-content:center;">${dLbl?`<span style="font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${dLbl}</span>`:''}</div>`;
     const evInternesJourW=getEvInternesDuJourPourEmp(emp.id,fmt(d));
-    const evBadgeW=evInternesJourW.length?`<div style="font-size:13px;margin-left:6px;" title="${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]||'📌').join('')}</div>`:'';
+    const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;" title="${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${evInternesJourW.map(e=>EV_INTERNE_LABELS[e.type]||'Autre').join(' + ')}</div>`:'';
     h+=`<div class="day-row${isT?' today-row':''}">
       <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${evBadgeW}
     </div>`;
@@ -2469,11 +2476,12 @@ function renderEmpMonth(){
     const thisM=cur.getMonth()===ref.getMonth();const isT=fmt(cur)===fmt(today);
     const sh=S.planning[`${emp.id}_${fmt(cur)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
-    let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
+    let bar='';let typeLblEM='';
+    if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;const lbl=cellShortLabel(type,site);if(lbl)typeLblEM=`<div style="position:absolute;top:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:${c.color};text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lbl}</div>`;}
     const evInternesJourEM=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
-    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;" title="${evInternesJourEM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourEM[0].type]||'📌'}</div>`:'';
+    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourEM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;">
-      <div class="cnum">${cur.getDate()}</div>${bar}${evBadgeEM}</div>`;
+      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblEM}${evBadgeEM}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('empCalBody').innerHTML=h;
@@ -2508,9 +2516,10 @@ function renderEmpMagasin(){
       const d=addDays(mon,i);
       const sh=S.planning[`${c.id}_${fmt(d)}`];
       const type=sh?.type||'off';const site2=sh?.site||c.site;
+      const lblEq=cellShortLabel(type,site2);
       const cell=type==='off'
         ?`<div class="sb empty"></div>`
-        :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site2).color};border-color:${getColor(type,site2).color};"></div>`;
+        :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site2).color};border-color:${getColor(type,site2).color};">${lblEq?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${lblEq}</span>`:''}</div>`;
       tb+=`<td>${cell}</td>`;
     }
     tb+='</tr>';
@@ -2973,7 +2982,8 @@ function renderWeek(){
         const type=sh?.type||'off';const empSite=sh?.site||emp.site;
         const dStr=fmt(d);
         const horsContrat=isHorsContrat(emp,dStr);
-        const remLabel=type==='remplacement'?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${empSite}</span>`:'';
+        const cellLbl=cellShortLabel(type,empSite);
+        const remLabel=cellLbl?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${cellLbl}</span>`:'';
         const cell=horsContrat
           ?`<div class="sb" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 4px,#E5E7EB 4px,#E5E7EB 8px);cursor:not-allowed;" title="Hors contrat"></div>`
           :type==='off'
@@ -2981,7 +2991,7 @@ function renderWeek(){
           :`<div class="sb${type==='vip'?' vip':''}${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         const evInternesJour=getEvInternesDuJourPourEmp(emp.id,dStr);
         const evInterneBadge=evInternesJour.length
-          ?`<div style="position:absolute;top:1px;right:1px;font-size:9px;line-height:1;pointer-events:none;" title="${evInternesJour.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJour[0].type]||'📌'}</div>`
+          ?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJour.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJour[0].type]||'Autre'}</div>`
           :'';
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}position:relative;">${cell}${evInterneBadge}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
@@ -3146,8 +3156,9 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
         cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
       } else {
         const c=getColor(type,site2);
-        const remLabel=type==='remplacement'
-          ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${site2}</span>`
+        const mLbl=cellShortLabel(type,site2);
+        const remLabel=mLbl
+          ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${mLbl}</span>`
           :'';
         cell=`<div class="mblock${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
         // Compte comme "présent ici" seulement si effectivement sur place ce jour-là :
@@ -3156,7 +3167,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       }
       const evInternesJourM=getEvInternesDuJourPourEmp(emp.id,dStr);
       const evInterneBadgeM=evInternesJourM.length
-        ?`<div style="position:absolute;top:0;right:1px;font-size:8px;line-height:1;pointer-events:none;" title="${evInternesJourM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourM[0].type]||'📌'}</div>`
+        ?`<div style="position:absolute;bottom:0;left:0;right:0;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:0 1px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJourM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourM[0].type]||'Autre'}</div>`
         :'';
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);position:relative;">${cell}${evInterneBadgeM}</td>`;
     });
@@ -3227,11 +3238,12 @@ function renderMonthEmp(ref,today){
     const thisM=cur.getMonth()===ref.getMonth();const isT=fmt(cur)===fmt(today);
     const sh=S.planning[`${emp.id}_${fmt(cur)}`];
     const type=sh?.type||'off';const site=sh?.site||emp.site;
-    let bar='';if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;}
+    let bar='';let typeLblE='';
+    if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;const lbl=cellShortLabel(type,site);if(lbl)typeLblE=`<div style="position:absolute;top:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:${c.color};text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lbl}</div>`;}
     const evInternesJourE=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
-    const evBadgeE=evInternesJourE.length?`<div style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;" title="${evInternesJourE.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_ICONS[evInternesJourE[0].type]||'📌'}</div>`:'';
+    const evBadgeE=evInternesJourE.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourE.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourE[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
-      <div class="cnum">${cur.getDate()}</div>${bar}${evBadgeE}</div>`;
+      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblE}${evBadgeE}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('calBody').innerHTML=h;
