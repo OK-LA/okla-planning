@@ -321,33 +321,16 @@ tbody tr:hover td{background:#FAFAF8;}
   <div style="max-width:540px;margin:0 auto;padding:20px 16px;">
     <div class="setup-card">
       <div style="font-size:18px;font-weight:700;margin-bottom:4px;">Configuration requise</div>
-      <div style="color:var(--muted);font-size:13px;margin-bottom:24px;">Connectez l'application à Google Sheets en 3 étapes</div>
-      <div class="setup-step">
-        <div class="setup-num">1</div>
-        <div class="setup-content">
-          <div class="setup-title">Créer le Google Sheet</div>
-          <div class="setup-desc">Ouvrez Google Sheets, créez un classeur "OK-LA Planning" avec 4 onglets : Employés, Planning, Demandes, Absences</div>
-        </div>
-      </div>
-      <div class="setup-step">
-        <div class="setup-num">2</div>
-        <div class="setup-content">
-          <div class="setup-title">Déployer le script Apps Script</div>
-          <div class="setup-desc">Dans le Sheet : Extensions → Apps Script → collez le code fourni → Déployer → Application Web → copiez l'URL</div>
-        </div>
-      </div>
-      <div class="setup-step">
-        <div class="setup-num">3</div>
-        <div class="setup-content">
-          <div class="setup-title">Entrez l'URL du script ici</div>
-          <div class="setup-desc">L'URL ressemble à : https://script.google.com/macros/s/XXXXX/exec</div>
-        </div>
-      </div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:24px;">Connectez l'application à Supabase (Dashboard Supabase → Settings → API)</div>
       <div class="fg" style="margin-top:20px;">
-        <label>URL du script Google Apps Script</label>
-        <input type="url" id="setupUrl" placeholder="https://script.google.com/macros/s/.../exec">
+        <label>URL du projet Supabase</label>
+        <input type="url" id="setupSupaUrl" placeholder="https://xxxx.supabase.co">
       </div>
-      <button class="btn btn-primary btn-full" onclick="saveSetup()">Connecter et démarrer →</button>
+      <div class="fg" style="margin-top:12px;">
+        <label>Clé API (anon)</label>
+        <input type="text" id="setupSupaKey" placeholder="eyJ...">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="saveSetup()" style="margin-top:16px;">Connecter et démarrer →</button>
     </div>
   </div>
 </div>
@@ -626,7 +609,6 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="tab-content" id="tab-conges">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <div style="font-weight:600;font-size:14px;">Congés payés — Suivi</div>
-        <button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;" onclick="envoyerRelances()">📧 Envoyer les relances</button>
       </div>
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
         <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">RÈGLES EN VIGUEUR</div>
@@ -703,7 +685,6 @@ tbody tr:hover td{background:#FAFAF8;}
               <input type="checkbox" id="modeVerrou" style="width:auto;accent-color:#DC2626;" onchange="toggleModeVerrou(this.checked)">
               <span id="modeVerrouLabel">Planning déverrouillé</span>
             </label>
-            <button class="btn btn-sm" onclick="testEmailGestionnaire()" style="background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE;">📧 Tester email gestionnaire</button>
           </div>
           <div id="verrouStatut" style="margin-top:10px;font-size:12px;"></div>
         </div>
@@ -814,7 +795,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="param-card" style="margin-top:14px;">
         <h3>📥 Import planning réel (déc. 2025 → jan. 2027)</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
-          Importe les vrais plannings de tes 5 sites (Breteuil, Entrepôt, Ham, Longueau, Roye) basés sur tes fichiers Excel. <strong>Cette action remplace</strong> toutes les données de planning existantes du 29 décembre 2025 au 3 janvier 2027, et ajoute les jours fériés détectés. Import local à cet appareil uniquement (ne pousse pas encore sur le Google Sheet partagé).
+          Importe les vrais plannings de tes 5 sites (Breteuil, Entrepôt, Ham, Longueau, Roye) basés sur tes fichiers Excel. <strong>Cette action remplace</strong> toutes les données de planning existantes du 29 décembre 2025 au 3 janvier 2027, et ajoute les jours fériés détectés. Synchronisé automatiquement avec Supabase.
         </div>
         <button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" onclick="importPlanningReel()">⚠️ Importer et remplacer (déc 2025 - jan 2027)</button>
       </div>
@@ -839,10 +820,6 @@ tbody tr:hover td{background:#FAFAF8;}
           </div>
           <div id="supaStatus" style="font-size:12px;margin-top:8px;"></div>
         </div>
-        <div class="fg"><label>URL du script Google Apps Script (ancien système)</label>
-          <input type="url" id="paramScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="saveScriptUrl()">✓ Mettre à jour l'URL</button>
       </div>
     </div>
 
@@ -1999,9 +1976,6 @@ const S={
   ]),
   // Événements appliqués sur des plages de dates : [{id, typeId, dateDebut, dateFin, portee, cible}]
   events:(Array.isArray(lsGet('events',[]))?lsGet('events',[]):[]),
-  // URL Apps Script pré-intégrée par défaut : évite que chaque nouvel appareil (un par salarié)
-  // ait à la coller manuellement à la première ouverture. Reste modifiable dans Paramètres si besoin.
-  scriptUrl:lsGet('scriptUrl','https://script.google.com/macros/s/AKfycbzpl5x4P-A05TtXqTufaPOcYlPtsBxoHyQedSnp908N_827T1yXSOEtgKJ7Hs-VyxCV/exec'),
   syncing:false,
 };
 
@@ -2029,41 +2003,6 @@ function persist(){
   }
 }
 
-// ══ API GOOGLE SHEETS ══
-async function api(action,data={}){
-  if(!S.scriptUrl) return {ok:false,error:'no_url'};
-  setSyncing(true);
-  try{
-    const url=new URL(S.scriptUrl);
-    url.searchParams.set('action',action);
-    // Pour les GET
-    if(['getAll','getPlanning'].includes(action)){
-      Object.entries(data).forEach(([k,v])=>url.searchParams.set(k,v));
-      const r=await fetch(url.toString());
-      const j=await r.json();
-      setSyncing(false);
-      return j;
-    }
-    // Pour les POST
-    // Content-Type volontairement text/plain (et non application/json) : ce dernier est un header
-    // "non simple" qui déclenche un preflight OPTIONS que Google Apps Script ne gère pas, bloquant
-    // toute la requête côté navigateur. En text/plain, pas de preflight, et le script côté serveur
-    // parse déjà le corps en JSON indépendamment du Content-Type déclaré (vérifié en conditions réelles).
-    const r=await fetch(S.scriptUrl,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({action,...data})
-    });
-    const j=await r.json();
-    setSyncing(false);
-    return j;
-  }catch(e){
-    setSyncing(false,true);
-    console.error('API error',e);
-    return {ok:false,error:e.message};
-  }
-}
-
 function setSyncing(on,err=false){
   S.syncing=on;
   const dot=document.getElementById('syncDot');
@@ -2088,29 +2027,7 @@ function restoreSession(){
   }
 }
 
-// Charger toutes les données depuis le Sheet.
-// Maintenant que les POST atteignent réellement le Sheet (fix CORS via Content-Type text/plain),
-// on resynchronise à chaque ouverture/rafraîchissement pour que les modifs faites depuis un autre
-// appareil/gestionnaire apparaissent (enregistrement partagé, pas seulement local).
-// Garde-fou conservé : si le Sheet renvoie une liste plus courte que la version locale (incident
-// réseau ponctuel, sauvegarde qui aurait échoué en silence...), on garde la version locale plutôt
-// que d'effacer des données récentes.
-function keepIfNotSmaller(local,remote){
-  return Array.isArray(remote) && remote.length>=(local?.length||0) ? remote : local;
-}
-// Fusion par id (et non par taille de tableau) : chaque entrée connue du Sheet écrase sa version
-// locale (dernière sauvegarde gagne), les entrées locales pas encore synchronisées sont gardées.
-// Nécessaire pour S.requests : un changement de statut (ex. échange accepté par un collègue) ne
-// change jamais la taille du tableau, donc keepIfNotSmaller ne le laissait jamais remonter tant
-// qu'un autre appareil (le gestionnaire) avait déjà au moins autant de demandes en local — bloquant
-// indéfiniment la visibilité des échanges à valider (cas réel 2026-07-03).
-function mergeParId(local,remote){
-  if(!Array.isArray(remote)) return local||[];
-  const map={};
-  (local||[]).forEach(item=>{ if(item&&item.id!=null) map[item.id]=item; });
-  remote.forEach(item=>{ if(item&&item.id!=null) map[item.id]=item; });
-  return Object.values(map);
-}
+// Charger toutes les données depuis Supabase.
 async function loadAll(force=false){
   // ── Priorité Supabase (synchronisation multi-appareils) ──
   if(_supaUrl && _supaKey) {
@@ -2186,88 +2103,9 @@ async function loadAll(force=false){
     return;
   }
 
-  // ── Fallback : Google Sheets (ancien système) ──
-  if(!S.scriptUrl){
-    hideLoading();
-    showScr('sSetup');
-    return;
-  }
-  setLoadingText('Connexion à Google Sheets...');
-  const r=await api('getAll');
-  if(r&&r.ok){
-    // Contrairement à requests/absences/eventTypes/events, on fait confiance au Sheet sans
-    // garde-fou de taille pour les employés : le vrai risque (doublons via id non fiable) est
-    // corrigé côté serveur depuis, et le garde-fou avait l'effet pervers inverse — un appareil
-    // dont le cache local avait été pollué par d'anciens doublons ne pouvait plus jamais revenir
-    // à une liste plus petite (donc correcte) venant du Sheet (cas réel 2026-07-03).
-    if(r.employees)  {S.employees=r.employees;  lsSet('employees',S.employees);}
-    // Résoudre les repos fixes par défaut (code → id réel), uniquement si pas déjà configuré
-    if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
-      S.params.reposFixe = {};
-      S.employees.forEach(emp=>{
-        const rf = S.params.reposFixeParCode[emp.code];
-        if(rf!==undefined) S.params.reposFixe[emp.id] = rf;
-      });
-      persist();
-    }
-    // Fusion case par case (et non un remplacement global) : le Sheet ne contient parfois que les
-    // cellules explicitement modifiées (pas tout le planning pré-rempli), donc comparer les totaux
-    // empêchait toute synchro dès qu'un autre appareil avait un planning local plus complet — même
-    // une seule case modifiée ailleurs n'était alors jamais adoptée. Ici, chaque case connue du Sheet
-    // écrase la version locale (dernière sauvegarde gagne), et les cases que le Sheet ne connaît pas
-    // (jamais synchronisées) gardent leur valeur locale au lieu d'être effacées.
-    if(r.planning && typeof r.planning==='object'){
-      S.planning = Object.assign({}, S.planning, r.planning);
-      lsSet('planning',S.planning);
-    }
-    if(r.requests)   {S.requests=mergeParId(S.requests,r.requests);    lsSet('requests',S.requests);}
-    if(r.absences)   {S.absences=keepIfNotSmaller(S.absences,r.absences);    lsSet('absences',S.absences);}
-    if(r.params&&r.params!==null) {
-      // Fusionner : garder les clés locales absentes du Sheet (verrou, typeColors, reposFixe...)
-      S.params = Object.assign({}, r.params, {
-        verrou: S.params.verrou,
-        typeColors: S.params.typeColors || r.params.typeColors || {},
-        reposFixe: S.params.reposFixe || r.params.reposFixe || {},
-        motifsAbsence: r.params.motifsAbsence || S.params.motifsAbsence,
-        reglesEnfantMalade: r.params.reglesEnfantMalade || S.params.reglesEnfantMalade,
-        samedisPleins: r.params.samedisPleins || S.params.samedisPleins,
-      });
-      lsSet('params',S.params);
-    }
-    if(r.eventTypes&&Array.isArray(r.eventTypes)) {S.eventTypes=keepIfNotSmaller(S.eventTypes,r.eventTypes); lsSet('eventTypes',S.eventTypes);}
-    if(r.events&&Array.isArray(r.events)) {S.events=keepIfNotSmaller(S.events,r.events); lsSet('events',S.events);}
-    if(r.sc && typeof r.sc==='object'){
-      Object.keys(SC).forEach(k=>delete SC[k]);
-      Object.assign(SC, r.sc);
-      lsSet('sc',SC);
-    }
-    if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
-    if(!S.params.typeColors) S.params.typeColors={};
-    // Initialiser planning vide si pas de données
-    if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
-    // Générer planning par défaut pour les employés si vide
-    if(S.employees.length>0 && Object.keys(S.planning).length===0){
-      const today=new Date();today.setHours(0,0,0,0);
-      S.employees.forEach(emp=>{
-        for(let d=-28;d<=84;d++){
-          const dt=addDays(today,d);
-          const key=emp.id+'_'+fmt(dt);
-          if(!S.planning[key]) S.planning[key]={type:isJourRepos(emp,dt)?'off':(emp.slot||'magasin'),site:emp.site,note:''};
-        }
-      });
-      lsSet('planning',S.planning);
-    }
-    setLoadingText('Données chargées ✓');
-    setTimeout(()=>{hideLoading();restoreSession();},400);
-  } else {
-    if(S.employees.length>0){
-      setLoadingText('Mode hors ligne — données locales');
-      setTimeout(()=>{hideLoading();showScr('sLogin');setSyncing(false,true);},800);
-    } else {
-      setLoadingText('Impossible de se connecter');
-      setTimeout(()=>{hideLoading();showScr('sSetup');},1000);
-    }
-  }
+  // ── Supabase non configuré ──
+  hideLoading();
+  showScr('sSetup');
 }
 
 function setLoadingText(t){const el=document.getElementById('loadingText');if(el)el.textContent=t;}
@@ -2407,9 +2245,10 @@ function updStats(){
 
 // ══ SETUP ══
 function saveSetup(){
-  const url=document.getElementById('setupUrl').value.trim();
-  if(!url||!url.includes('script.google.com')){toast('URL invalide');return;}
-  S.scriptUrl=url;lsSet('scriptUrl',url);
+  const url=document.getElementById('setupSupaUrl').value.trim();
+  const key=document.getElementById('setupSupaKey').value.trim();
+  if(!url||!key){toast('Remplissez l\'URL et la clé Supabase');return;}
+  _supaUrl=url;_supaKey=key;lsSet('supaUrl',url);lsSet('supaKey',key);
   document.getElementById('loadingScreen').style.display='flex';
   document.getElementById('mainHeader').style.display='none';
   showScr('sLogin');
@@ -2425,7 +2264,7 @@ function doLogin(){
     lsSet('session',{role:'emp',empId:emp.id,ts:Date.now()});
     showScr('sEmp');renderEmp();
   }
-  else if(S.employees.length===0){toast('Aucun employé — connectez d\'abord Google Sheets');}
+  else if(S.employees.length===0){toast('Aucun employé — configurez d\'abord Supabase');}
   else toast('Code non reconnu');
 }
 function loginMgr(){
@@ -2680,9 +2519,7 @@ async function sendReq(){
   renderEmpQuota();
   renderEmpCongeSansSolde();
   renderEmpEchanges();
-  toast('Envoi en cours...');
-  const r=await api('saveRequest',req);
-  toast(r&&r.ok?'✓ Demande envoyée':'✓ Demande enregistrée');
+  toast('✓ Demande envoyée');
 }
 
 // ══ GESTIONNAIRE ══
@@ -2690,8 +2527,6 @@ function renderMgr(){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
   buildSelects();initFiltres();renderWeek();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();
-  if(document.getElementById('paramScriptUrl'))
-    document.getElementById('paramScriptUrl').value=S.scriptUrl||'';
 }
 function switchTab(n){
   const mgrScreen = document.getElementById('sMgr');
@@ -2830,7 +2665,6 @@ async function appliquerSelectionType(type){
     const emp = S.employees.find(e=>e.id===empId);
     if(!emp) continue;
     S.planning[key] = {type, site:emp.site, note:''};
-    api('updateShift',{empId,dateStr,type,site:emp.site,note:'',sendEmail:false});
   }
   persist();
   annulerSelection();
@@ -2857,12 +2691,6 @@ function toggleModeVerrou(checked){
     ? '<span style="color:#DC2626;font-weight:600;">⛔ Toute modification du planning est bloquée</span>'
     : '<span style="color:#059669;">✓ Les modifications sont autorisées</span>';
   toast(checked ? '🔒 Planning verrouillé' : '🔓 Planning déverrouillé');
-}
-
-async function testEmailGestionnaire(){
-  toast('📧 Envoi du mail de test...');
-  const r = await api('testMail', {});
-  toast(r&&r.ok ? '✓ Email envoyé à gwen.bruchet@ok-la.fr' : '⚠ Échec — vérifiez l\'URL du script');
 }
 
 function initVerrouUI(){
@@ -3419,13 +3247,7 @@ async function saveShift(){
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
   checkEffectifAlerts(mon2);
-  toast('Enregistrement...');
-  const r=await api('updateShift',{
-    empId,dateStr,type:S.editType,site:siteEffectif,note,
-    sendEmail:sendMail,empEmail:emp.email,empName:emp.name,
-    targetSite:siteEffectif
-  });
-  toast(r&&r.ok?(sendMail?`✓ Modifié · Email envoyé à ${emp.name.split(' ')[0]}`:'✓ Planning enregistré'):'✓ Sauvegardé localement');
+  toast('✓ Planning enregistré');
 }
 
 async function saveShiftPeriode(){
@@ -3455,24 +3277,6 @@ async function saveShiftPeriode(){
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
   checkEffectifAlerts(mon2);
-  toast('Envoi...');
-
-  for(const dStr of jours){
-    await api('updateShift',{
-      empId,dateStr:dStr,type:S.editType,site:siteEffectif,note,
-      sendEmail:false,empEmail:emp.email,empName:emp.name
-    });
-  }
-  if(sendMail && emp.email){
-    const t=TYPES.find(x=>x.key===S.editType);
-    const det=S.editType==='remplacement'?`Remplacement — ${siteEffectif}`:(t?t.info:'');
-    const dl=`du ${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'long'})}`;
-    api('updateShift',{
-      empId,dateStr:debut,type:S.editType,site:siteEffectif,note,
-      sendEmail:true,empEmail:emp.email,empName:emp.name,
-      overrideDetail:`Période ${dl} : ${siteEffectif} — ${det}`
-    });
-  }
   toast(`✓ Période mise à jour (${jours.length} jour${jours.length>1?'s':''})`);
 }
 
@@ -3495,7 +3299,6 @@ async function saveAbsence(){
   const absId=Date.now();
   const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
   S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
-  api('saveAbsence',abs);
   openRempModal(absId);
 }
 
@@ -3535,11 +3338,7 @@ async function saveAbsenceEmp(){
   S.absences.push(abs);persist();updStats();
   closeModal('mAbsEmp');
   renderEmpWeek();renderEmpAbsList();
-  toast('Envoi en cours...');
-  const r=await api('saveAbsence',abs);
-  toast(r&&r.ok
-    ?`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`
-    :'✓ Signalement enregistré localement');
+  toast(`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 function renderEmpAbsList(){
   const emp=S.user;if(!emp)return;
@@ -3635,8 +3434,6 @@ async function accepterEchangeCollegue(id){
   persist();
   renderEmpEchanges();
   toast('✓ Échange accepté, en attente de validation du gestionnaire');
-  api('updateRequestStatus',{reqId:id,newStatus:'pending_gestionnaire',
-    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB});
 }
 async function refuserEchangeCollegue(id){
   const req=S.requests.find(r=>r.id==id); if(!req) return;
@@ -3644,8 +3441,6 @@ async function refuserEchangeCollegue(id){
   persist();
   renderEmpEchanges();
   toast('Échange refusé');
-  api('updateRequestStatus',{reqId:id,newStatus:'refused',
-    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB,refusePar:'collegue'});
 }
 
 const DIST={
@@ -3729,8 +3524,6 @@ async function validerRemp(){
   S.mods.push({empId:rempId,dl:fmtFR(new Date(abs.dateStr+'T12:00'),{day:'numeric',month:'long'}),det:`Remplacement à ${abs.empSite}`,seen:false});
   persist();updStats();closeModal('mRemp');renderWeek();if(S.view==='mois')renderMonth();renderAbsList();
   toast(`✓ ${remp.name} affecté(e)`);
-  api('validerRemplacement',{absId:abs.id,rempId,rempName:remp.name,rempEmail:remp.email,
-    dateStr:abs.dateStr,site:abs.empSite,absName:abs.empName});
 }
 
 function renderAbsList(){
@@ -3990,12 +3783,9 @@ async function saveFicheEmp(){
   refreshActiveView();
   closeModal('mFicheEmp');
   toast(`✓ Fiche de ${emp.name.split(' ')[0]} mise à jour`);
-  api('saveEmployee', emp);
 }
 
 // Supprime définitivement un employé (fiche + planning + repos fixe associés).
-// Nécessite l'action serveur deleteEmployee (Apps Script v4+) pour que la ligne soit
-// aussi retirée du Google Sheet, sinon elle reviendrait à la prochaine synchro.
 async function deleteEmp(){
   const empId = document.getElementById('mFicheEmp').dataset.empId;
   const emp = S.employees.find(e=>e.id===empId);
@@ -4010,8 +3800,6 @@ async function deleteEmp(){
   refreshActiveView();
   closeModal('mFicheEmp');
   toast(`✓ ${emp.name} supprimé(e)`);
-  const r = await api('deleteEmployee', {code: emp.code});
-  if(!r||!r.ok) toast('⚠ Suppression locale ok, mais la synchro avec le Sheet a échoué — réessaie plus tard');
 }
 function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCode','aeDateFin'].forEach(id=>document.getElementById(id).value='');openModal('mEmp');}
 document.getElementById('aeName').addEventListener('input',function(){
@@ -4037,9 +3825,7 @@ async function saveNewEmp(){
   const today=new Date();today.setHours(0,0,0,0);
   for(let d=-28;d<=84;d++){const dt=addDays(today,d);S.planning[`${emp.id}_${fmt(dt)}`]={type:isJourRepos(emp,dt)?'off':slot,site,note:''};}
   persist();updStats();closeModal('mEmp');renderEmpList();buildSelects();renderWeek();
-  toast('Enregistrement...');
-  const r=await api('saveEmployee',emp);
-  toast(r&&r.ok?`✓ ${name} ajouté(e) — Code : ${emp.code}`:`✓ ${name} ajouté(e) localement`);
+  toast(`✓ ${name} ajouté(e) — Code : ${emp.code}`);
 }
 
 // ── Paramètres ──
@@ -4099,9 +3885,8 @@ async function saveParams(){
     if(auMoinsUnTrouve) S.params.minStaff[site]=parJour;
   });
   persist();
-  const r=await api('saveParams',{params:S.params});
   refreshActiveView();
-  toast(r&&r.ok?'✓ Paramètres enregistrés':'✓ Enregistré localement');
+  toast('✓ Paramètres enregistrés');
 }
 
 // Détermine si une date (samedi) est le 1er samedi du mois — comportement par défaut "effectif plein".
@@ -4148,9 +3933,8 @@ async function saveSamedisPleins(){
     cur = addDays(cur,7);
   }
   persist();
-  const r = await api('saveParams',{params:S.params});
   refreshActiveView();
-  toast(r&&r.ok?'✓ Samedis enregistrés':'✓ Enregistré localement');
+  toast('✓ Samedis enregistrés');
 }
 // ── GESTION MAGASINS ──
 // ── GESTION TYPES D'ÉVÉNEMENTS (pastilles personnalisables) ──
@@ -4186,8 +3970,7 @@ async function saveTypeColors(){
   });
   persist();
   refreshActiveView();
-  const r=await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
-  toast(r&&r.ok?'✓ Couleurs enregistrées':'✓ Enregistré localement');
+  toast('✓ Couleurs enregistrées');
 }
 
 function renderParamEvents(){
@@ -4240,10 +4023,9 @@ async function saveEventTypes(){
     if(vacEl) ev.isVacances = vacEl.checked;
   });
   persist();
-  const r = await api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
   renderParamEvents();
   refreshActiveView();
-  toast(r&&r.ok?'✓ Types d\'événements enregistrés':'✓ Enregistré localement');
+  toast('✓ Types d\'événements enregistrés');
 }
 
 // ── Motifs d'absence configurables (salarié → "Signaler une absence") ──
@@ -4281,10 +4063,9 @@ async function saveMotifsAbsence(){
     if(labelEl) m.label = labelEl.value.trim() || m.label;
   });
   persist();
-  const r = await api('saveParams',{params:S.params});
   renderParamMotifsAbsence();
   populerMotifsAbsenceEmp();
-  toast(r&&r.ok?'✓ Motifs enregistrés':'✓ Enregistré localement');
+  toast('✓ Motifs enregistrés');
 }
 // Remplit dynamiquement le select du modal "Signaler une absence" côté salarié
 function populerMotifsAbsenceEmp(){
@@ -4336,9 +4117,8 @@ async function saveReglesEnfantMalade(){
   regles.joursSiMoinsUnAn = parseInt(document.getElementById('pJoursMoinsUnAn').value)||0;
   S.params.reglesEnfantMalade = regles;
   persist();
-  const r = await api('saveParams',{params:S.params});
   renderParamReglesEnfantMalade();
-  toast(r&&r.ok?'✓ Règles enregistrées':'✓ Enregistré localement');
+  toast('✓ Règles enregistrées');
 }
 // Calcule le quota "enfant malade" (jours/an) d'un employé selon ses enfants déclarés.
 // Prend le palier le plus élevé atteint par le nombre d'enfants, ou la majoration "moins d'1 an"
@@ -4423,7 +4203,6 @@ async function supprimerEvenement(evId){
   renderEvListeExistants();
   refreshActiveView();
   toast('✓ Période supprimée');
-  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
 }
 function toggleEvPortee(){
   const v = document.getElementById('evPortee').value;
@@ -4450,7 +4229,6 @@ async function appliquerEvenementPlage(){
   refreshActiveView();
   const typeLabel = S.eventTypes.find(t=>t.id===typeId)?.label || '';
   toast(`✓ ${typeLabel} appliqué du ${fmtFR(new Date(dateDebut+'T12:00'),{day:'numeric',month:'short'})} au ${fmtFR(new Date(dateFin+'T12:00'),{day:'numeric',month:'short'})}`);
-  api('saveParams',{params:S.params, eventTypes:S.eventTypes, events:S.events});
 }
 
 function renderParamMagasins(){
@@ -4553,14 +4331,13 @@ async function saveMagasins(){
   if(hasRename) S.filtresSites = Object.keys(SC).slice(0,1);
 
   persist();
-  const r = await api('saveParams',{params:S.params, employees:S.employees, sc:SC});
   buildLegend('mgrLeg');
   renderChipsSites();
   buildSelects();
   renderWeek();
   renderParamMagasins();
   renderParamRotation();
-  toast(r&&r.ok?'✓ Magasins enregistrés':'✓ Enregistré localement');
+  toast('✓ Magasins enregistrés');
 }
 
 async function saveAdresses(){
@@ -4633,17 +4410,6 @@ async function importPlanningReel(){
   persist();
   refreshActiveView();
   toast(`✓ Planning importé : ${applied} jour(s) appliqué(s)${skipped?`, ${skipped} ignoré(s) (code inconnu)`:''}${ferieAdded?`, ${ferieAdded} jour(s) férié(s) ajouté(s)`:''}`);
-  // Import local uniquement pour l'instant : pousser ces données sur le Google Sheet partagé
-  // nécessite un envoi en masse (des milliers de cellules) — voir avec Antoine avant d'automatiser ça,
-  // le POST par cellule (updateShift) n'est pas adapté à ce volume.
-}
-
-function saveScriptUrl(){
-  const url=document.getElementById('paramScriptUrl').value.trim();
-  if(!url){toast('URL vide');return;}
-  S.scriptUrl=url;lsSet('scriptUrl',url);
-  toast('✓ URL mise à jour — rechargement...');
-  setTimeout(()=>location.reload(),1200);
 }
 
 // ══ CONFIGURATION SUPABASE ══
@@ -5266,8 +5032,6 @@ async function validerConge(id) {
   renderCongesMgr();
   renderWeek();
   toast('✓ Congé validé');
-  api('validerConge', {reqId: id, empId: req.empId, dateDebut: req.dateDebut, dateFin: req.dateFin,
-    empEmail: req.empEmail, empName: req.empName, jokers: S.params.jokers});
 }
 
 async function refuserConge(id) {
@@ -5277,8 +5041,6 @@ async function refuserConge(id) {
   persist();
   renderCongesMgr();
   toast('Congé refusé');
-  api('refuserConge', {reqId: id, empEmail: req.empEmail, empName: req.empName,
-    dateDebut: req.dateDebut, dateFin: req.dateFin});
 }
 
 // ── Congés sans solde (gestionnaire) : hors quota CP, pas de jokers ──
@@ -5324,8 +5086,6 @@ async function validerCongeSansSolde(id){
   renderCongeSansSoldeMgr();
   renderWeek();
   toast('✓ Congé sans solde validé');
-  api('validerConge', {reqId:id, empId:req.empId, dateDebut:req.dateDebut, dateFin:req.dateFin,
-    empEmail:req.empEmail, empName:req.empName});
 }
 async function refuserCongeSansSolde(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
@@ -5333,8 +5093,6 @@ async function refuserCongeSansSolde(id){
   persist();
   renderCongeSansSoldeMgr();
   toast('Congé sans solde refusé');
-  api('refuserConge', {reqId:id, empEmail:req.empEmail, empName:req.empName,
-    dateDebut:req.dateDebut, dateFin:req.dateFin});
 }
 
 // ── Échanges d'horaire (vue gestionnaire) ──
@@ -5385,14 +5143,6 @@ async function validerEchange(id){
   renderWeek();
   updStats();
   toast('✓ Échange validé, planning mis à jour');
-  await Promise.all([
-    api('updateShift',{empId:req.empId,dateStr:req.dateB,type:cellEmpDateB.type,site:cellEmpDateB.site,note:cellEmpDateB.note,sendEmail:false}),
-    api('updateShift',{empId:req.empId,dateStr:req.dateA,type:cellEmpDateA.type,site:cellEmpDateA.site,note:cellEmpDateA.note,sendEmail:false}),
-    api('updateShift',{empId:req.cibleId,dateStr:req.dateA,type:cellCibleDateA.type,site:cellCibleDateA.site,note:cellCibleDateA.note,sendEmail:false}),
-    api('updateShift',{empId:req.cibleId,dateStr:req.dateB,type:cellCibleDateB.type,site:cellCibleDateB.site,note:cellCibleDateB.note,sendEmail:false}),
-    api('updateRequestStatus',{reqId:id,newStatus:'approved',
-      empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB}),
-  ]);
 }
 async function refuserEchangeGestionnaire(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
@@ -5401,22 +5151,6 @@ async function refuserEchangeGestionnaire(id){
   renderEchangesMgr();
   updStats();
   toast('Échange refusé');
-  api('updateRequestStatus',{reqId:id,newStatus:'refused',
-    empName:req.empName,empEmail:req.empEmail,cibleName:req.cibleName,cibleEmail:req.cibleEmail,dateA:req.dateA,dateB:req.dateB,refusePar:'gestionnaire'});
-}
-
-async function envoyerRelances() {
-  const regles = S.params.reglesConges || {};
-  const empsSansConges = S.employees.filter(e => {
-    const restants = getQuotaAnnuel() - getJoursPris(e.id) - getJoursEnAttente(e.id);
-    return restants > 10; // Plus de 10j non posés = relance
-  });
-  if (!empsSansConges.length) { toast('Tous les employés ont posé leurs congés ✓'); return; }
-  toast(`Envoi de ${empsSansConges.length} relance(s)...`);
-  const r = await api('envoyerRelances', {employes: empsSansConges.map(e=>({id:e.id,name:e.name,email:e.email,
-    restants: getQuotaAnnuel() - getJoursPris(e.id) - getJoursEnAttente(e.id),
-    jokers: getJokersUtilises(e.id)})), managerEmail: MANAGER_EMAIL||''});
-  toast(r&&r.ok ? `✓ ${empsSansConges.length} relance(s) envoyée(s)` : 'Relances envoyées localement');
 }
 
 // Paramètres règles congés
@@ -5425,7 +5159,6 @@ function saveReglesConges() {
   S.params.reglesConges.dateAlerte = document.getElementById('pDateAlerte')?.value || '';
   S.params.reglesConges.quota = parseInt(document.getElementById('pQuota')?.value) || 25;
   persist();
-  api('saveParams', {params: S.params});
   toast('✓ Paramètres congés enregistrés');
 }
 
@@ -5465,7 +5198,6 @@ function saveSoldesInitiaux(){
     if(dateEl&&dateEl.value) emp.soldeCPManuelDate=dateEl.value;
   });
   persist();
-  api('saveEmployees',{employees:S.employees});
   renderSoldesInitiaux();
   toast('✓ Soldes CP enregistrés');
 }
@@ -5514,7 +5246,6 @@ function saveRotation() {
     soldes: document.getElementById('samSoldes')?.checked ?? true
   };
   persist();
-  api('saveParams', {params: S.params});
   toast('✓ Rotation samedis enregistrée');
 }
 
@@ -5543,11 +5274,10 @@ function saveReposFixe() {
     if (el) S.params.reposFixe[emp.id] = parseInt(el.value) || 0;
   });
   persist();
-  api('saveParams', {params: S.params});
   toast('✓ Jours de repos fixes enregistrés');
 }
 
-// Forcer une resynchronisation immédiate avec Google Sheets (au cas où l'auto-sync au chargement n'a pas suffi)
+// Forcer une resynchronisation immédiate avec Supabase (au cas où l'auto-sync au chargement n'a pas suffi)
 async function refreshData(){
   setSyncing(true);
   setLoadingText('Actualisation...');
@@ -5599,12 +5329,12 @@ window.addEventListener('load', () => {
   }
 });
 
-// Resynchroniser avec le Sheet quand l'app redevient visible (changement d'onglet, ou PWA mobile
+// Resynchroniser avec Supabase quand l'app redevient visible (changement d'onglet, ou PWA mobile
 // relancée depuis l'arrière-plan sans rechargement complet de la page — window.load ne se redéclenche
 // pas dans ce cas, donc sans ceci deux appareils ouverts en même temps ne se voient jamais l'un l'autre).
 let lastVisibilitySync = Date.now();
 function resyncIfPossible(){
-  if (!S.role || !S.scriptUrl) return;
+  if (!S.role || !_supaUrl || !_supaKey) return;
   // On évite de resynchroniser en plein milieu d'une saisie (une modale est ouverte)
   if (document.querySelector('.modal-overlay.open')) return;
   lastVisibilitySync = Date.now();
