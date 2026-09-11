@@ -1253,6 +1253,15 @@ tbody tr:hover td{background:#FAFAF8;}
           <option value="6">Samedi</option>
         </select>
       </div>
+      <div style="font-size:11px;color:var(--muted);margin:8px 0 6px;">
+        Génère le planning normal (travail les autres jours, repos le dimanche + ce jour fixe) sur une période — sans toucher aux congés, arrêts, formations, remplacements ou VIP déjà posés. À utiliser en base, puis ajouter les exceptions (roulement du samedi, réunions...) à la main par-dessus.
+      </div>
+      <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+        <div class="fg" style="flex:1;min-width:110px;margin:0;"><label>Du</label><input type="date" id="genPlanningDebut"></div>
+        <div class="fg" style="flex:1;min-width:110px;margin:0;"><label>Au</label><input type="date" id="genPlanningFin"></div>
+        <button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;" onclick="analyserGenerationPlanning()">Analyser</button>
+      </div>
+      <div id="genPlanningPreview"></div>
     </div>
 
     <!-- Congés -->
@@ -3931,6 +3940,10 @@ function openFicheEmp(empId){
   document.getElementById('ficheContratStatut').innerHTML = statut;
   // Repos fixe
   document.getElementById('ficheRepos').value = S.params?.reposFixe?.[emp.id]||'';
+  const dansUnAn = new Date(); dansUnAn.setFullYear(dansUnAn.getFullYear()+1);
+  document.getElementById('genPlanningDebut').value = fmt(new Date());
+  document.getElementById('genPlanningFin').value = fmt(dansUnAn);
+  document.getElementById('genPlanningPreview').innerHTML = '';
   // Congés
   document.getElementById('ficheSoldeCPManuel').value = emp.soldeCPManuel!=null ? emp.soldeCPManuel : '';
   // Date par défaut si aucune n'est encore renseignée : le 31/05 le plus récent (fin de période légale)
@@ -4099,6 +4112,73 @@ async function saveFicheEmp(){
   refreshActiveView();
   closeModal('mFicheEmp');
   toast(`✓ Fiche de ${emp.name.split(' ')[0]} mise à jour`);
+}
+
+// ── Génération du planning normal depuis le repos hebdomadaire ──
+// Pose "travail" (créneau habituel) les jours normaux et "repos" le dimanche + le jour de repos
+// fixe choisi, sur toute une période. Sert de base fiable (contrairement à un import Excel dont
+// le vocabulaire/les colonnes peuvent être mal reconnus) ; les exceptions (roulement du samedi,
+// réunion, formation, congé...) se posent ensuite à la main par-dessus, jamais écrasées ici :
+// toute case qui n'est pas déjà "repos" ou le créneau habituel est considérée comme une exception
+// volontaire et n'est jamais touchée.
+let _genPlanningStaging = null;
+function analyserGenerationPlanning(){
+  const empId = document.getElementById('mFicheEmp').dataset.empId;
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp) return;
+  const el = document.getElementById('genPlanningPreview');
+  // Le site/créneau/repos fixe utilisés ici doivent être ceux déjà enregistrés sur la fiche —
+  // sinon un changement de site tapé mais pas encore sauvegardé se retrouverait gravé sur des
+  // dizaines de cases de planning alors que la fiche employé, elle, garderait l'ancien site
+  // (exactement le décalage planning/fiche corrigé aujourd'hui même pour Delphine/Cédric/Hamidou).
+  const siteNonSauve = document.getElementById('ficheSite').value !== emp.site;
+  const slotNonSauve = document.getElementById('ficheSlot').value !== (emp.slot||'magasin');
+  const reposNonSauve = document.getElementById('ficheRepos').value !== String(S.params?.reposFixe?.[emp.id]||'');
+  if(siteNonSauve || slotNonSauve || reposNonSauve){
+    el.innerHTML = '<div style="color:#DC2626;font-size:12px;margin-top:8px;">⚠️ Enregistrez d\'abord la fiche (bouton "Enregistrer" en bas) — le site, le créneau ou le repos fixe ont été modifiés mais pas encore sauvegardés.</div>';
+    return;
+  }
+  const debut = document.getElementById('genPlanningDebut').value;
+  const fin = document.getElementById('genPlanningFin').value;
+  if(!debut||!fin||fin<debut){ el.innerHTML='<div style="color:#DC2626;font-size:12px;margin-top:8px;">Période invalide.</div>'; return; }
+  const reposFixeVal = S.params?.reposFixe?.[emp.id]||'';
+  const site = emp.site;
+  const slot = emp.slot||'magasin';
+  const estRepos = (d) => d.getDay()===0 || (reposFixeVal && parseInt(reposFixeVal)===d.getDay());
+
+  let nbTravail=0, nbRepos=0, nbPreserves=0, changes=[];
+  let cur = new Date(debut+'T12:00'); const last = new Date(fin+'T12:00');
+  while(cur<=last){
+    const dStr = fmt(cur);
+    const nouveauType = estRepos(cur) ? 'off' : slot;
+    if(nouveauType==='off') nbRepos++; else nbTravail++;
+    const existant = S.planning[`${empId}_${dStr}`];
+    const typeActuel = existant?.type || 'off';
+    const estException = existant && !['off','magasin','entrepotA','entrepotB'].includes(typeActuel);
+    if(estException){ nbPreserves++; }
+    else if(typeActuel!==nouveauType || (existant?.site||site)!==site){
+      changes.push({dateStr:dStr, newType:nouveauType, oldType:typeActuel, note:existant?.note||''});
+    }
+    cur = addDays(cur,1);
+  }
+  _genPlanningStaging = {empId, site, changes};
+  el.innerHTML = `<div style="margin-top:10px;padding:10px;background:#F8FAFF;border-radius:8px;border:1px solid #DBEAFE;font-size:12px;">
+    <div>${nbTravail} jour(s) de travail, ${nbRepos} jour(s) de repos sur la période.</div>
+    <div>${nbPreserves} case(s) déjà exceptionnelle(s) (congé, arrêt, formation, remplacement, VIP...) préservée(s) telle(s) quelle(s).</div>
+    <div style="font-weight:700;margin-top:4px;">${changes.length} case(s) seront posée(s)/corrigée(s).</div>
+    ${changes.length?`<button class="btn btn-primary btn-sm mt-10" onclick="appliquerGenerationPlanning()">✓ Appliquer</button>`:''}
+  </div>`;
+}
+function appliquerGenerationPlanning(){
+  if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
+  if(!_genPlanningStaging || !_genPlanningStaging.changes.length) return;
+  const {empId, site, changes} = _genPlanningStaging;
+  changes.forEach(c=>{ S.planning[`${empId}_${c.dateStr}`] = {type:c.newType, site, note:c.note}; });
+  persist();
+  refreshActiveView();
+  toast(`✓ ${changes.length} case(s) de planning généré(es)`);
+  document.getElementById('genPlanningPreview').innerHTML='';
+  _genPlanningStaging = null;
 }
 
 // Supprime définitivement un employé (fiche + planning + repos fixe associés).
