@@ -2472,8 +2472,11 @@ function renderEmp(resetView=true){
     // Resynchronisation en arrière-plan (toutes les 30s, cf. resyncIfPossible) : on rafraîchit
     // juste les données de l'onglet/la vue déjà ouverts par le salarié, sans le faire sauter
     // vers "Mon planning"/Semaine (bug réel signalé : retour forcé en vue Semaine).
-    if(S.empView==='mois') renderEmpMonth();
-    if(S.empTab==='magasin') renderEmpMagasin();
+    // buildTypeLegend() aussi (pas seulement les cases) : sinon une couleur de type changée par
+    // le gestionnaire sur un autre appareil resterait affichée à l'ancienne dans la légende
+    // jusqu'au prochain vrai changement de vue.
+    if(S.empView==='mois'){ buildTypeLegend('empLegMois'); renderEmpMonth(); }
+    if(S.empTab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
     else if(S.empTab==='comms'){ renderEmpComms(); renderMurListe('murListeEmp',false); }
   }
 }
@@ -4903,7 +4906,10 @@ function analyzeExcelImport(wb, site, inclurePasse){
     // Pas trouvé dans ce magasin : peut-être quelqu'un d'un autre site présent en renfort ici
     // (ex : Franck/Breteuil ou Cédric/Roye qui font parfois une journée à l'Entrepôt) — dans ce
     // cas une présence normale dans ce fichier devient un remplacement sur CE site pour lui.
-    const crossMatch = allEmps.find(e=>e.site!==site && stripAccents(e.name.split(' ')[0]).toUpperCase()===stripAccents(name).toUpperCase());
+    const crossMatches = allEmps.filter(e=>e.site!==site && stripAccents(e.name.split(' ')[0]).toUpperCase()===stripAccents(name).toUpperCase());
+    // Deux employés de sites différents peuvent partager le même prénom — dans ce cas impossible
+    // de savoir lequel cette colonne désigne, on ne devine pas : traité comme non reconnu.
+    const crossMatch = crossMatches.length===1 ? crossMatches[0] : null;
     colMap[c] = crossMatch
       ? {empId:crossMatch.id, label:crossMatch.name+' ('+crossMatch.site+')', firstName:crossMatch.name.split(' ')[0], crossSite:true}
       : {unmatched:true, label:name};
