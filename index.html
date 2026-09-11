@@ -6007,8 +6007,15 @@ window.addEventListener('load', () => {
           const newWorker = reg.installing;
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // Nouvelle version installée : on l'active immédiatement et on recharge
-              newWorker.postMessage({ type: 'SKIP_WAITING' });
+              // Nouvelle version installée : on l'active (ce qui recharge la page, voir
+              // controllerchange plus bas) — mais jamais pendant qu'une fiche/modale est ouverte,
+              // sinon un déploiement recharge la page en pleine saisie et fait perdre la place
+              // à l'utilisateur (instabilité réellement signalée le 2026-09-11).
+              const activerQuandLibre = () => {
+                if (document.querySelector('.modal-overlay.open')) { setTimeout(activerQuandLibre, 3000); return; }
+                newWorker.postMessage({ type: 'SKIP_WAITING' });
+              };
+              activerQuandLibre();
             }
           });
         });
