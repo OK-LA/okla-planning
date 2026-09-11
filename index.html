@@ -1253,8 +1253,19 @@ tbody tr:hover td{background:#FAFAF8;}
           <option value="6">Samedi</option>
         </select>
       </div>
+      <div class="fg">
+        <label>Jours d'école (apprentis — laisser vide si non concerné)</label>
+        <div id="ficheJoursEcole" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="1" style="width:auto;">Lun</label>
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="2" style="width:auto;">Mar</label>
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="3" style="width:auto;">Mer</label>
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="4" style="width:auto;">Jeu</label>
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="5" style="width:auto;">Ven</label>
+          <label style="display:flex;align-items:center;gap:4px;font-weight:400;"><input type="checkbox" value="6" style="width:auto;">Sam</label>
+        </div>
+      </div>
       <div style="font-size:11px;color:var(--muted);margin:8px 0 6px;">
-        Génère le planning normal (travail les autres jours, repos le dimanche + ce jour fixe) sur une période — sans toucher aux congés, arrêts, formations, remplacements ou VIP déjà posés. À utiliser en base, puis ajouter les exceptions (roulement du samedi, réunions...) à la main par-dessus.
+        Génère le planning normal (travail les autres jours, repos le dimanche + le jour fixe, formation les jours d'école) sur une période — sans toucher aux congés, arrêts, formations, remplacements ou VIP déjà posés. À utiliser en base, puis ajouter les exceptions (roulement du samedi, réunions...) à la main par-dessus.
       </div>
       <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
         <div class="fg" style="flex:1;min-width:110px;margin:0;"><label>Du</label><input type="date" id="genPlanningDebut"></div>
@@ -1454,6 +1465,7 @@ async function supaWriteEmployees(employees) {
       ville: e.ville || null,
       code_postal: e.codePostal || null,
       date_embauche: e.dateEmbauche || null,
+      jours_ecole: e.joursEcole || [],
     }));
     const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
       method: 'POST',
@@ -1492,6 +1504,7 @@ async function supaReadEmployees() {
       codePostal: row.code_postal,
       dateEmbauche: row.date_embauche,
       _reposFixeWeekday: row.repos_fixe_weekday,
+      joursEcole: row.jours_ecole || [],
     }));
   } catch(e) { console.warn('supaReadEmployees error', e); return null; }
 }
@@ -3940,6 +3953,9 @@ function openFicheEmp(empId){
   document.getElementById('ficheContratStatut').innerHTML = statut;
   // Repos fixe
   document.getElementById('ficheRepos').value = S.params?.reposFixe?.[emp.id]||'';
+  // Jours d'école (apprentis)
+  const joursEcole = (emp.joursEcole||[]).map(String);
+  document.querySelectorAll('#ficheJoursEcole input[type=checkbox]').forEach(cb=>{ cb.checked = joursEcole.includes(cb.value); });
   const dansUnAn = new Date(); dansUnAn.setFullYear(dansUnAn.getFullYear()+1);
   document.getElementById('genPlanningDebut').value = fmt(new Date());
   document.getElementById('genPlanningFin').value = fmt(dansUnAn);
@@ -4100,6 +4116,8 @@ async function saveFicheEmp(){
   if(!S.params.reposFixe) S.params.reposFixe={};
   if(repos) S.params.reposFixe[empId]=repos;
   else delete S.params.reposFixe[empId];
+  // Jours d'école (apprentis)
+  emp.joursEcole = [...document.querySelectorAll('#ficheJoursEcole input[type=checkbox]:checked')].map(cb=>parseInt(cb.value));
   // Solde CP manuel : la date "valide au" est saisie librement (ex: 31/05, fin de période) —
   // ce n'est plus automatiquement la date du jour, le calcul décompte les congés pris depuis
   // CETTE date, pas depuis aujourd'hui.
@@ -4115,12 +4133,12 @@ async function saveFicheEmp(){
 }
 
 // ── Génération du planning normal depuis le repos hebdomadaire ──
-// Pose "travail" (créneau habituel) les jours normaux et "repos" le dimanche + le jour de repos
-// fixe choisi, sur toute une période. Sert de base fiable (contrairement à un import Excel dont
-// le vocabulaire/les colonnes peuvent être mal reconnus) ; les exceptions (roulement du samedi,
-// réunion, formation, congé...) se posent ensuite à la main par-dessus, jamais écrasées ici :
-// toute case qui n'est pas déjà "repos" ou le créneau habituel est considérée comme une exception
-// volontaire et n'est jamais touchée.
+// Pose "travail" (créneau habituel) les jours normaux, "repos" le dimanche + le jour de repos
+// fixe choisi, et "formation" les jours d'école (apprentis, si définis) sur toute une période.
+// Sert de base fiable (contrairement à un import Excel dont le vocabulaire/les colonnes peuvent
+// être mal reconnus) ; les exceptions (roulement du samedi, réunion, congé...) se posent ensuite
+// à la main par-dessus, jamais écrasées ici : toute case qui n'est pas déjà repos/travail/école
+// est considérée comme une exception volontaire et n'est jamais touchée.
 let _genPlanningStaging = null;
 function analyserGenerationPlanning(){
   const empId = document.getElementById('mFicheEmp').dataset.empId;
@@ -4134,8 +4152,11 @@ function analyserGenerationPlanning(){
   const siteNonSauve = document.getElementById('ficheSite').value !== emp.site;
   const slotNonSauve = document.getElementById('ficheSlot').value !== (emp.slot||'magasin');
   const reposNonSauve = document.getElementById('ficheRepos').value !== String(S.params?.reposFixe?.[emp.id]||'');
-  if(siteNonSauve || slotNonSauve || reposNonSauve){
-    el.innerHTML = '<div style="color:#DC2626;font-size:12px;margin-top:8px;">⚠️ Enregistrez d\'abord la fiche (bouton "Enregistrer" en bas) — le site, le créneau ou le repos fixe ont été modifiés mais pas encore sauvegardés.</div>';
+  const liveJoursEcole = [...document.querySelectorAll('#ficheJoursEcole input[type=checkbox]:checked')].map(cb=>parseInt(cb.value)).sort().join(',');
+  const savedJoursEcole = (emp.joursEcole||[]).map(Number).sort().join(',');
+  const joursEcoleNonSauve = liveJoursEcole !== savedJoursEcole;
+  if(siteNonSauve || slotNonSauve || reposNonSauve || joursEcoleNonSauve){
+    el.innerHTML = '<div style="color:#DC2626;font-size:12px;margin-top:8px;">⚠️ Enregistrez d\'abord la fiche (bouton "Enregistrer" en bas) — le site, le créneau, le repos fixe ou les jours d\'école ont été modifiés mais pas encore sauvegardés.</div>';
     return;
   }
   const debut = document.getElementById('genPlanningDebut').value;
@@ -4145,16 +4166,28 @@ function analyserGenerationPlanning(){
   const site = emp.site;
   const slot = emp.slot||'magasin';
   const estRepos = (d) => d.getDay()===0 || (reposFixeVal && parseInt(reposFixeVal)===d.getDay());
+  // Jours d'école (apprentis) : uniquement s'ils sont définis pour cet employé — sinon 'formation'
+  // reste traité comme une exception ponctuelle (ex: un salarié classique envoyé en formation un
+  // jour donné), qu'on ne veut surtout pas écraser en la confondant avec un rythme hebdomadaire.
+  const joursEcole = (emp.joursEcole||[]).map(Number);
+  const aJoursEcole = joursEcole.length>0;
+  const estJourEcole = (d) => aJoursEcole && joursEcole.includes(d.getDay());
+  const typesGenerablesBase = ['off','magasin','entrepotA','entrepotB'];
 
-  let nbTravail=0, nbRepos=0, nbPreserves=0, changes=[];
+  let nbTravail=0, nbRepos=0, nbEcole=0, nbPreserves=0, changes=[];
   let cur = new Date(debut+'T12:00'); const last = new Date(fin+'T12:00');
   while(cur<=last){
     const dStr = fmt(cur);
-    const nouveauType = estRepos(cur) ? 'off' : slot;
-    if(nouveauType==='off') nbRepos++; else nbTravail++;
+    const jourEcole = estJourEcole(cur);
+    const nouveauType = estRepos(cur) ? 'off' : (jourEcole ? 'formation' : slot);
+    if(nouveauType==='off') nbRepos++; else if(nouveauType==='formation') nbEcole++; else nbTravail++;
     const existant = S.planning[`${empId}_${dStr}`];
     const typeActuel = existant?.type || 'off';
-    const estException = existant && !['off','magasin','entrepotA','entrepotB'].includes(typeActuel);
+    // 'formation' n'est generable/corrigeable que sur un JOUR D'ÉCOLE réel — sinon une formation
+    // ponctuelle (salarié envoyé en stage un jour qui ne correspond à aucun rythme hebdomadaire)
+    // resterait exposée à être écrasée dès qu'un seul jour d'école est défini pour l'employé.
+    const typesGenerables = jourEcole ? [...typesGenerablesBase,'formation'] : typesGenerablesBase;
+    const estException = existant && !typesGenerables.includes(typeActuel);
     if(estException){ nbPreserves++; }
     else if(typeActuel!==nouveauType || (existant?.site||site)!==site){
       changes.push({dateStr:dStr, newType:nouveauType, oldType:typeActuel, note:existant?.note||''});
@@ -4163,8 +4196,8 @@ function analyserGenerationPlanning(){
   }
   _genPlanningStaging = {empId, site, changes};
   el.innerHTML = `<div style="margin-top:10px;padding:10px;background:#F8FAFF;border-radius:8px;border:1px solid #DBEAFE;font-size:12px;">
-    <div>${nbTravail} jour(s) de travail, ${nbRepos} jour(s) de repos sur la période.</div>
-    <div>${nbPreserves} case(s) déjà exceptionnelle(s) (congé, arrêt, formation, remplacement, VIP...) préservée(s) telle(s) quelle(s).</div>
+    <div>${nbTravail} jour(s) de travail, ${nbRepos} jour(s) de repos${aJoursEcole?`, ${nbEcole} jour(s) d'école`:''} sur la période.</div>
+    <div>${nbPreserves} case(s) déjà exceptionnelle(s) (congé, arrêt${aJoursEcole?'':', formation'}, remplacement, VIP...) préservée(s) telle(s) quelle(s).</div>
     <div style="font-weight:700;margin-top:4px;">${changes.length} case(s) seront posée(s)/corrigée(s).</div>
     ${changes.length?`<button class="btn btn-primary btn-sm mt-10" onclick="appliquerGenerationPlanning()">✓ Appliquer</button>`:''}
   </div>`;
