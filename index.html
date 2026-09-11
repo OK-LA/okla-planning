@@ -832,6 +832,10 @@ tbody tr:hover td{background:#FAFAF8;}
             <option value="Roye">Roye</option>
           </select>
         </div>
+        <div class="fg" style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="excelImportInclurePasse" style="width:auto;">
+          <label for="excelImportInclurePasse" style="margin:0;">Inclure aussi les dates déjà passées (correction rétroactive, ex : un jour de cours resté marqué CP)</label>
+        </div>
         <div class="fg">
           <input type="file" id="excelImportFile" accept=".xlsx,.xls" onchange="handleExcelFile(this)">
         </div>
@@ -877,11 +881,22 @@ tbody tr:hover td{background:#FAFAF8;}
           <input type="date" id="evInterneDate" style="flex:1;min-width:120px;">
           <input type="text" id="evInterneLabel" placeholder="Description..." style="flex:2;min-width:150px;">
         </div>
+        <div class="fg" style="margin-top:8px;display:flex;gap:8px;">
+          <div style="flex:1;"><label>Heure de début (optionnel)</label>
+            <input type="time" id="evInterneHeureDebut">
+          </div>
+          <div style="flex:1;"><label>Heure de fin (optionnel)</label>
+            <input type="time" id="evInterneHeureFin">
+          </div>
+        </div>
         <div class="fg" style="margin-top:8px;">
           <label>Participants (laisser vide = tous les employés)</label>
           <select id="evInterneParticipants" multiple size="5" style="height:auto;"></select>
         </div>
-        <button class="btn btn-primary btn-sm mt-10" onclick="ajouterEvInterne()">+ Ajouter</button>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-primary btn-sm" id="evInterneSaveBtn" onclick="ajouterEvInterne()">+ Ajouter</button>
+          <button class="btn btn-ghost btn-sm" id="evInterneCancelBtn" style="display:none;" onclick="annulerEditionEvInterne()">Annuler</button>
+        </div>
       </div>
       <div class="param-card">
         <h3>📣 Planning Communication OK-LA</h3>
@@ -1269,6 +1284,7 @@ function cellShortLabel(type,site){
   return TYPES.find(t=>t.key===type)?.short||'';
 }
 const EV_INTERNE_LABELS={reunion:'Réunion',formation:'Formation',livraison:'Livraison',autre:'Autre'};
+function evInterneTooltipTxt(e){ return EV_INTERNE_ICONS[e.type]+' '+e.label+(e.heureDebut?' ('+e.heureDebut+(e.heureFin?'–'+e.heureFin:'')+')':''); }
 const JOURS_C=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const MGR={code:'ADMIN',name:'Gestionnaire'};
 
@@ -1375,17 +1391,11 @@ async function supaWrite(section, data) {
 async function supaWriteEmployees(employees) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — jamais de suppression basée sur l'instantané local (persist()
+    // envoie toujours TOUT S.employees, et un onglet resté ouvert avec une copie en
+    // mémoire incomplète effacerait silencieusement les employés créés ailleurs entre-temps).
+    // Un employé qui part est archivé (active=false), jamais supprimé de la table — voir deleteEmp().
     const ids = (employees || []).map(e => e.id).filter(Boolean);
-    // Garde-fou : ne jamais vider la table sur une liste vide (protège contre un bug
-    // ailleurs qui viderait S.employees par accident).
-    if (ids.length) {
-      const idList = ids.map(id => encodeURIComponent(id)).join(',');
-      const rDel = await fetch(`${supaBase()}/rest/v1/employees?id=not.in.(${idList})`, {
-        method: 'DELETE',
-        headers: supaHeaders({'Prefer': 'return=minimal'})
-      });
-      if(!rDel.ok) console.warn('supaWriteEmployees delete error', rDel.status, await rDel.text());
-    }
     if (!ids.length) return true;
     const rows = employees.map(e => ({
       id: e.id,
@@ -1454,15 +1464,17 @@ async function supaReadEmployees() {
 async function supaWritePlanning(planning) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — jamais de suppression basée sur l'instantané local. L'ancienne
+    // version supprimait toutes les lignes des employés présents dans `planning` avant de
+    // réinsérer : un onglet resté ouvert (ou pas encore complètement rechargé) avec une copie
+    // en mémoire incomplète pour un employé effaçait alors silencieusement ses vraies données
+    // côté serveur, ne laissant que les quelques entrées connues de cet onglet (cause du
+    // planning de Steven/Corentin/Marjorie/Franck vidé le 2026-09-11). Aucune case de planning
+    // n'est jamais réellement "supprimée" dans le code (toujours réassignée à type:'off') —
+    // seul importPlanningReel() purge une plage de dates, et le fait via un appel dédié
+    // ci-dessous plutôt que de dépendre de cette fonction.
     const entries = Object.entries(planning || {});
-    if (!entries.length) return true; // garde-fou : jamais vider sur une map vide
-    const empIds = [...new Set(entries.map(([key]) => key.slice(0, -11)))];
-    const idList = empIds.map(id => encodeURIComponent(id)).join(',');
-    const rDel = await fetch(`${supaBase()}/rest/v1/planning_entries?employee_id=in.(${idList})`, {
-      method: 'DELETE',
-      headers: supaHeaders({'Prefer': 'return=minimal'})
-    });
-    if(!rDel.ok) console.warn('supaWritePlanning delete error', rDel.status, await rDel.text());
+    if (!entries.length) return true;
     const rows = entries.map(([key, val]) => ({
       employee_id: key.slice(0, -11),
       entry_date: key.slice(-10),
@@ -1513,13 +1525,11 @@ async function supaReadPlanning() {
 async function supaWriteRequests(requests) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — les demandes ne sont jamais supprimées dans le code (seul leur
+    // statut change), donc aucune suppression basée sur l'instantané local n'est nécessaire
+    // ni sûre (voir le commentaire équivalent dans supaWritePlanning).
     const ids = (requests || []).map(r => r.id).filter(v => v != null);
     if (!ids.length) return true;
-    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
-    const rDel = await fetch(`${supaBase()}/rest/v1/requests?id=not.in.(${idList})`, {
-      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-    });
-    if(!rDel.ok) console.warn('supaWriteRequests delete error', rDel.status, await rDel.text());
     const rows = requests.map(r => ({
       id: r.id,
       type: r.type,
@@ -1566,13 +1576,11 @@ async function supaReadRequests() {
 async function supaWriteAbsences(absences) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — les absences ne sont jamais supprimées dans le code (seul leur
+    // champ resolved change), donc aucune suppression basée sur l'instantané local n'est
+    // nécessaire ni sûre (voir le commentaire équivalent dans supaWritePlanning).
     const ids = (absences || []).map(a => a.id).filter(v => v != null);
     if (!ids.length) return true;
-    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
-    const rDel = await fetch(`${supaBase()}/rest/v1/absences?id=not.in.(${idList})`, {
-      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-    });
-    if(!rDel.ok) console.warn('supaWriteAbsences delete error', rDel.status, await rDel.text());
     const rows = absences.map(a => ({
       id: a.id,
       emp_id: a.empId,
@@ -1614,13 +1622,12 @@ async function supaReadAbsences() {
 async function supaWriteEventTypes(eventTypes) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — la suppression d'un type d'événement est un geste explicite et rare
+    // (voir supprimerTypeEvenement, qui envoie son propre DELETE ciblé par id) plutôt qu'une
+    // réconciliation "tout ce qui n'est pas dans ma copie locale" à chaque persist(), dangereuse
+    // si cette copie est incomplète (voir le commentaire équivalent dans supaWritePlanning).
     const ids = (eventTypes || []).map(t => t.id).filter(Boolean);
     if (!ids.length) return true;
-    const idList = ids.map(id => encodeURIComponent(id)).join(',');
-    const rDel = await fetch(`${supaBase()}/rest/v1/event_types?id=not.in.(${idList})`, {
-      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-    });
-    if(!rDel.ok) console.warn('supaWriteEventTypes delete error', rDel.status, await rDel.text());
     const rows = eventTypes.map(t => ({ id: t.id, label: t.label, color: t.color, is_vacances: !!t.isVacances }));
     const r2 = await fetch(`${supaBase()}/rest/v1/event_types?on_conflict=id`, {
       method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
@@ -1645,13 +1652,12 @@ async function supaReadEventTypes() {
 async function supaWriteEvents(events) {
   if(!_supaUrl || !_supaKey) return false;
   try {
+    // Upsert seulement — la suppression d'un événement est un geste explicite et rare
+    // (voir supprimerEvenement et supprimerTypeEvenement, qui envoient leur propre DELETE
+    // ciblé par id) plutôt qu'une réconciliation à chaque persist() (voir le commentaire
+    // équivalent dans supaWritePlanning).
     const ids = (events || []).map(e => e.id).filter(v => v != null);
     if (!ids.length) return true;
-    const idList = ids.map(id => encodeURIComponent(String(id))).join(',');
-    const rDel = await fetch(`${supaBase()}/rest/v1/events?id=not.in.(${idList})`, {
-      method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-    });
-    if(!rDel.ok) console.warn('supaWriteEvents delete error', rDel.status, await rDel.text());
     const rows = events.map(ev => ({
       id: ev.id, type_id: ev.typeId, date_debut: ev.dateDebut, date_fin: ev.dateFin,
       portee: ev.portee, cible: ev.cible || null,
@@ -1796,16 +1802,12 @@ async function supaWriteParams(params) {
       }
     }
 
-    // internal_events (evInternes) — upsert + suppression
+    // internal_events (evInternes) — upsert seulement ; la suppression est ciblée par id
+    // directement dans supprimerEvInterne() (voir le commentaire dans supaWritePlanning).
     const evInternes = params.evInternes || [];
     const ieIds = evInternes.map(ie => ie.id).filter(v => v != null);
     if (ieIds.length) {
-      const idList = ieIds.map(id => encodeURIComponent(String(id))).join(',');
-      const rDelIe = await fetch(`${supaBase()}/rest/v1/internal_events?id=not.in.(${idList})`, {
-        method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-      });
-      if(!rDelIe.ok) console.warn('supaWriteParams internal_events delete error', rDelIe.status, await rDelIe.text());
-      const ieRows = evInternes.map(ie => ({ id: ie.id, type: ie.type, event_date: ie.date, label: ie.label || null, participants: ie.participants || [] }));
+      const ieRows = evInternes.map(ie => ({ id: ie.id, type: ie.type, event_date: ie.date, label: ie.label || null, participants: ie.participants || [], heure_debut: ie.heureDebut || null, heure_fin: ie.heureFin || null }));
       const rIe = await fetch(`${supaBase()}/rest/v1/internal_events?on_conflict=id`, {
         method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
         body: JSON.stringify(ieRows)
@@ -1950,7 +1952,7 @@ async function supaReadParams(empRows) {
       reglesConges: { quota: app.regles_conges_quota, dateAlerte: app.regles_conges_date_alerte || '' },
       samSpeciaux: app.sam_speciaux || { premiers: true, soldes: true },
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
-      evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [] })),
+      evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
     };
   } catch(e) { console.warn('supaReadParams error', e); return null; }
@@ -2445,7 +2447,7 @@ function renderEmpWeek(){
     const dLbl=cellShortLabel(type,site);
     const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};display:flex;align-items:center;justify-content:center;">${dLbl?`<span style="font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${dLbl}</span>`:''}</div>`;
     const evInternesJourW=getEvInternesDuJourPourEmp(emp.id,fmt(d));
-    const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;" title="${evInternesJourW.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${evInternesJourW.map(e=>EV_INTERNE_LABELS[e.type]||'Autre').join(' + ')}</div>`:'';
+    const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;" title="${evInternesJourW.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${evInternesJourW.map(e=>(EV_INTERNE_LABELS[e.type]||'Autre')+(e.heureDebut?' '+e.heureDebut:'')).join(' + ')}</div>`:'';
     h+=`<div class="day-row${isT?' today-row':''}">
       <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${evBadgeW}
     </div>`;
@@ -2501,7 +2503,7 @@ function renderEmpMonth(){
     let bar='';let typeLblEM='';
     if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;const lbl=cellShortLabel(type,site);if(lbl)typeLblEM=`<div style="position:absolute;top:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:${c.color};text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lbl}</div>`;}
     const evInternesJourEM=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
-    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourEM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
+    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourEM.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;">
       <div class="cnum">${cur.getDate()}</div>${bar}${typeLblEM}${evBadgeEM}</div>`;
     cur=addDays(cur,1);
@@ -3013,7 +3015,7 @@ function renderWeek(){
           :`<div class="sb${type==='vip'?' vip':''}${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${getColor(type,empSite).color};border-color:${getColor(type,empSite).color};" onclick="openShiftMod('${emp.id}','${dStr}')">${remLabel}</div>`;
         const evInternesJour=getEvInternesDuJourPourEmp(emp.id,dStr);
         const evInterneBadge=evInternesJour.length
-          ?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJour.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJour[0].type]||'Autre'}</div>`
+          ?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJour.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJour[0].type]||'Autre'}</div>`
           :'';
         tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}position:relative;">${cell}${evInterneBadge}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
@@ -3189,7 +3191,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       }
       const evInternesJourM=getEvInternesDuJourPourEmp(emp.id,dStr);
       const evInterneBadgeM=evInternesJourM.length
-        ?`<div style="position:absolute;bottom:0;left:0;right:0;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:0 1px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJourM.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourM[0].type]||'Autre'}</div>`
+        ?`<div style="position:absolute;bottom:0;left:0;right:0;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:0 1px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJourM.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourM[0].type]||'Autre'}</div>`
         :'';
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);position:relative;">${cell}${evInterneBadgeM}</td>`;
     });
@@ -3263,7 +3265,7 @@ function renderMonthEmp(ref,today){
     let bar='';let typeLblE='';
     if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;const lbl=cellShortLabel(type,site);if(lbl)typeLblE=`<div style="position:absolute;top:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:${c.color};text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lbl}</div>`;}
     const evInternesJourE=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
-    const evBadgeE=evInternesJourE.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourE.map(e=>EV_INTERNE_ICONS[e.type]+' '+e.label).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourE[0].type]||'Autre'}</div>`:'';
+    const evBadgeE=evInternesJourE.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourE.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourE[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
       <div class="cnum">${cur.getDate()}</div>${bar}${typeLblE}${evBadgeE}</div>`;
     cur=addDays(cur,1);
@@ -3399,7 +3401,15 @@ async function saveShiftPeriode(){
   }
   if(!jours.length){toast('Aucun jour à appliquer sur cette période');return;}
 
-  jours.forEach(dStr=>{ S.planning[`${empId}_${dStr}`]={type:S.editType,site:siteEffectif,note}; });
+  jours.forEach(dStr=>{
+    // Comme pour la validation d'une demande de congé (validerConge) : le jour de repos fixe
+    // de l'employé reste "repos" pendant une période de congé, il n'est jamais décompté en CP.
+    if(S.editType==='conge' && isJourRepos(emp, new Date(dStr+'T12:00'))){
+      S.planning[`${empId}_${dStr}`]={type:'off',site:siteEffectif,note:''};
+    } else {
+      S.planning[`${empId}_${dStr}`]={type:S.editType,site:siteEffectif,note};
+    }
+  });
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
@@ -4224,11 +4234,17 @@ function ajouterTypeEvenement(){
   toast(`✓ ${nom.trim()} ajouté`);
 }
 
-function supprimerTypeEvenement(idx){
+async function supprimerTypeEvenement(idx){
   const ev = S.eventTypes[idx];
   if(!ev) return;
   S.eventTypes.splice(idx,1);
   S.events = (S.events||[]).filter(e => e.typeId !== ev.id);
+  // Suppression ciblée côté serveur (par id), plutôt que de compter sur persist() pour
+  // réconcilier — supaWriteEventTypes/supaWriteEvents ne suppriment plus rien eux-mêmes.
+  if(_supaUrl && _supaKey){
+    fetch(`${supaBase()}/rest/v1/event_types?id=eq.${encodeURIComponent(ev.id)}`, {method:'DELETE', headers:supaHeaders({'Prefer':'return=minimal'})}).catch(()=>{});
+    fetch(`${supaBase()}/rest/v1/events?type_id=eq.${encodeURIComponent(ev.id)}`, {method:'DELETE', headers:supaHeaders({'Prefer':'return=minimal'})}).catch(()=>{});
+  }
   persist();
   renderParamEvents();
   refreshActiveView();
@@ -4493,6 +4509,10 @@ function renderEvListeExistants(){
 }
 async function supprimerEvenement(evId){
   S.events = (S.events||[]).filter(e=>e.id!==evId);
+  // Suppression ciblée côté serveur (par id) — supaWriteEvents ne supprime plus rien lui-même.
+  if(_supaUrl && _supaKey){
+    fetch(`${supaBase()}/rest/v1/events?id=eq.${encodeURIComponent(evId)}`, {method:'DELETE', headers:supaHeaders({'Prefer':'return=minimal'})}).catch(()=>{});
+  }
   persist();
   renderEvListeExistants();
   refreshActiveView();
@@ -4676,6 +4696,15 @@ async function importPlanningReel(){
     const dateStr = key.split('_').slice(-1)[0];
     if(dateStr >= startDate && dateStr <= endDate) delete S.planning[key];
   });
+  // Purge aussi côté serveur (par plage de dates explicite) : supaWritePlanning ne supprime
+  // plus rien lui-même en écriture normale, cette fonction gère donc son propre cas particulier.
+  if(_supaUrl && _supaKey){
+    try {
+      await fetch(`${supaBase()}/rest/v1/planning_entries?entry_date=gte.${startDate}&entry_date=lte.${endDate}`, {
+        method:'DELETE', headers: supaHeaders({'Prefer':'return=minimal'})
+      });
+    } catch(e){ console.warn('importPlanningReel: purge serveur échouée', e); }
+  }
 
   // 2. Appliquer les nouvelles données en résolvant CODE -> id réel
   Object.entries(PLANNING_IMPORT_DATA).forEach(([key, val]) => {
@@ -4719,11 +4748,12 @@ function handleExcelFile(input){
   const site = document.getElementById('excelImportSite').value;
   if(!site){ toast('⚠️ Choisis d\'abord le magasin concerné par ce fichier'); input.value=''; return; }
   if(typeof XLSX==='undefined'){ toast('❌ La librairie de lecture Excel ne s\'est pas chargée (vérifie ta connexion internet)'); input.value=''; return; }
+  const inclurePasse = document.getElementById('excelImportInclurePasse')?.checked||false;
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
       const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
-      analyzeExcelImport(wb, site);
+      analyzeExcelImport(wb, site, inclurePasse);
     } catch(err) {
       console.error(err);
       toast('❌ Erreur de lecture du fichier : '+err.message);
@@ -4760,7 +4790,7 @@ function mapExcelCellValue(rawValue, site, empFirstName){
   return null; // vraiment pas reconnu
 }
 
-function analyzeExcelImport(wb, site){
+function analyzeExcelImport(wb, site, inclurePasse){
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
   let headerRowIdx = -1;
@@ -4792,7 +4822,7 @@ function analyzeExcelImport(wb, site){
     const dateVal = row[0];
     if(!(dateVal instanceof Date)) continue;
     const dateStr = fmt(dateVal);
-    if(dateStr < todayStr) continue; // on ne touche jamais aux dates déjà passées
+    if(!inclurePasse && dateStr < todayStr) continue; // par défaut, on ne touche jamais aux dates déjà passées
     for(const cStr of Object.keys(colMap)){
       const info = colMap[cStr];
       const raw = row[Number(cStr)];
@@ -5469,11 +5499,17 @@ async function validerConge(id) {
   }
   req.status = 'approved';
   // Marquer dans le planning
+  const emp = S.employees.find(e => e.id === req.empId);
   let cur = new Date(req.dateDebut);
   while (cur <= new Date(req.dateFin)) {
     if (JOURS_OUVRES.includes(cur.getDay())) {
-      const emp = S.employees.find(e => e.id === req.empId);
-      S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
+      // Le jour de repos fixe de l'employé reste "repos" : il ne travaille pas ce jour-là de
+      // toute façon, donc il ne doit pas être décompté comme un jour de CP consommé.
+      if (emp && isJourRepos(emp, cur)) {
+        S.planning[`${req.empId}_${fmt(cur)}`] = {type:'off', site:emp?.site||'', note:''};
+      } else {
+        S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
+      }
     }
     cur = addDays(cur, 1);
   }
@@ -5857,6 +5893,8 @@ function renderCommPlanning(){
   el.innerHTML=h;
 }
 
+let _editingEvInterneId=null;
+
 function renderEvInternes(){
   const el=document.getElementById('evInternesList');
   if(!el) return;
@@ -5869,35 +5907,80 @@ function renderEvInternes(){
     const partLabel=parts.length
       ? parts.map(id=>S.employees.find(emp=>emp.id===id)?.name.split(' ')[0]).filter(Boolean).join(', ')
       : 'Tous les employés';
+    const horaire=e.heureDebut?` · ${e.heureDebut}${e.heureFin?'–'+e.heureFin:''}`:'';
     return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;">
     <span style="font-size:14px;">${EV_INTERNE_ICONS[e.type]||'📌'}</span>
-    <div style="flex:1;font-size:12px;"><strong>${e.label}</strong><br><span style="color:var(--muted);">${fmtFR(new Date(e.date+'T12:00'),{weekday:'short',day:'numeric',month:'long',year:'numeric'})} · ${partLabel}</span></div>
+    <div style="flex:1;font-size:12px;"><strong>${e.label}</strong><br><span style="color:var(--muted);">${fmtFR(new Date(e.date+'T12:00'),{weekday:'short',day:'numeric',month:'long',year:'numeric'})}${horaire} · ${partLabel}</span></div>
+    <button class="btn-del" onclick="editerEvInterne(${i})" title="Modifier" style="background:none;border:none;cursor:pointer;font-size:14px;">✏️</button>
     <button class="btn-del" onclick="supprimerEvInterne(${i})" title="Supprimer">✕</button>
   </div>`;
   }).join('');
+}
+
+function editerEvInterne(i){
+  const evs=(S.params.evInternes||[]).sort((a,b)=>a.date.localeCompare(b.date));
+  const ev=evs[i];
+  if(!ev) return;
+  _editingEvInterneId=ev.id;
+  document.getElementById('evInterneType').value=ev.type;
+  document.getElementById('evInterneDate').value=ev.date;
+  document.getElementById('evInterneLabel').value=ev.label;
+  document.getElementById('evInterneHeureDebut').value=ev.heureDebut||'';
+  document.getElementById('evInterneHeureFin').value=ev.heureFin||'';
+  const partSel=document.getElementById('evInterneParticipants');
+  if(partSel) [...partSel.options].forEach(o=>o.selected=(ev.participants||[]).includes(o.value));
+  document.getElementById('evInterneSaveBtn').textContent='✓ Enregistrer les modifications';
+  document.getElementById('evInterneCancelBtn').style.display='inline-block';
+  document.getElementById('evInterneLabel').scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+function annulerEditionEvInterne(){
+  _editingEvInterneId=null;
+  document.getElementById('evInterneLabel').value='';
+  document.getElementById('evInterneHeureDebut').value='';
+  document.getElementById('evInterneHeureFin').value='';
+  const partSel=document.getElementById('evInterneParticipants');
+  if(partSel) [...partSel.options].forEach(o=>o.selected=false);
+  document.getElementById('evInterneSaveBtn').textContent='+ Ajouter';
+  document.getElementById('evInterneCancelBtn').style.display='none';
 }
 
 function ajouterEvInterne(){
   const type=document.getElementById('evInterneType')?.value||'autre';
   const date=document.getElementById('evInterneDate')?.value;
   const label=document.getElementById('evInterneLabel')?.value?.trim();
+  const heureDebut=document.getElementById('evInterneHeureDebut')?.value||'';
+  const heureFin=document.getElementById('evInterneHeureFin')?.value||'';
   if(!date||!label){toast('Remplissez la date et la description');return;}
   const partSel=document.getElementById('evInterneParticipants');
   const participants=partSel?[...partSel.selectedOptions].map(o=>o.value):[];
   if(!S.params.evInternes) S.params.evInternes=[];
-  S.params.evInternes.push({type,date,label,participants,id:Date.now()});
+  const wasEditing=_editingEvInterneId!=null;
+  if(wasEditing){
+    const ev=S.params.evInternes.find(e=>e.id===_editingEvInterneId);
+    if(ev){ Object.assign(ev,{type,date,label,heureDebut,heureFin,participants}); }
+    annulerEditionEvInterne();
+  } else {
+    S.params.evInternes.push({type,date,label,heureDebut,heureFin,participants,id:Date.now()});
+    document.getElementById('evInterneLabel').value='';
+    if(partSel) [...partSel.options].forEach(o=>o.selected=false);
+  }
   S.params.evInternes.sort((a,b)=>a.date.localeCompare(b.date));
   persist();
-  document.getElementById('evInterneLabel').value='';
-  if(partSel) [...partSel.options].forEach(o=>o.selected=false);
   renderEvInternes();
   refreshActiveView();
-  toast('✓ Événement ajouté');
+  toast(wasEditing?'✓ Événement modifié':'✓ Événement ajouté');
 }
 
 function supprimerEvInterne(i){
   if(!S.params.evInternes) return;
+  const ie = S.params.evInternes[i];
   S.params.evInternes.splice(i,1);
+  // Suppression ciblée côté serveur (par id) — supaWriteParams ne supprime plus les
+  // internal_events absents de l'instantané local (voir le commentaire dans supaWritePlanning).
+  if(ie && _supaUrl && _supaKey){
+    fetch(`${supaBase()}/rest/v1/internal_events?id=eq.${encodeURIComponent(ie.id)}`, {method:'DELETE', headers:supaHeaders({'Prefer':'return=minimal'})}).catch(()=>{});
+  }
   persist();
   renderEvInternes();
   renderEmpComms();
