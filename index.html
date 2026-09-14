@@ -1045,6 +1045,17 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL INFOS ÉVÉNEMENT INTERNE (clic sur un badge réunion/formation/livraison/autre) -->
+<div class="modal-overlay" id="mEvInfo">
+  <div class="modal" style="max-width:340px;">
+    <div class="modal-title">📌 Événement</div>
+    <div id="evInfoBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-save" onclick="closeModal('mEvInfo')">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL SIGNALEMENT ABSENCE — SALARIÉ -->
 <div class="modal-overlay" id="mAbsEmp">
   <div class="modal">
@@ -2389,6 +2400,22 @@ function getEvInternesDuJourPourEmp(empId, dateStr){
     e.date===dateStr && (!e.participants || !e.participants.length || e.participants.includes(empId))
   );
 }
+// Détail au clic sur un badge événement interne (réunion/formation/livraison/autre) du planning —
+// le survol (title) ne fonctionne pas au tactile, d'où cette popup cliquable.
+function voirEvInternesJour(empId, dateStr){
+  const evs=getEvInternesDuJourPourEmp(empId, dateStr);
+  if(!evs.length) return;
+  const dLong=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('evInfoBody').innerHTML=evs.map(e=>{
+    const horaire=e.heureDebut?` à ${e.heureDebut}${e.heureFin?'–'+e.heureFin:''}`:'';
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+      <span style="font-size:20px;">${EV_INTERNE_ICONS[e.type]||'📌'}</span>
+      <div><div style="font-weight:700;font-size:14px;">${e.label||EV_INTERNE_LABELS[e.type]||'Autre'}</div>
+      <div style="font-size:12px;color:var(--muted);">${dLong}${horaire}</div></div>
+    </div>`;
+  }).join('');
+  openModal('mEvInfo');
+}
 function renderPastillesDate(dateStr){
   const evs=getEvenementsDuJour(dateStr);
   if(!evs.length) return '';
@@ -2632,7 +2659,7 @@ function renderEmpWeek(){
     const dLbl=cellShortLabel(type,site);
     const bar=type==='off'?`<div class="dbar off"></div>`:`<div class="dbar" style="background:${getColor(type,site).color};display:flex;align-items:center;justify-content:center;">${dLbl?`<span style="font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${dLbl}</span>`:''}</div>`;
     const evInternesJourW=getEvInternesDuJourPourEmp(emp.id,fmt(d));
-    const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;" title="${evInternesJourW.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${evInternesJourW.map(e=>(EV_INTERNE_LABELS[e.type]||'Autre')+(e.heureDebut?' '+e.heureDebut:'')).join(' + ')}</div>`:'';
+    const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;cursor:pointer;" title="${evInternesJourW.map(e=>evInterneTooltipTxt(e)).join(' · ')}" onclick="voirEvInternesJour('${emp.id}','${fmt(d)}')">${evInternesJourW.map(e=>(EV_INTERNE_LABELS[e.type]||'Autre')+(e.heureDebut?' '+e.heureDebut:'')).join(' + ')}</div>`:'';
     h+=`<div class="day-row${isT?' today-row':''}">
       <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${evBadgeW}
     </div>`;
@@ -2688,7 +2715,7 @@ function renderEmpMonth(){
     let bar='';let typeLblEM='';
     if(type!=='off'&&thisM){const c=getColor(type,site);bar=`<div class="cbar" style="background:${c.color};"></div>`;const lbl=cellShortLabel(type,site);if(lbl)typeLblEM=`<div style="position:absolute;top:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:${c.color};text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${lbl}</div>`;}
     const evInternesJourEM=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
-    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourEM.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
+    const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="${evInternesJourEM.map(e=>evInterneTooltipTxt(e)).join(' · ')}" onclick="event.stopPropagation();voirEvInternesJour('${emp.id}','${fmt(cur)}')">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;">
       <div class="cnum">${cur.getDate()}</div>${bar}${typeLblEM}${evBadgeEM}</div>`;
     cur=addDays(cur,1);
@@ -3424,7 +3451,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres, readOnly=false){
       }
       const evInternesJourM=getEvInternesDuJourPourEmp(emp.id,dStr);
       const evInterneBadgeM=evInternesJourM.length
-        ?`<div style="position:absolute;bottom:0;left:0;right:0;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:0 1px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJourM.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourM[0].type]||'Autre'}</div>`
+        ?`<div style="position:absolute;bottom:0;left:0;right:0;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:0 1px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${readOnly?'cursor:pointer;':'pointer-events:none;'}" title="${evInternesJourM.map(e=>evInterneTooltipTxt(e)).join(' · ')}"${readOnly?` onclick="voirEvInternesJour('${emp.id}','${dStr}')"`:''}>${EV_INTERNE_LABELS[evInternesJourM[0].type]||'Autre'}</div>`
         :'';
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);position:relative;">${cell}${evInterneBadgeM}</td>`;
     });
