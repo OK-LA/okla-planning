@@ -414,12 +414,29 @@ tbody tr:hover td{background:#FAFAF8;}
     <!-- MON MAGASIN (vue équipe) -->
     <div id="empTabContentMagasin" style="display:none;">
       <div class="view-bar">
-        <button class="btn btn-ghost btn-sm" onclick="eqM(-1)">←</button>
-        <div class="week-label" id="eqMLbl"></div>
-        <button class="btn btn-ghost btn-sm" onclick="eqM(1)">→</button>
+        <div class="vtoggle" style="margin-right:8px;">
+          <button class="vbtn active" id="empMagVSemBtn" onclick="setEmpMagasinView('sem')">Semaine</button>
+          <button class="vbtn" id="empMagVMoisBtn" onclick="setEmpMagasinView('mois')">Mois</button>
+        </div>
       </div>
-      <div id="empMagasinView"></div>
-      <div class="legend mt-10" id="empLegMagasin"></div>
+      <div id="empMagVSemaine">
+        <div class="view-bar">
+          <button class="btn btn-ghost btn-sm" onclick="eqM(-1)">←</button>
+          <div class="week-label" id="eqMLbl"></div>
+          <button class="btn btn-ghost btn-sm" onclick="eqM(1)">→</button>
+        </div>
+        <div id="empMagasinView"></div>
+        <div class="legend mt-10" id="empLegMagasin"></div>
+      </div>
+      <div id="empMagVMois" style="display:none;">
+        <div class="view-bar">
+          <button class="btn btn-ghost btn-sm" onclick="eqMMois(-1)">←</button>
+          <div class="week-label" id="eqMMoisLbl"></div>
+          <button class="btn btn-ghost btn-sm" onclick="eqMMois(1)">→</button>
+        </div>
+        <div class="site-month-wrap" id="empMagasinMoisView"></div>
+        <div class="legend mt-10" id="empLegMagasinMois"></div>
+      </div>
     </div>
 
     <!-- COMMUNICATIONS (vue salarié) -->
@@ -2057,7 +2074,7 @@ const S={
   requests:lsGet('requests',[]),
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
-  eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,empTab:'perso',empView:'sem',
+  eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,eqMO:0,empTab:'perso',empView:'sem',empMagView:'sem',
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
@@ -2495,7 +2512,7 @@ function renderEmp(resetView=true){
     // le gestionnaire sur un autre appareil resterait affichée à l'ancienne dans la légende
     // jusqu'au prochain vrai changement de vue.
     if(S.empView==='mois'){ buildTypeLegend('empLegMois'); renderEmpMonth(); }
-    if(S.empTab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
+    if(S.empTab==='magasin'){ renderEmpMagasinActive(); }
     else if(S.empTab==='comms'){ renderEmpComms(); renderMurListe('murListeEmp',false); }
   }
 }
@@ -2531,7 +2548,7 @@ function switchEmpTab(tab){
   document.getElementById('empTabContentMagasin').style.display=tab==='magasin'?'block':'none';
   const commsEl=document.getElementById('empTabContentComms');
   if(commsEl) commsEl.style.display=tab==='comms'?'block':'none';
-  if(tab==='magasin'){ buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
+  if(tab==='magasin'){ renderEmpMagasinActive(); }
   if(tab==='comms') {renderEmpComms();renderMurListe('murListeEmp',false);}
 }
 
@@ -2644,6 +2661,27 @@ function renderEmpMagasin(){
   document.getElementById('empMagasinView').innerHTML=`
     <div class="table-wrap"><table><thead>${th}</thead><tbody>${tb}</tbody></table></div>
     <div class="muted tc mt-10">Planning de toute l'équipe ${sPill(emp.site)}</div>`;
+}
+// ── Mon magasin : vue Mois (réutilise le tableau mois/site du gestionnaire, en lecture seule) ──
+function setEmpMagasinView(v){
+  S.empMagView=v;
+  document.getElementById('empMagVSemBtn').classList.toggle('active',v==='sem');
+  document.getElementById('empMagVMoisBtn').classList.toggle('active',v==='mois');
+  document.getElementById('empMagVSemaine').style.display=v==='sem'?'block':'none';
+  document.getElementById('empMagVMois').style.display=v==='mois'?'block':'none';
+  renderEmpMagasinActive();
+}
+function renderEmpMagasinActive(){
+  if(S.empMagView==='mois'){ buildTypeLegend('empLegMagasinMois'); renderEmpMagasinMois(); }
+  else { buildTypeLegend('empLegMagasin'); renderEmpMagasin(); }
+}
+function eqMMois(d){S.eqMO+=d;renderEmpMagasinMois();}
+function renderEmpMagasinMois(){
+  const emp=S.user;if(!emp)return;
+  const today=new Date();today.setHours(0,0,0,0);
+  const ref=new Date(today.getFullYear(),today.getMonth()+S.eqMO,1);
+  document.getElementById('eqMMoisLbl').textContent=fmtFR(ref,{month:'long',year:'numeric'});
+  document.getElementById('empMagasinMoisView').innerHTML=renderMonthSiteTable(emp.site, ref, today, activeEmployees(), true);
 }
 async function sendReq(){
   const emp=S.user;
@@ -3166,8 +3204,9 @@ function renderMonth(){
   else renderMonthEmp(ref,today);
 }
 
-// Génère le tableau HTML pour UN magasin donné (réutilisé pour empiler plusieurs magasins)
-function renderMonthSiteTable(site, ref, today, empsFiltres){
+// Génère le tableau HTML pour UN magasin donné (réutilisé pour empiler plusieurs magasins, et
+// pour "Mon magasin" côté salarié en lecture seule via readOnly=true).
+function renderMonthSiteTable(site, ref, today, empsFiltres, readOnly=false){
   const sColor=SC[site]||SC['Ham'];
   const emps=empsFiltres.filter(e=>e.site===site && estVisibleDansPlanning(e,ref));
   const daysInMonth=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
@@ -3211,7 +3250,10 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:#0EA5E9;margin:0 auto 2px;">↔</div>`+
       `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">↔ Renfort</div></th>`;
   }
-  th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
+  // La colonne effectifs (présents/minimum requis) est réservée au gestionnaire — un salarié en
+  // lecture seule sur "Mon magasin" n'a pas à voir les seuils de sous-effectif configurés.
+  if(!readOnly) th+=`<th style="min-width:42px;color:var(--muted);font-size:10px;">Présents</th></tr></thead>`;
+  else th+=`</tr></thead>`;
 
   let tb=`<tbody>`;
   days.forEach(d=>{
@@ -3248,14 +3290,14 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       if(isHorsContrat(emp,dStr)){
         cell=`<div class="mblock" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 3px,#E5E7EB 3px,#E5E7EB 6px);cursor:not-allowed;" title="Hors contrat"></div>`;
       } else if(type==='off'){
-        cell=`<div class="mblock empty" onclick="openShiftMod('${emp.id}','${fmt(d)}')"></div>`;
+        cell=`<div class="mblock empty"${readOnly?'':` onclick="openShiftMod('${emp.id}','${fmt(d)}')"`}></div>`;
       } else {
         const c=getColor(type,site2);
         const mLbl=cellShortLabel(type,site2);
         const remLabel=mLbl
           ?`<span style="font-size:7px;font-weight:700;color:#fff;line-height:1;display:block;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${mLbl}</span>`
           :'';
-        cell=`<div class="mblock${selCells.has(emp.id+'_'+dStr)?' sel-active':''}" data-sel="${emp.id+'_'+dStr}" style="background:${c.color};display:flex;align-items:center;justify-content:center;" onclick="openShiftMod('${emp.id}','${fmt(d)}')" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
+        cell=`<div class="mblock${!readOnly&&selCells.has(emp.id+'_'+dStr)?' sel-active':''}"${readOnly?'':` data-sel="${emp.id+'_'+dStr}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"`} style="background:${c.color};display:flex;align-items:center;justify-content:center;${readOnly?'cursor:default;':''}" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
         // Compte comme "présent ici" seulement si effectivement sur place ce jour-là :
         // pas en congé/maladie/formation, et pas parti en renfort ailleurs (site effectif différent).
         if(type!=='conge' && type!=='maladie' && type!=='formation' && site2===site) count++;
@@ -3276,16 +3318,19 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
       if(presentsAujourdhui.length){
         const noms = presentsAujourdhui.map(r=>r.name.split(' ')[0]).join(' + ');
         const titres = presentsAujourdhui.map(r=>r.name).join(', ');
-        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;width:auto;min-width:34px;padding:0 3px;" onclick="openShiftMod('${presentsAujourdhui[0].id}','${dStr}')" title="${titres} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${noms}</span></div>`;
+        cell=`<div class="mblock" style="background:${sColor.color};display:flex;align-items:center;justify-content:center;width:auto;min-width:34px;padding:0 3px;${readOnly?'cursor:default;':''}"${readOnly?'':` onclick="openShiftMod('${presentsAujourdhui[0].id}','${dStr}')"`} title="${titres} en renfort"><span style="font-size:7px;font-weight:700;color:#fff;line-height:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${noms}</span></div>`;
         count += presentsAujourdhui.length;
       } else {
         cell=`<div class="mblock empty" style="opacity:.2;"></div>`;
       }
       tb+=`<td class="${weCls}" style="border-right:1px solid var(--border);background:#F8FAFF;">${cell}</td>`;
     }
-    const minStaffJour = getMinStaffEffectif(site, d);
-    const cls=count>=minStaffJour?'staff-ok':'staff-warn';
-    tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}<span style="font-size:9px;color:var(--muted);font-weight:400;"> /${minStaffJour}</span></td></tr>`;
+    if(!readOnly){
+      const minStaffJour = getMinStaffEffectif(site, d);
+      const cls=count>=minStaffJour?'staff-ok':'staff-warn';
+      tb+=`<td class="${cls}" style="font-size:12px;font-weight:700;">${count}<span style="font-size:9px;color:var(--muted);font-weight:400;"> /${minStaffJour}</span></td>`;
+    }
+    tb+=`</tr>`;
   });
   tb+=`</tbody>`;
 
@@ -3293,7 +3338,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres){
     <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="width:10px;height:10px;border-radius:3px;background:${sColor.color}"></div>
       <span style="font-size:12px;font-weight:600;">${site}</span>
-      <span style="font-size:11px;color:var(--muted);">· ${emps.length} employé(s)${renforts.length?` · <span style="color:#0EA5E9;font-weight:600;">${renforts.length} renfort(s)</span>`:''} · min affiché par jour (colonne Présents)
+      <span style="font-size:11px;color:var(--muted);">· ${emps.length} employé(s)${renforts.length?` · <span style="color:#0EA5E9;font-weight:600;">${renforts.length} renfort(s)</span>`:''}${readOnly?'':' · min affiché par jour (colonne Présents)'}
       </span>
     </div>
     <div class="site-month-wrap"><table class="site-month-table">${th}${tb}</table></div>
