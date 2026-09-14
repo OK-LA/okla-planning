@@ -2875,26 +2875,43 @@ function renderSelBar(){
   if(selCells.size===0 && !selMode){bar.style.display='none';return;}
   bar.style.display='flex';
   countEl.textContent = selCells.size+' cellule(s) sélectionnée(s)';
-  // Boutons types
+  // Boutons types — "Remplacement" a besoin en plus du magasin cible pour toute la sélection
+  // (jusqu'ici il n'y avait aucun moyen de le choisir, la case prenait par erreur le site
+  // d'origine de chaque employé au lieu du site de renfort).
   btns.innerHTML = TYPES.map(t=>{
     const c = getColor(t.key, S.employees[0]?.site||'Ham');
+    if(t.key==='remplacement'){
+      return `<div style="display:flex;gap:4px;align-items:center;">
+        <select id="selRemplacementSite" style="font-size:11px;padding:5px 6px;border-radius:6px;border:1px solid var(--border);">
+          ${Object.keys(SC).map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <button onclick="appliquerSelectionType('remplacement', document.getElementById('selRemplacementSite').value)" style="background:${c.color};color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">${t.label}</button>
+      </div>`;
+    }
     return `<button onclick="appliquerSelectionType('${t.key}')" style="background:${c.color};color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">${t.label}</button>`;
   }).join('');
 }
 
-async function appliquerSelectionType(type){
+async function appliquerSelectionType(type, targetSite){
   if(selCells.size===0){toast('Aucune cellule sélectionnée');return;}
   const keys = [...selCells];
+  let dejaSurCeSite = 0;
   for(const key of keys){
     const [empId, dateStr] = key.split('_');
     const emp = S.employees.find(e=>e.id===empId);
     if(!emp) continue;
-    S.planning[key] = {type, site:emp.site, note:''};
+    // Pour un remplacement, le site cible choisi s'applique à toute la sélection ; les autres
+    // types restent sur le site habituel de chaque employé, comme avant.
+    const site = type==='remplacement' ? (targetSite||emp.site) : emp.site;
+    if(type==='remplacement' && site===emp.site) dejaSurCeSite++;
+    S.planning[key] = {type, site, note:''};
   }
   persist();
   annulerSelection();
   refreshActiveView();
-  toast(`✓ ${keys.length} cellule(s) mises à jour`);
+  toast(dejaSurCeSite
+    ? `✓ ${keys.length} cellule(s) mises à jour (⚠️ ${dejaSurCeSite} déjà sur le site choisi — pas un vrai renfort pour elles)`
+    : `✓ ${keys.length} cellule(s) mises à jour`, dejaSurCeSite?5000:3000);
 }
 
 function annulerSelection(){
