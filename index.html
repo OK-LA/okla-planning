@@ -1231,10 +1231,10 @@ tbody tr:hover td{background:#FAFAF8;}
         <label>Type de contrat</label>
         <select id="ficheTypeContrat"></select>
       </div>
-      <div class="fg" id="ficheDateFinWrap" style="display:none;">
-        <label>Date de fin de contrat</label>
+      <div class="fg" id="ficheDateFinWrap">
+        <label id="ficheDateFinLabel">Date de fin de contrat</label>
         <input type="date" id="ficheDateFin">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Les jours après cette date seront grisés sur le planning.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;" id="ficheDateFinHint">Les jours après cette date seront grisés sur le planning.</div>
       </div>
       <div id="ficheContratStatut" style="font-size:12px;margin-top:6px;"></div>
     </div>
@@ -2239,7 +2239,7 @@ async function loadAll(force=false){
     // on rafraîchit juste les données affichées, sans rappeler restoreSession() qui ferait
     // sauter l'utilisateur vers l'onglet/la vue par défaut toutes les 30s (bug réel observé :
     // retour forcé en vue Semaine côté salarié, vue Mois qui affiche la Semaine côté gestionnaire).
-    if (S.role === 'mgr') renderMgr();
+    if (S.role === 'mgr') renderMgr(false);
     else if (S.role === 'emp') renderEmp(false);
     else restoreSession();
     return;
@@ -2704,13 +2704,16 @@ async function sendReq(){
 }
 
 // ══ GESTIONNAIRE ══
-function renderMgr(){
+function renderMgr(resetView=true){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   updStats();buildLegend('mgrLeg');
-  // refreshActiveView() respecte S.view (semaine/mois déjà sélectionné) au lieu de toujours
-  // forcer la vue semaine — important car ceci est aussi appelé toutes les 30s en arrière-plan
-  // (resyncIfPossible) et ne doit pas faire sauter le gestionnaire hors de la vue Mois.
-  buildSelects();initFiltres();refreshActiveView();renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
+  buildSelects();initFiltres();
+  // Ouverture réelle de l'appli : vue Mois par défaut (setView gère aussi les classes des
+  // boutons Semaine/Mois et l'affichage des conteneurs, contrairement à refreshActiveView()).
+  // resetView=false = resynchronisation en arrière-plan (toutes les 30s) : on garde la vue déjà
+  // choisie par l'utilisateur, refreshActiveView() suffit alors (respecte S.view).
+  if(resetView) setView('mois'); else refreshActiveView();
+  renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
 }
 function switchTab(n){
   const mgrScreen = document.getElementById('sMgr');
@@ -2763,10 +2766,10 @@ function setMoisMode(mode){
 
 // ── FILTRES ──
 function initFiltres() {
-  // Par défaut : magasin du premier employé trouvé (ou Ham)
+  // Par défaut à l'ouverture : tous les magasins (S.filtresSites n'est pas persisté, donc ceci
+  // se redéclenche à chaque nouvelle session — un rechargement, pas un simple clic de filtre).
   if (S.filtresSites.length === 0) {
-    const defSite = S.employees[0]?.site || 'Ham';
-    S.filtresSites = [defSite];
+    S.filtresSites = Object.keys(SC);
   }
   renderChipsSites();
 }
@@ -3940,7 +3943,7 @@ function openFicheEmp(empId){
   const typeC = emp.typeContrat||'';
   document.getElementById('ficheTypeContrat').value = typeC;
   document.getElementById('ficheDateFin').value = emp.dateFin||'';
-  document.getElementById('ficheDateFinWrap').style.display = typeC ? 'block' : 'none';
+  majLabelDateFin(typeC);
   // Statut contrat
   const today = fmt(new Date());
   let statut = '';
@@ -4064,9 +4067,19 @@ function supprimerEnfantFiche(idx){
   renderFicheEnfants();
 }
 
+// Le champ "date de fin" reste toujours visible, y compris pour un CDI : sert normalement à la
+// fin prévue d'un contrat à durée déterminée, mais aussi à noter une rupture de CDI le cas
+// échéant (démission, licenciement...) — la date n'est donc plus effacée automatiquement en
+// passant à CDI, contrairement à avant.
+function majLabelDateFin(typeC){
+  const estCDI = !typeC;
+  document.getElementById('ficheDateFinLabel').textContent = estCDI ? 'Date de fin de contrat (rupture de CDI, si applicable)' : 'Date de fin de contrat';
+  document.getElementById('ficheDateFinHint').textContent = estCDI
+    ? 'Laisser vide pour un CDI en cours. À renseigner uniquement en cas de rupture (démission, licenciement...).'
+    : 'Les jours après cette date seront grisés sur le planning.';
+}
 document.getElementById('ficheTypeContrat').addEventListener('change', function(){
-  document.getElementById('ficheDateFinWrap').style.display = this.value ? 'block' : 'none';
-  if(!this.value) document.getElementById('ficheDateFin').value='';
+  majLabelDateFin(this.value);
 });
 
 async function saveFicheEmp(){
