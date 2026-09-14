@@ -72,7 +72,7 @@ input:focus,select:focus,textarea:focus{border-color:#3B82F6;background:#fff;}
 .tab.active{background:#fff;color:var(--text);box-shadow:var(--sh);}
 .tab-content{display:none;}.tab-content.active{display:block;}
 
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:16px;}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:16px;}
 .stat{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:11px;text-align:center;}
 .stat-val{font-size:20px;font-weight:700;}.stat-lbl{font-size:10px;color:var(--muted);margin-top:2px;}
 
@@ -557,6 +557,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="stat" onclick="showStatDetail('modifs')" style="cursor:pointer;" title="Voir les modifications"><div class="stat-val" id="sM">0</div><div class="stat-lbl">Modifs</div></div>
       <div class="stat" onclick="showStatDetail('demandes')" style="cursor:pointer;" title="Voir les demandes"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
       <div class="stat" onclick="showStatDetail('absences')" style="cursor:pointer;" title="Voir les absences"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
+      <div class="stat" onclick="showStatDetail('profils')" style="cursor:pointer;" title="Voir les modifications de profil"><div class="stat-val" id="sP">0</div><div class="stat-lbl">Profils</div></div>
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
@@ -1096,6 +1097,22 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL MES INFORMATIONS (salarié modifie ses propres coordonnées) -->
+<div class="modal-overlay" id="mMesInfos">
+  <div class="modal">
+    <div class="modal-title">✏️ Mes informations</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Le gestionnaire est prévenu à chaque modification.</div>
+    <div class="fg"><label>Téléphone</label><input type="tel" id="miTel" placeholder="06 12 34 56 78"></div>
+    <div class="fg"><label>Adresse</label><input type="text" id="miAddr" placeholder="12 rue des Lilas"></div>
+    <div class="fg"><label>Code postal</label><input type="text" id="miCodePostal" placeholder="80000"></div>
+    <div class="fg"><label>Ville</label><input type="text" id="miVille" placeholder="Amiens"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mMesInfos')">Annuler</button>
+      <button class="btn btn-save" onclick="enregistrerMesInfos()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL COLORATION D'ÉVÉNEMENT SUR UNE PLAGE DE DATES -->
 <div class="modal-overlay" id="mEvent">
   <div class="modal">
@@ -1450,6 +1467,7 @@ async function supaWrite(section, data) {
   if (section === 'events') return supaWriteEvents(data);
   if (section === 'sc') return supaWriteSiteColors(data);
   if (section === 'params') return supaWriteParams(data);
+  if (section === 'profil_notifs') return supaWriteProfilNotifs(data);
   try {
     // Utiliser PATCH (UPDATE) sur la ligne existante plutôt que POST (INSERT)
     // Les 9 sections sont déjà créées par le SQL setup → on met à jour, jamais on insère
@@ -1705,6 +1723,34 @@ async function supaReadAbsences() {
       rempId: row.remp_id, rempName: row.remp_name, source: row.source,
     }));
   } catch(e) { console.warn('supaReadAbsences error', e); return null; }
+}
+
+// Notifications gestionnaire (salarié qui modifie ses propres coordonnées) — upsert seulement,
+// jamais de suppression basée sur l'instantané local (voir le commentaire dans supaWritePlanning).
+async function supaWriteProfilNotifs(notifs) {
+  if(!_supaUrl || !_supaKey) return false;
+  try {
+    const ids = (notifs || []).map(n => n.id).filter(v => v != null);
+    if (!ids.length) return true;
+    const rows = notifs.map(n => ({
+      id: n.id, emp_id: n.empId, emp_name: n.empName || null, message: n.message || null, seen: !!n.seen,
+    }));
+    const r = await fetch(`${supaBase()}/rest/v1/profil_notifs?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if(!r.ok) { console.warn('supaWriteProfilNotifs error', r.status, await r.text()); return false; }
+    return true;
+  } catch(e) { console.warn('supaWriteProfilNotifs error', e); return false; }
+}
+async function supaReadProfilNotifs() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/profil_notifs?select=*&order=created_at.desc`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    return rows.map(row => ({ id: row.id, empId: row.emp_id, empName: row.emp_name, message: row.message, seen: row.seen }));
+  } catch(e) { console.warn('supaReadProfilNotifs error', e); return null; }
 }
 
 // Écriture des types d'événements dans `event_types`.
@@ -2060,8 +2106,8 @@ async function supaReadAll() {
     const result = {};
     rows.forEach(row => { result[row.section] = row.data; });
     // Ces sections : source de vérité = tables relationnelles (repli sur okla_store si indisponible)
-    const [empRows, planningRows, requestRows, absenceRows, eventTypeRows, eventRows] = await Promise.all([
-      supaReadEmployees(), supaReadPlanning(), supaReadRequests(), supaReadAbsences(), supaReadEventTypes(), supaReadEvents(),
+    const [empRows, planningRows, requestRows, absenceRows, eventTypeRows, eventRows, profilNotifRows] = await Promise.all([
+      supaReadEmployees(), supaReadPlanning(), supaReadRequests(), supaReadAbsences(), supaReadEventTypes(), supaReadEvents(), supaReadProfilNotifs(),
     ]);
     if (empRows) result.employees = empRows;
     if (planningRows) result.planning = planningRows;
@@ -2069,6 +2115,7 @@ async function supaReadAll() {
     if (absenceRows) result.absences = absenceRows;
     if (eventTypeRows) result.event_types = eventTypeRows;
     if (eventRows) result.events = eventRows;
+    if (profilNotifRows) result.profil_notifs = profilNotifRows;
 
     // sc + params dépendent des employés (reposFixe) déjà chargés ci-dessus.
     const [siteRows, paramsResult] = await Promise.all([
@@ -2100,6 +2147,7 @@ const S={
   requests:lsGet('requests',[]),
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
+  profilNotifs:lsGet('profilNotifs',[]),
   eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,eqMO:0,empTab:'perso',empView:'sem',empMagView:'sem',
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
@@ -2169,6 +2217,7 @@ function persist(){
   lsSet('eventTypes',S.eventTypes);
   lsSet('events',S.events);
   lsSet('sc',SC);
+  lsSet('profilNotifs',S.profilNotifs);
   // 2. Synchronisation Supabase (différée pour éviter les appels en rafale)
   if(_supaUrl && _supaKey) {
     supaWriteDebounced('employees', S.employees);
@@ -2179,6 +2228,7 @@ function persist(){
     supaWriteDebounced('event_types', S.eventTypes);
     supaWriteDebounced('events', S.events);
     supaWriteDebounced('sc', SC);
+    supaWriteDebounced('profil_notifs', S.profilNotifs);
   }
 }
 
@@ -2258,6 +2308,11 @@ async function loadAll(force=false){
         Object.keys(SC).forEach(k=>delete SC[k]);
         Object.assign(SC, supa.sc);
         lsSet('sc', SC);
+      }
+      // Notifications gestionnaire (modifications de coordonnées salarié) — remplacement direct.
+      if(Array.isArray(supa.profil_notifs)) {
+        S.profilNotifs = supa.profil_notifs;
+        lsSet('profilNotifs', S.profilNotifs);
       }
       console.log('✓ Données chargées depuis Supabase');
     } else {
@@ -2452,6 +2507,16 @@ function updStats(){
   document.getElementById('sM').textContent=S.mods.length;
   document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending'||r.status==='pending_gestionnaire').length;
   document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
+  const sP=document.getElementById('sP'); if(sP) sP.textContent=(S.profilNotifs||[]).filter(n=>!n.seen).length;
+}
+
+function marquerProfilNotifVu(id){
+  const n=(S.profilNotifs||[]).find(n=>n.id===id);
+  if(!n) return;
+  n.seen=true;
+  persist();
+  updStats();
+  showStatDetail('profils');
 }
 
 // ══ SETUP ══
@@ -2523,7 +2588,8 @@ function renderEmp(resetView=true){
     <div style="flex:1">
       <div style="font-weight:700;font-size:15px">${emp.name}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px">${sPill(emp.site)} &nbsp;Code : <strong>${emp.code}</strong></div>
-    </div>`;
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="ouvrirMesInfos()" title="Modifier mes coordonnées">✏️ Mes infos</button>`;
   const myMods=S.mods.filter(m=>m.empId===emp.id&&!m.seen);
   document.getElementById('empAlert').innerHTML=myMods.length
     ?`<div class="alert-mod">⚠️ <strong>Planning modifié :</strong> ${myMods.map(m=>`${m.dl} : ${m.det}`).join(' · ')}</div>`:'';
@@ -3666,6 +3732,38 @@ async function saveRetardEmp(){
   closeModal('mRetardEmp');
   renderEmpAbsList();
   toast(`✓ Retard signalé — ${duree} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
+}
+
+// ── Mes informations (salarié modifie ses propres coordonnées) ──
+function ouvrirMesInfos(){
+  const emp=S.user; if(!emp) return;
+  document.getElementById('miTel').value=emp.tel||'';
+  document.getElementById('miAddr').value=emp.addr||'';
+  document.getElementById('miCodePostal').value=emp.codePostal||'';
+  document.getElementById('miVille').value=emp.ville||'';
+  openModal('mMesInfos');
+}
+function enregistrerMesInfos(){
+  const emp=S.user; if(!emp) return;
+  const nouveaux={
+    tel: document.getElementById('miTel').value.trim(),
+    addr: document.getElementById('miAddr').value.trim(),
+    codePostal: document.getElementById('miCodePostal').value.trim(),
+    ville: document.getElementById('miVille').value.trim(),
+  };
+  const labels={tel:'Téléphone',addr:'Adresse',codePostal:'Code postal',ville:'Ville'};
+  const changements=Object.keys(nouveaux).filter(champ=>(emp[champ]||'')!==nouveaux[champ]);
+  if(!changements.length){toast('Aucune modification');closeModal('mMesInfos');return;}
+  changements.forEach(champ=>{ emp[champ]=nouveaux[champ]; });
+  if(!S.profilNotifs) S.profilNotifs=[];
+  S.profilNotifs.push({
+    id: Date.now(), empId: emp.id, empName: emp.name, seen:false,
+    message: `${emp.name} a modifié : ${changements.map(c=>labels[c]).join(', ')}`,
+  });
+  persist();
+  closeModal('mMesInfos');
+  renderEmp(false);
+  toast('✓ Vos informations ont été mises à jour');
 }
 
 function toggleAbsMotifLibre(){
@@ -6614,6 +6712,24 @@ function showStatDetail(type){
       }).join('');
     }
     html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');">Gérer les remplacements →</button></div>`;
+
+  } else if(type==='profils'){
+    title = `📝 Modifications de profil`;
+    const notifs = [...(S.profilNotifs||[])].sort((a,b)=>b.id-a.id);
+    if(!notifs.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">Aucune modification de profil</div>';
+    } else {
+      html = notifs.map(n=>{
+        const emp = S.employees.find(e=>e.id===n.empId);
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);${n.seen?'opacity:.55;':''}">
+          <div class="avatar" style="background:${emp?avc(emp.id):'#9CA3AF'};flex-shrink:0;font-size:10px;">${emp?ini(emp.name):'?'}</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;">${n.message}</div>
+          </div>
+          ${n.seen?'':`<button class="btn btn-sm" onclick="marquerProfilNotifVu(${n.id})" style="font-size:11px;white-space:nowrap;">✓ Vu</button>`}
+        </div>`;
+      }).join('');
+    }
   }
 
   titleEl.textContent = title;
