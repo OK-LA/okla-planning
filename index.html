@@ -1826,14 +1826,11 @@ async function supaWriteParams(params) {
       if (!results.every(Boolean)) ok = false;
     }
 
-    // employee_leave_jokers — upsert + suppression de ce qui n'est plus présent
+    // employee_leave_jokers — upsert seulement (aucune suppression basée sur l'instantané local,
+    // voir le commentaire équivalent dans supaWritePlanning — ce bloc avait été oublié lors de
+    // cette correction, repéré en touchant ce code pour remettre à 0 les jokers d'Emilie).
     const jokerEntries = Object.entries(params.jokers || {});
     if (jokerEntries.length) {
-      const empIdList = jokerEntries.map(([empId]) => encodeURIComponent(empId)).join(',');
-      const rDelJ = await fetch(`${supaBase()}/rest/v1/employee_leave_jokers?employee_id=in.(${empIdList})`, {
-        method: 'DELETE', headers: supaHeaders({'Prefer': 'return=minimal'})
-      });
-      if(!rDelJ.ok) console.warn('supaWriteParams jokers delete error', rDelJ.status, await rDelJ.text());
       const jokerRows = jokerEntries.flatMap(([empId, val]) => {
         if (val && typeof val === 'object' && val.annee !== undefined && val.count !== undefined) {
           return [{ employee_id: empId, periode_key: String(val.annee), count: val.count }];
