@@ -726,12 +726,18 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
       </div>
       <div class="param-card" style="margin-top:14px;">
-        <h3>🎨 Couleurs des types de journée</h3>
+        <h3>🎨 Types de planning</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
-          Personnalisez la couleur de chaque type (Congé, Maladie, Entrepôt A/B...). Laisser vide = couleur par défaut du magasin.
+          Personnalisez le libellé, l'abréviation et la couleur de chaque type existant.
         </div>
         <div id="paramTypeColors"></div>
-        <button class="btn btn-primary btn-sm mt-10" onclick="saveTypeColors()">✓ Enregistrer</button>
+        <div style="border-top:1px solid var(--border);margin:14px 0;"></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Vos propres types de journée — "Absence" = ne compte pas dans l'effectif présent (comme Congé/Maladie/Formation).
+        </div>
+        <div id="paramCustomTypes"></div>
+        <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterTypePersonnalise()">+ Ajouter un type</button>
+        <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveTypeColors()">✓ Enregistrer</button>
       </div>
       <div class="param-card" style="margin-top:14px;">
         <h3>🔵 Événements & pastilles</h3>
@@ -1393,10 +1399,26 @@ const TYPES=[
   {key:'formation', label:'Formation',     short:'Form.',  info:'Apprenti en centre de formation', color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
   {key:'off',       label:'Repos',         short:'',       info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
 ];
+// Types de planning affichés/sélectionnables : les 9 types d'origine (avec libellé/abréviation
+// éventuellement personnalisés par le gestionnaire) + les types personnalisés ajoutés en Paramètres.
+// La clé (`key`) des 9 types d'origine ne change jamais — c'est elle que toute la logique métier
+// (calcul CP, jour de repos, jours d'école...) teste ; seuls label/short sont personnalisables.
+function getAllTypes(){
+  const overrides=S.params?.typeLabels||{};
+  const base=TYPES.map(t=>overrides[t.key]?{...t,...overrides[t.key]}:t);
+  return base.concat(S.params?.customTypes||[]);
+}
+// Un type personnalisé peut être marqué "absence" (n'apparaît pas dans l'effectif présent),
+// comme congé/maladie/formation qui le sont nativement.
+function estTypeAbsence(type){
+  if(type==='conge'||type==='maladie'||type==='formation') return true;
+  const ct=(S.params?.customTypes||[]).find(t=>t.key===type);
+  return ct?!!ct.absence:false;
+}
 // Libellé court affiché en clair sur les cases de planning (remplacement = site cible, dynamique)
 function cellShortLabel(type,site){
   if(type==='remplacement') return site||'';
-  return TYPES.find(t=>t.key===type)?.short||'';
+  return getAllTypes().find(t=>t.key===type)?.short||'';
 }
 const EV_INTERNE_LABELS={reunion:'Réunion',formation:'Formation',livraison:'Livraison',autre:'Autre'};
 function evInterneTooltipTxt(e){ return EV_INTERNE_ICONS[e.type]+' '+e.label+(e.heureDebut?' ('+e.heureDebut+(e.heureFin?'–'+e.heureFin:'')+')':''); }
@@ -1415,7 +1437,7 @@ function getColor(type,site){
     return {color:'#6D28D9',bg:'#F5F3FF',border:'#DDD6FE'};
   }
   if(type==='remplacement') return SC[site]||SC['Ham'];
-  const t=TYPES.find(x=>x.key===type);
+  const t=getAllTypes().find(x=>x.key===type);
   return t?{color:t.color,bg:t.bg,border:t.border}:{color:'#ccc',bg:'#f5f5f5',border:'#ddd'};
 }
 
@@ -1897,6 +1919,8 @@ async function supaWriteParams(params) {
       sam_speciaux: params.samSpeciaux || { premiers: true, soldes: true },
       planning_com: params.planningCom || [],
       planning_com_seeded: !!params.planningComSeeded,
+      custom_types: params.customTypes || [],
+      type_labels: params.typeLabels || {},
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2098,6 +2122,8 @@ async function supaReadParams(empRows) {
       samSpeciaux: app.sam_speciaux || { premiers: true, soldes: true },
       planningCom: app.planning_com || [],
       planningComSeeded: app.planning_com_seeded || false,
+      customTypes: app.custom_types || [],
+      typeLabels: app.type_labels || {},
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -2333,6 +2359,8 @@ async function loadAll(force=false){
     if(!S.planning || Object.keys(S.planning).length===0) S.planning={};
     if(!Array.isArray(S.eventTypes)) S.eventTypes=[];
     if(!S.params.typeColors) S.params.typeColors={};
+    if(!Array.isArray(S.params.customTypes)) S.params.customTypes=[];
+    if(!S.params.typeLabels) S.params.typeLabels={};
     if(!S.params.reposFixe) S.params.reposFixe={};
     // Résoudre les repos fixes par défaut
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
@@ -2523,7 +2551,7 @@ function buildLegend(id){
 function buildTypeLegend(id){
   const el=document.getElementById(id);if(!el)return;
   const site = S.user?.site || Object.keys(SC)[0];
-  let h = TYPES.map(t=>{
+  let h = getAllTypes().map(t=>{
     const c = getColor(t.key, site);
     return `<div class="legend-item"><div class="ldot" style="background:${c.color}"></div>${t.label}</div>`;
   }).join('');
@@ -3008,7 +3036,7 @@ function renderSelBar(){
   // Boutons types — "Remplacement" a besoin en plus du magasin cible pour toute la sélection
   // (jusqu'ici il n'y avait aucun moyen de le choisir, la case prenait par erreur le site
   // d'origine de chaque employé au lieu du site de renfort).
-  btns.innerHTML = TYPES.map(t=>{
+  btns.innerHTML = getAllTypes().map(t=>{
     const c = getColor(t.key, S.employees[0]?.site||'Ham');
     if(t.key==='remplacement'){
       return `<div style="display:flex;gap:4px;align-items:center;">
@@ -3161,7 +3189,7 @@ function checkEffectifAlerts(mon) {
         const sh = S.planning[`${e.id}_${dateStr}`];
         const siteEffectifJour = sh?.site || e.site;
         if (siteEffectifJour !== site) return false;
-        return sh && sh.type !== 'off' && sh.type !== 'conge' && sh.type !== 'maladie' && sh.type !== 'formation';
+        return sh && sh.type !== 'off' && !estTypeAbsence(sh.type);
       }).length;
       const total = activeEmployees().filter(e => e.site === site).length;
       if (total > 0) {
@@ -3327,7 +3355,7 @@ function renderWeek(){
         const sh=S.planning[`${e.id}_${dStr2}`];
         const siteEffectifJour = sh?.site || e.site;
         if(siteEffectifJour!==site)return false;
-        return sh&&sh.type!=='off'&&sh.type!=='conge'&&sh.type!=='maladie'&&sh.type!=='formation';
+        return sh&&sh.type!=='off'&&!estTypeAbsence(sh.type);
       }).length;
       const total=activeEmployees().filter(e=>e.site===site).length;
       const cls=presents<minStaff?'eff-ko':presents===minStaff?'eff-warn':'eff-ok';
@@ -3447,7 +3475,7 @@ function renderMonthSiteTable(site, ref, today, empsFiltres, readOnly=false){
         cell=`<div class="mblock${!readOnly&&selCells.has(emp.id+'_'+dStr)?' sel-active':''}"${readOnly?'':` data-sel="${emp.id+'_'+dStr}" onclick="openShiftMod('${emp.id}','${fmt(d)}')"`} style="background:${c.color};display:flex;align-items:center;justify-content:center;${readOnly?'cursor:default;':''}" title="${type==='remplacement'?'Remplace à '+site2:type}">${remLabel}</div>`;
         // Compte comme "présent ici" seulement si effectivement sur place ce jour-là :
         // pas en congé/maladie/formation, et pas parti en renfort ailleurs (site effectif différent).
-        if(type!=='conge' && type!=='maladie' && type!=='formation' && site2===site) count++;
+        if(!estTypeAbsence(type) && site2===site) count++;
       }
       const evInternesJourM=getEvInternesDuJourPourEmp(emp.id,dStr);
       const evInterneBadgeM=evInternesJourM.length
@@ -3578,7 +3606,7 @@ function updPeriodeInfo(){
 document.addEventListener('change', e => { if(e.target && ['shiftDateDebut','shiftDateFin','excludeDimanche'].includes(e.target.id)) updPeriodeInfo(); });
 
 function renderTypeGrid(emp){
-  document.getElementById('typeGrid').innerHTML=TYPES.map(t=>{
+  document.getElementById('typeGrid').innerHTML=getAllTypes().map(t=>{
     const c=getColor(t.key, emp.site);
     const sel=S.editType===t.key;
     return `<div class="type-opt${sel?' sel':''}"
@@ -3606,7 +3634,7 @@ function selType(key){S.editType=key;const emp=S.employees.find(e=>e.id===S.edit
 function updNotif(){
   if(!S.editing)return;
   const emp=S.employees.find(e=>e.id===S.editing.empId);if(!emp)return;
-  const t=TYPES.find(x=>x.key===S.editType);
+  const t=getAllTypes().find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(S.editing.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
   let det=t?t.info:'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
@@ -3629,7 +3657,7 @@ async function saveShift(){
     : emp.site;
   const shift={type:S.editType,site:siteEffectif,note};
   S.planning[`${empId}_${dateStr}`]=shift;
-  const t=TYPES.find(x=>x.key===S.editType);
+  const t=getAllTypes().find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
   let det=t?t.info:'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
@@ -3943,7 +3971,7 @@ function findReplacements(absentId,dateStr,targetSite){
     const minStaff=getMinStaffEffectif(site, new Date(dateStr+'T12:00:00'));
     const presents=activeEmployees().filter(e=>{
       const s=S.planning[`${e.id}_${dateStr}`];
-      return s&&s.type!=='off'&&s.type!=='conge'&&s.type!=='maladie'&&s.type!=='formation'&&s.site===site;
+      return s&&s.type!=='off'&&!estTypeAbsence(s.type)&&s.site===site;
     }).length;
     return {presents,minStaff,marge:presents-minStaff};
   }
@@ -4506,6 +4534,7 @@ function renderParams(){
   if(quotaEl) quotaEl.value = regles.quota || 25;
   renderParamMagasins();
   renderParamTypeColors();
+  renderParamCustomTypes();
   renderParamEvents();
   renderSoldesInitiaux();
   initVerrouUI();
@@ -4612,14 +4641,18 @@ function renderParamTypeColors(){
   const el=document.getElementById('paramTypeColors');
   if(!el) return;
   if(!S.params.typeColors) S.params.typeColors={};
+  if(!S.params.typeLabels) S.params.typeLabels={};
   let h='';
   TYPES.forEach(t=>{
     const current=S.params.typeColors[t.key] || getColor(t.key, S.employees[0]?.site||'Ham').color;
-    h+=`<div class="magasin-row">
+    const lbl=S.params.typeLabels[t.key]?.label ?? t.label;
+    const sh=S.params.typeLabels[t.key]?.short ?? t.short;
+    h+=`<div class="magasin-row" style="flex-wrap:wrap;gap:6px;">
       <input type="color" class="color-picker" id="tc_${t.key}" value="${current}" title="Couleur">
-      <div style="flex:1;font-size:13px;font-weight:500;">${t.label}</div>
+      <input type="text" class="magasin-name-input" id="tl_${t.key}" value="${lbl}" placeholder="Libellé" style="flex:1;min-width:110px;">
+      <input type="text" id="ts_${t.key}" value="${sh}" placeholder="Abrév." style="width:64px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);">
       <span style="font-size:11px;color:var(--muted);white-space:nowrap;">${t.info}</span>
-      <button class="btn-del" onclick="reinitialiserCouleurType('${t.key}')" title="Réinitialiser">↺</button>
+      <button class="btn-del" onclick="reinitialiserCouleurType('${t.key}')" title="Réinitialiser la couleur">↺</button>
     </div>`;
   });
   el.innerHTML=h;
@@ -4631,15 +4664,82 @@ function reinitialiserCouleurType(key){
   refreshActiveView();
   toast('✓ Couleur réinitialisée');
 }
+function renderParamCustomTypes(){
+  const el=document.getElementById('paramCustomTypes');
+  if(!el) return;
+  if(!Array.isArray(S.params.customTypes)) S.params.customTypes=[];
+  if(!S.params.typeColors) S.params.typeColors={};
+  let h='';
+  S.params.customTypes.forEach((t,i)=>{
+    const current=S.params.typeColors[t.key]||'#6B7280';
+    h+=`<div class="magasin-row" style="flex-wrap:wrap;gap:6px;">
+      <input type="color" class="color-picker" id="ctc_${i}" value="${current}" title="Couleur">
+      <input type="text" class="magasin-name-input" id="ctl_${i}" value="${t.label}" placeholder="Libellé" style="flex:1;min-width:110px;">
+      <input type="text" id="cts_${i}" value="${t.short||''}" placeholder="Abrév." style="width:64px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;padding:4px 8px;border-radius:6px;border:1px solid ${t.absence?'#DC2626':'var(--border)'};background:${t.absence?'#FEF2F2':'transparent'};color:${t.absence?'#DC2626':'var(--muted)'};" title="Ne compte pas dans l'effectif présent">
+        <input type="checkbox" id="cta_${i}" ${t.absence?'checked':''} style="width:auto;accent-color:#DC2626;"> Absence
+      </label>
+      <button class="btn-del" onclick="supprimerTypePersonnalise(${i})" title="Supprimer">✕</button>
+    </div>`;
+  });
+  el.innerHTML = h || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun type personnalisé</div>';
+}
+function ajouterTypePersonnalise(){
+  const nom = prompt('Nom du nouveau type de planning (ex : Inventaire, Mission spéciale...) :');
+  if(!nom || !nom.trim()) return;
+  if(!Array.isArray(S.params.customTypes)) S.params.customTypes=[];
+  const key='custom_'+Date.now();
+  const couleurs=['#8B5CF6','#0EA5E9','#10B981','#F97316','#4B5563','#EC4899','#14B8A6'];
+  const couleur=couleurs[S.params.customTypes.length % couleurs.length];
+  S.params.customTypes.push({key, label:nom.trim(), short:'', info:'', absence:false});
+  if(!S.params.typeColors) S.params.typeColors={};
+  S.params.typeColors[key]=couleur;
+  persist();
+  renderParamCustomTypes();
+  toast(`✓ ${nom.trim()} ajouté`);
+}
+function supprimerTypePersonnalise(i){
+  const t=S.params.customTypes[i];
+  if(!t) return;
+  const enUsage=Object.values(S.planning).filter(sh=>sh?.type===t.key).length;
+  if(enUsage>0){
+    toast(`Impossible : ${enUsage} case(s) de planning utilisent encore "${t.label}"`);
+    return;
+  }
+  S.params.customTypes.splice(i,1);
+  delete S.params.typeColors[t.key];
+  persist();
+  renderParamCustomTypes();
+  toast(`✓ ${t.label} supprimé`);
+}
 async function saveTypeColors(){
   if(!S.params.typeColors) S.params.typeColors={};
+  if(!S.params.typeLabels) S.params.typeLabels={};
   TYPES.forEach(t=>{
-    const el=document.getElementById('tc_'+t.key);
-    if(el) S.params.typeColors[t.key]=el.value;
+    const elC=document.getElementById('tc_'+t.key);
+    if(elC) S.params.typeColors[t.key]=elC.value;
+    const elL=document.getElementById('tl_'+t.key);
+    const elS=document.getElementById('ts_'+t.key);
+    const lbl=elL?elL.value.trim()||t.label:t.label;
+    const sh=elS?(elS.value.trim()||t.short):t.short;
+    if(lbl!==t.label || sh!==t.short) S.params.typeLabels[t.key]={label:lbl, short:sh};
+    else delete S.params.typeLabels[t.key];
+  });
+  (S.params.customTypes||[]).forEach((t,i)=>{
+    const elC=document.getElementById('ctc_'+i);
+    const elL=document.getElementById('ctl_'+i);
+    const elS=document.getElementById('cts_'+i);
+    const elA=document.getElementById('cta_'+i);
+    if(elC) S.params.typeColors[t.key]=elC.value;
+    if(elL) t.label=elL.value.trim()||t.label;
+    if(elS) t.short=elS.value.trim();
+    if(elA) t.absence=elA.checked;
   });
   persist();
+  renderParamTypeColors();
+  renderParamCustomTypes();
   refreshActiveView();
-  toast('✓ Couleurs enregistrées');
+  toast('✓ Types enregistrés');
 }
 
 function renderParamEvents(){
@@ -5305,8 +5405,8 @@ function renderExcelImportPreview(changes, unrecognized, unmatchedCols, assumpti
   if(changes.length){
     h += `<div style="max-height:220px;overflow-y:auto;font-size:11px;margin-bottom:10px;">`;
     changes.slice(0,200).forEach(c=>{
-      const oldLbl = TYPES.find(t=>t.key===c.oldType)?.label || c.oldType;
-      const newLbl = TYPES.find(t=>t.key===c.newType)?.label || c.newType;
+      const oldLbl = getAllTypes().find(t=>t.key===c.oldType)?.label || c.oldType;
+      const newLbl = getAllTypes().find(t=>t.key===c.newType)?.label || c.newType;
       h += `<div style="padding:3px 0;border-bottom:1px solid #EEF2FF;">${fmtFR(new Date(c.dateStr+'T12:00'),{day:'numeric',month:'short'})} — <strong>${c.empLabel}</strong> : ${oldLbl}${c.oldSite&&c.oldType==='remplacement'?' ('+c.oldSite+')':''} → ${newLbl}${c.newSite&&c.newType==='remplacement'?' ('+c.newSite+')':''}${c.newNote?' — note : '+c.newNote:''}</div>`;
     });
     if(changes.length>200) h += `<div style="padding:4px 0;color:var(--muted);">… et ${changes.length-200} de plus</div>`;
@@ -6678,7 +6778,7 @@ function showStatDetail(type){
       html = `<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">${top20.length} modification(s) sur les 7 derniers jours</div>`;
       html += top20.map(m=>{
         const c = getColor(m.type, m.site);
-        const label = TYPES.find(t=>t.key===m.type)?.label||m.type;
+        const label = getAllTypes().find(t=>t.key===m.type)?.label||m.type;
         const d = new Date(m.dateStr+'T12:00');
         const jours=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
