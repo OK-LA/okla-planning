@@ -1153,6 +1153,20 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL MODIFIER UN CP DÉJÀ VALIDÉ -->
+<div class="modal-overlay" id="mModifierConge">
+  <div class="modal">
+    <div class="modal-title">✏️ Modifier le CP de <span id="modifCongeEmpNom"></span></div>
+    <div class="fg"><label>Date de début</label><input type="date" id="modifCongeDebut"></div>
+    <div class="fg"><label>Date de fin</label><input type="date" id="modifCongeFin"></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">L'ancienne période est libérée sur le planning, la nouvelle est posée à la place (le jour de repos fixe de l'employé reste "repos").</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mModifierConge')">Annuler</button>
+      <button class="btn btn-save" onclick="enregistrerModifConge()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL ADD EMP -->
 <div class="modal-overlay" id="mEmp">
   <div class="modal">
@@ -5654,8 +5668,8 @@ function renderEmpQuota() {
   let h = mesDemandes.length ? '' : '<div style="font-size:12px;color:var(--muted);">Aucune demande cette année</div>';
   mesDemandes.forEach(r => {
     const nb = countJoursOuvres(r.dateDebut, r.dateFin);
-    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
-    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
+    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':r.status==='cancelled'?'cs-refused':'cs-pending';
+    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':r.status==='cancelled'?'Annulé par le gestionnaire':'En attente';
     h += `<div class="conge-item">
       <div style="flex:1">
         <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
@@ -5737,6 +5751,10 @@ function renderCongesMgr() {
     const jokers = getJokersUtilises(emp.id);
     const pct = Math.round((pris / getQuotaAnnuel()) * 100);
     const demandes = getCongesEmp(emp.id).filter(r => r.status === 'pending');
+    // CP déjà validés, à venir ou en cours — permet de corriger une erreur de saisie sans passer
+    // par une demande de congé sans solde ou un rattrapage manuel case par case.
+    const todayStr = fmt(new Date());
+    const congesValides = getCongesEmp(emp.id).filter(r => r.status === 'approved' && r.type === 'conge' && r.dateFin >= todayStr);
 
     h += `<div class="quota-card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
@@ -5773,9 +5791,93 @@ function renderCongesMgr() {
           </div>`;
         }).join('')}
       </div>` : ''}
+      ${congesValides.length ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">CP validés à venir</div>
+        ${congesValides.map(r=>{
+          const nb=countJoursOuvresReels(r.dateDebut,r.dateFin);
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+            <div style="flex:1;font-size:12px;">✓ ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}j</div>
+            <div style="display:flex;gap:5px;">
+              <button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;" onclick="ouvrirModifierConge(${r.id})">Modifier</button>
+              <button class="btn btn-sm btn-no" onclick="annulerCongeValide(${r.id})">Supprimer</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
     </div>`;
   });
   document.getElementById('congesListeMgr').innerHTML = h || '<div style="text-align:center;padding:20px;color:var(--muted)">Aucun congé en cours</div>';
+}
+
+// Retire les jours de congé posés sur le planning pour une plage donnée (les jours de repos
+// fixe, jamais marqués 'conge' au départ, sont laissés tels quels).
+function retirerCongePlanning(empId, dateDebut, dateFin){
+  const emp = S.employees.find(e=>e.id===empId);
+  let cur = new Date(dateDebut+'T12:00');
+  const fin = new Date(dateFin+'T12:00');
+  while(cur<=fin){
+    const key = `${empId}_${fmt(cur)}`;
+    if(S.planning[key]?.type==='conge') S.planning[key] = {type:'off', site:emp?.site||'', note:''};
+    cur = addDays(cur,1);
+  }
+}
+
+function annulerCongeValide(id){
+  if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
+  const req = S.requests.find(r=>r.id==id);
+  if(!req) return;
+  if(!confirm(`Annuler le CP de ${req.empName} du ${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long'})} ? Les jours redeviennent disponibles au planning.`)) return;
+  retirerCongePlanning(req.empId, req.dateDebut, req.dateFin);
+  req.status = 'cancelled';
+  persist();
+  renderCongesMgr();
+  refreshActiveView();
+  toast('✓ CP annulé, jours remis à disposition');
+}
+
+let _modifCongeId = null;
+function ouvrirModifierConge(id){
+  const req = S.requests.find(r=>r.id==id);
+  if(!req) return;
+  _modifCongeId = id;
+  document.getElementById('modifCongeEmpNom').textContent = req.empName;
+  document.getElementById('modifCongeDebut').value = req.dateDebut;
+  document.getElementById('modifCongeFin').value = req.dateFin;
+  openModal('mModifierConge');
+}
+function enregistrerModifConge(){
+  if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
+  const req = S.requests.find(r=>r.id==_modifCongeId);
+  if(!req) return;
+  const nouveauDebut = document.getElementById('modifCongeDebut').value;
+  const nouveauFin = document.getElementById('modifCongeFin').value;
+  if(!nouveauDebut||!nouveauFin||nouveauFin<nouveauDebut){toast('Période invalide');return;}
+  // Même vérification que pour une validation normale (validerConge) : si la nouvelle période
+  // déclenche un avertissement (préavis, quota...) un joker est consommé, exactement comme si
+  // c'était une nouvelle demande — sinon modifier un CP validé contournerait silencieusement ces
+  // règles là où une vraie nouvelle demande les aurait respectées.
+  const check = verifierRegleConges(req.empId, nouveauDebut, nouveauFin);
+  if(check.warnings.length && !check.errors.length) incrementJoker(req.empId);
+  // Libère l'ancienne période, puis repose la nouvelle exactement comme une validation normale
+  // (respecte le repos fixe de l'employé).
+  retirerCongePlanning(req.empId, req.dateDebut, req.dateFin);
+  req.dateDebut = nouveauDebut;
+  req.dateFin = nouveauFin;
+  const emp = S.employees.find(e=>e.id===req.empId);
+  let cur = new Date(nouveauDebut+'T12:00');
+  const fin = new Date(nouveauFin+'T12:00');
+  while(cur<=fin){
+    if(JOURS_OUVRES.includes(cur.getDay())){
+      if(emp && isJourRepos(emp, cur)) S.planning[`${req.empId}_${fmt(cur)}`] = {type:'off', site:emp?.site||'', note:''};
+      else S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
+    }
+    cur = addDays(cur,1);
+  }
+  persist();
+  closeModal('mModifierConge');
+  renderCongesMgr();
+  refreshActiveView();
+  toast('✓ CP modifié');
 }
 
 async function validerConge(id) {
