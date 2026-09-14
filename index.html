@@ -936,6 +936,14 @@ tbody tr:hover td{background:#FAFAF8;}
           </select>
         </div>
         <div id="commPlanningList"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <input type="date" id="commEvDate" style="flex:1;min-width:120px;">
+          <input type="text" id="commEvLabel" placeholder="Nom de l'événement (ex: SOLDES D'HIVER)..." style="flex:2;min-width:150px;">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-primary btn-sm" id="commEvSaveBtn" onclick="ajouterCommEv()">+ Ajouter</button>
+          <button class="btn btn-ghost btn-sm" id="commEvCancelBtn" style="display:none;" onclick="annulerEditionCommEv()">Annuler</button>
+        </div>
       </div>
 
       <!-- MUR SOCIAL -->
@@ -1830,6 +1838,8 @@ async function supaWriteParams(params) {
       regles_conges_quota: (params.reglesConges && params.reglesConges.quota) || 25,
       regles_conges_date_alerte: (params.reglesConges && params.reglesConges.dateAlerte) || null,
       sam_speciaux: params.samSpeciaux || { premiers: true, soldes: true },
+      planning_com: params.planningCom || [],
+      planning_com_seeded: !!params.planningComSeeded,
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2029,6 +2039,8 @@ async function supaReadParams(empRows) {
       samedisPleins: app.samedis_pleins || {},
       reglesConges: { quota: app.regles_conges_quota, dateAlerte: app.regles_conges_date_alerte || '' },
       samSpeciaux: app.sam_speciaux || { premiers: true, soldes: true },
+      planningCom: app.planning_com || [],
+      planningComSeeded: app.planning_com_seeded || false,
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -2263,6 +2275,17 @@ async function loadAll(force=false){
         const rf = S.params.reposFixeParCode[emp.code];
         if(rf!==undefined) S.params.reposFixe[emp.id] = rf;
       });
+      persist();
+    }
+    // Amorçage unique du calendrier commercial (PLANNING_COM_SEED, jusque-là codé en dur) dans
+    // S.params.planningCom — désormais modifiable. Le marqueur planningComSeeded (synchronisé,
+    // pas juste local) garantit que ça ne se fait qu'une seule fois pour de bon : sans lui, vider
+    // complètement la liste volontairement la ferait réapparaître au resync suivant (30s après).
+    if(!S.params.planningComSeeded){
+      if((!S.params.planningCom || S.params.planningCom.length===0) && PLANNING_COM_SEED.length){
+        S.params.planningCom = PLANNING_COM_SEED.map((e,i)=>({id:i+1, date:e.date, label:e.label}));
+      }
+      S.params.planningComSeeded = true;
       persist();
     }
     hideLoading();
@@ -6235,7 +6258,9 @@ setInterval(() => {
 }, 30000);
 
 // ══ PLANNING COMMUNICATION ══
-const PLANNING_COM_DATA = [
+// Amorçage initial seulement (voir loadAll) — la liste éditable réelle vit dans
+// S.params.planningCom une fois synchronisée, ce tableau n'est plus jamais lu directement.
+const PLANNING_COM_SEED = [
   {"date":"2026-01-02","label":"INVENTAIRE?"},{"date":"2026-01-04","label":"VIP"},
   {"date":"2026-01-05","label":"INVENTAIRE?"},{"date":"2026-01-07","label":"SOLDES D'HIVER"},
   {"date":"2026-02-14","label":"ST VALENTIN"},{"date":"2026-02-17","label":"MARDI GRAS"},
@@ -6270,7 +6295,7 @@ function renderCommPlanning(){
   if(!el) return;
   const annee=parseInt(document.getElementById('commFiltreAnnee')?.value||2026);
   const mois=parseInt(document.getElementById('commFiltreMois')?.value||0);
-  let evs=PLANNING_COM_DATA.filter(e=>new Date(e.date+'T12:00').getFullYear()===annee);
+  let evs=(S.params.planningCom||[]).filter(e=>new Date(e.date+'T12:00').getFullYear()===annee);
   if(mois) evs=evs.filter(e=>new Date(e.date+'T12:00').getMonth()+1===mois);
   evs.sort((a,b)=>a.date.localeCompare(b.date));
   if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px 0;">Aucun événement pour cette période.</div>';return;}
@@ -6284,12 +6309,61 @@ function renderCommPlanning(){
       const d=new Date(e.date+'T12:00');
       h+=`<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:#F8FAFF;border-radius:7px;margin-bottom:4px;border-left:3px solid #3B82F6;">
         <div style="font-size:12px;font-weight:700;color:#3B82F6;white-space:nowrap;">${jours[d.getDay()]} ${d.getDate()}</div>
-        <div style="font-size:12px;font-weight:600;">${e.label}</div>
+        <div style="flex:1;font-size:12px;font-weight:600;">${e.label}</div>
+        <button class="btn-del" onclick="editerCommEv(${e.id})" title="Modifier" style="background:none;border:none;cursor:pointer;font-size:13px;">✏️</button>
+        <button class="btn-del" onclick="supprimerCommEv(${e.id})" title="Supprimer">✕</button>
       </div>`;
     });
     h+='</div>';
   });
   el.innerHTML=h;
+}
+
+let _editingCommEvId=null;
+function ajouterCommEv(){
+  const date=document.getElementById('commEvDate')?.value;
+  const label=document.getElementById('commEvLabel')?.value?.trim();
+  if(!date||!label){toast('Remplissez la date et le nom de l\'événement');return;}
+  if(!S.params.planningCom) S.params.planningCom=[];
+  const wasEditing=_editingCommEvId!=null;
+  if(wasEditing){
+    const ev=S.params.planningCom.find(e=>e.id===_editingCommEvId);
+    if(ev){ ev.date=date; ev.label=label; }
+    annulerEditionCommEv();
+  } else {
+    const nextId=(S.params.planningCom.reduce((max,e)=>Math.max(max,e.id||0),0))+1;
+    S.params.planningCom.push({id:nextId, date, label});
+    document.getElementById('commEvLabel').value='';
+  }
+  S.params.planningCom.sort((a,b)=>a.date.localeCompare(b.date));
+  persist();
+  renderCommPlanning();
+  toast(wasEditing?'✓ Événement modifié':'✓ Événement ajouté');
+}
+function editerCommEv(id){
+  const ev=(S.params.planningCom||[]).find(e=>e.id===id);
+  if(!ev) return;
+  _editingCommEvId=id;
+  document.getElementById('commEvDate').value=ev.date;
+  document.getElementById('commEvLabel').value=ev.label;
+  document.getElementById('commEvSaveBtn').textContent='✓ Enregistrer les modifications';
+  document.getElementById('commEvCancelBtn').style.display='inline-block';
+  document.getElementById('commEvLabel').scrollIntoView({block:'center',behavior:'smooth'});
+}
+function annulerEditionCommEv(){
+  _editingCommEvId=null;
+  document.getElementById('commEvDate').value='';
+  document.getElementById('commEvLabel').value='';
+  document.getElementById('commEvSaveBtn').textContent='+ Ajouter';
+  document.getElementById('commEvCancelBtn').style.display='none';
+}
+function supprimerCommEv(id){
+  if(!S.params.planningCom) return;
+  S.params.planningCom=S.params.planningCom.filter(e=>e.id!==id);
+  if(_editingCommEvId===id) annulerEditionCommEv();
+  persist();
+  renderCommPlanning();
+  toast('✓ Événement supprimé');
 }
 
 let _editingEvInterneId=null;
@@ -6394,7 +6468,7 @@ function renderEmpComms(){
   const evInternes=(S.params.evInternes||[])
     .filter(e=>e.date>=maintenant && (!e.participants || !e.participants.length || e.participants.includes(empId)))
     .slice(0,20);
-  const evCom=PLANNING_COM_DATA.filter(e=>e.date>=maintenant).slice(0,15);
+  const evCom=(S.params.planningCom||[]).filter(e=>e.date>=maintenant).slice(0,15);
   let h='';
   if(evInternes.length){
     h+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Événements internes</div>`;
