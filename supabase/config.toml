@@ -1,0 +1,5 @@
+[functions.send-notification]
+# La fonction ne se sert jamais du JWT de l'appelant (elle relaie juste vers Resend avec sa
+# propre clé secrète) — désactivé pour ne pas dépendre du format de la clé anon utilisée côté
+# client (l'app supporte déjà l'ancien format eyJ... et le nouveau sb_publishable_...).
+verify_jwt = false

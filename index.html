@@ -740,6 +740,14 @@ tbody tr:hover td{background:#FAFAF8;}
         <button class="btn btn-primary btn-sm mt-10" style="margin-left:8px;" onclick="saveTypeColors()">✓ Enregistrer</button>
       </div>
       <div class="param-card" style="margin-top:14px;">
+        <h3>📧 Notifications par email</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Un email est envoyé à ces adresses à chaque nouvelle demande (congé, échange...), absence signalée ou retard. Une ou plusieurs adresses, séparées par une virgule. Laisser vide = pas d'email envoyé (seule la notification dans l'appli reste active).
+        </div>
+        <div class="fg"><input type="text" id="paramNotifEmails" placeholder="antoine.bruchet@ok-la.fr, gwen.bruchet@ok-la.fr"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveNotifEmails()">✓ Enregistrer</button>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
         <h3>🔵 Événements & pastilles</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
           Créez vos propres types d'événements (vacances scolaires, soldes, inventaire...) avec la couleur de votre choix. Ils apparaîtront en petite pastille sur les cases du planning.
@@ -1478,6 +1486,25 @@ function supaHeaders(extra={}) {
   };
 }
 
+// ══ NOTIFICATIONS EMAIL (Resend, via la Edge Function Supabase send-notification) ══
+// Best-effort et jamais bloquant : si la fonction n'est pas déployée ou que l'envoi échoue,
+// l'appli continue normalement (la demande reste de toute façon visible dans l'appli — l'email
+// n'est qu'un rappel en plus). Volontairement pas de `await` aux points d'appel.
+async function envoyerNotifEmail(to, subject, html){
+  if(!_supaUrl || !_supaKey) return;
+  const recipients = (Array.isArray(to)?to:[to]).filter(Boolean);
+  if(!recipients.length) return;
+  try {
+    await fetch(`${supaBase()}/functions/v1/send-notification`, {
+      method:'POST', headers: supaHeaders(),
+      body: JSON.stringify({to:recipients, subject, html})
+    });
+  } catch(e){ console.warn('envoyerNotifEmail error', e); }
+}
+function emailsGestionnaire(){
+  return (S.params?.notifEmails||[]).filter(Boolean);
+}
+
 // Lecture d'une section depuis Supabase
 async function supaRead(section) {
   if(!_supaUrl || !_supaKey) return null;
@@ -1929,6 +1956,7 @@ async function supaWriteParams(params) {
       planning_com_seeded: !!params.planningComSeeded,
       custom_types: params.customTypes || [],
       type_labels: params.typeLabels || {},
+      notif_emails: params.notifEmails || [],
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2132,6 +2160,7 @@ async function supaReadParams(empRows) {
       planningComSeeded: app.planning_com_seeded || false,
       customTypes: app.custom_types || [],
       typeLabels: app.type_labels || {},
+      notifEmails: app.notif_emails || [],
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -2385,6 +2414,7 @@ async function loadAll(force=false){
     if(!S.params.typeColors) S.params.typeColors={};
     if(!Array.isArray(S.params.customTypes)) S.params.customTypes=[];
     if(!S.params.typeLabels) S.params.typeLabels={};
+    if(!Array.isArray(S.params.notifEmails)) S.params.notifEmails=[];
     if(!S.params.reposFixe) S.params.reposFixe={};
     // Résoudre les repos fixes par défaut
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
@@ -2920,7 +2950,34 @@ async function sendReq(){
   renderEmpQuota();
   renderEmpCongeSansSolde();
   renderEmpEchanges();
+  notifierNouvelleDemande(req, emp);
   toast('✓ Demande envoyée');
+}
+// Email best-effort à chaque nouvelle demande — un échange va au collègue concerné (c'est lui
+// qui doit répondre en premier), tout le reste va au(x) gestionnaire(s) configuré(s) en Paramètres.
+const LABELS_TYPE_DEMANDE={conge:'Congé payé',conge_sans_solde:'Congé sans solde',enfant_malade:'Enfant malade',maladie:'Arrêt maladie',medical:'Rendez-vous médical',autre:'Autre'};
+function notifierNouvelleDemande(req, emp){
+  const periode = req.dateDebut===req.dateFin
+    ? fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long',year:'numeric'})
+    : `${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}`;
+  if(req.type==='echange'){
+    const cible=S.employees.find(e=>e.id===req.cibleId);
+    if(!cible?.email) return;
+    envoyerNotifEmail(cible.email, `Proposition d'échange — ${emp.name}`,
+      `<p><strong>${emp.name}</strong> vous propose un échange de jour :</p>
+      <p>Son ${fmtFR(new Date(req.dateA+'T12:00'),{day:'numeric',month:'long'})} contre votre ${fmtFR(new Date(req.dateB+'T12:00'),{day:'numeric',month:'long'})}.</p>
+      ${req.note?`<p>Note : ${req.note}</p>`:''}
+      <p>Répondez directement depuis l'application OK-LA Planning.</p>`);
+    return;
+  }
+  const emails=emailsGestionnaire();
+  if(!emails.length) return;
+  const label=LABELS_TYPE_DEMANDE[req.type]||req.type;
+  envoyerNotifEmail(emails, `Nouvelle demande — ${label} — ${emp.name}`,
+    `<p><strong>${emp.name}</strong> (${emp.site}) a envoyé une nouvelle demande :</p>
+    <p><strong>${label}</strong> — ${periode}${req.joursOuvres?` (${req.joursOuvres} jour(s) ouvré(s))`:''}</p>
+    ${req.note?`<p>Note : ${req.note}</p>`:''}
+    <p>À traiter depuis l'application OK-LA Planning.</p>`);
 }
 
 // ══ GESTIONNAIRE ══
@@ -3814,6 +3871,13 @@ async function saveRetardEmp(){
   S.absences.push(abs);persist();updStats();
   closeModal('mRetardEmp');
   renderEmpAbsList();
+  const emails=emailsGestionnaire();
+  if(emails.length){
+    envoyerNotifEmail(emails, `Retard signalé — ${emp.name}`,
+      `<p><strong>${emp.name}</strong> (${emp.site}) a signalé un retard :</p>
+      <p>${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long',year:'numeric'})} — estimé ${duree}</p>
+      ${note?`<p>Note : ${note}</p>`:''}`);
+  }
   toast(`✓ Retard signalé — ${duree} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 
@@ -3911,6 +3975,14 @@ async function saveAbsenceEmp(){
   S.absences.push(abs);persist();updStats();
   closeModal('mAbsEmp');
   renderEmpWeek();renderEmpAbsList();
+  const emails=emailsGestionnaire();
+  if(emails.length){
+    envoyerNotifEmail(emails, `Absence signalée — ${emp.name}`,
+      `<p><strong>${emp.name}</strong> (${emp.site}) a signalé une absence :</p>
+      <p><strong>${motifFinal}</strong> — ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}</p>
+      ${note?`<p>Note : ${note}</p>`:''}
+      <p>À traiter depuis l'application OK-LA Planning.</p>`);
+  }
   toast(`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 function renderEmpAbsList(){
@@ -4600,6 +4672,8 @@ function renderParams(){
   renderParamMagasins();
   renderParamTypeColors();
   renderParamCustomTypes();
+  const notifEl=document.getElementById('paramNotifEmails');
+  if(notifEl) notifEl.value=(S.params.notifEmails||[]).join(', ');
   renderParamEvents();
   renderSoldesInitiaux();
   initVerrouUI();
@@ -4748,6 +4822,12 @@ function renderParamCustomTypes(){
     </div>`;
   });
   el.innerHTML = h || '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Aucun type personnalisé</div>';
+}
+function saveNotifEmails(){
+  const raw=document.getElementById('paramNotifEmails').value;
+  S.params.notifEmails = raw.split(',').map(e=>e.trim()).filter(Boolean);
+  persist();
+  toast('✓ Adresses enregistrées');
 }
 function ajouterTypePersonnalise(){
   const nom = prompt('Nom du nouveau type de planning (ex : Inventaire, Mission spéciale...) :');
