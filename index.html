@@ -1313,7 +1313,12 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg" style="flex:1;"><label>Code postal</label><input type="text" id="ficheCodePostal" maxlength="10"></div>
         <div class="fg" style="flex:2;"><label>Ville</label><input type="text" id="ficheVille"></div>
       </div>
-      <div class="fg"><label>Code d'accès (pour se connecter)</label><input type="text" id="ficheCode" maxlength="8" style="text-transform:uppercase;letter-spacing:2px;"></div>
+      <div class="fg"><label>Code d'accès (pour se connecter)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="ficheCode" maxlength="8" style="text-transform:uppercase;letter-spacing:2px;flex:1;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('ficheCode').value=genererCodeAleatoire()" title="Générer un nouveau code aléatoire">🎲</button>
+        </div>
+      </div>
       <div class="fg"><label>Site principal</label>
         <select id="ficheSite">
           <option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option>
