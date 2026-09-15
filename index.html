@@ -1270,7 +1270,12 @@ tbody tr:hover td{background:#FAFAF8;}
         <option value="entrepotB">Entrepôt B — 10h–12h / 13h30–18h30</option>
       </select>
     </div>
-    <div class="fg"><label>Code d'accès</label><input type="text" id="aeCode" readonly style="background:var(--bg);letter-spacing:2px;color:var(--muted);"></div>
+    <div class="fg"><label>Code d'accès</label>
+      <div style="display:flex;gap:6px;">
+        <input type="text" id="aeCode" maxlength="8" style="text-transform:uppercase;letter-spacing:2px;flex:1;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('aeCode').value=genererCodeAleatoire()" title="Générer un autre code">🎲</button>
+      </div>
+    </div>
     <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
       <input type="checkbox" id="aeChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
     </label></div>
@@ -4804,22 +4809,33 @@ async function deleteEmp(){
   closeModal('mFicheEmp');
   toast(`✓ ${emp.name} archivé(e)`);
 }
-function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCodePostal','aeVille','aeCode','aeDateEmbauche','aeDateFin'].forEach(id=>document.getElementById(id).value='');populerSelectTypeContrat('aeTypeContrat');openModal('mEmp');}
-document.getElementById('aeName').addEventListener('input',function(){
-  const p=this.value.trim().split(' ');
-  if(p.length>=2){const c=(p[0].substring(0,3)+p[1].substring(0,2)).toUpperCase().replace(/[^A-Z]/g,'');
-    document.getElementById('aeCode').value=c+String(S.employees.length+1).padStart(2,'0');}
-});
+// Un code dérivé du nom ("CEDQU03") se devine trop facilement en connaissant juste l'employé et
+// un petit numéro séquentiel — remplacé par un code aléatoire, même longueur, sans lien avec le
+// nom (Antoine, 2026-09-15). Alphabet sans caractères ambigus à l'oral/l'écrit (0/O, 1/I/L) pour
+// rester facile à communiquer par téléphone.
+function genererCodeAleatoire(){
+  const alphabet='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code;
+  do {
+    code='';
+    for(let i=0;i<6;i++) code+=alphabet[Math.floor(Math.random()*alphabet.length)];
+  } while(S.employees.some(e=>(e.code||'').toUpperCase()===code));
+  return code;
+}
+function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCodePostal','aeVille','aeDateEmbauche','aeDateFin'].forEach(id=>document.getElementById(id).value='');document.getElementById('aeCode').value=genererCodeAleatoire();populerSelectTypeContrat('aeTypeContrat');openModal('mEmp');}
 async function saveNewEmp(){
   const name=document.getElementById('aeName').value.trim();
   const email=document.getElementById('aeEmail').value.trim();
   if(!name||!email){toast('Remplissez nom et email');return;}
+  const code=document.getElementById('aeCode').value.trim().toUpperCase();
+  if(!code){toast('Le code d\'accès ne peut pas être vide');return;}
+  if(S.employees.some(e=>(e.code||'').toUpperCase()===code)){toast(`⚠️ Le code "${code}" est déjà utilisé par un autre employé`);return;}
   const site=document.getElementById('aeSite').value;
   const slot=document.getElementById('aeSlot').value;
   const _existingENums=S.employees.map(e=>{const m=/^E(\d+)$/.exec(e.id);return m?parseInt(m[1],10):0;});
   const _nextENum=(_existingENums.length?Math.max(..._existingENums):0)+1;
   const emp={id:'E'+String(_nextENum).padStart(2,'0'),
-    code:document.getElementById('aeCode').value,name,email,
+    code,name,email,
     tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
     codePostal:document.getElementById('aeCodePostal').value.trim(),
     ville:document.getElementById('aeVille').value.trim(),
