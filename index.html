@@ -574,7 +574,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="btn btn-sm" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:12px;" onclick="openEventModal()">
         🎨 Colorer une période (vacances, soldes, férié...)
       </button>
-      <button id="btnEnvoyerSms" onclick="envoyerNotifsSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés concernés ne sont prévenus par SMS qu'à ce moment-là, pas à chaque modification">
+      <button id="btnEnvoyerSms" onclick="ouvrirRevueSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés concernés ne sont prévenus par SMS qu'à ce moment-là, pas à chaque modification">
         📤 Envoyer les SMS en attente (0)
       </button>
       <div class="view-bar">
@@ -1085,6 +1085,19 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL REVUE AVANT ENVOI DES SMS EN ATTENTE -->
+<div class="modal-overlay" id="mRevueSms">
+  <div class="modal">
+    <div class="modal-title">📤 Envoyer les SMS en attente</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Décochez les salariés dont le planning est encore en préparation — leurs modifications resteront en attente pour un prochain envoi.</div>
+    <div id="revueSmsListe" style="max-height:50vh;overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mRevueSms')">Annuler</button>
+      <button class="btn btn-save" onclick="confirmerEnvoiSmsSelection()">→ Envoyer aux sélectionnés</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL INFOS ÉVÉNEMENT INTERNE (clic sur un badge réunion/formation/livraison/autre) -->
 <div class="modal-overlay" id="mEvInfo">
   <div class="modal" style="max-width:340px;">
@@ -1583,7 +1596,50 @@ function renderPendingSmsBtn(){
   btn.style.display = n>0 ? 'inline-block' : 'none';
   btn.textContent = `📤 Envoyer les SMS en attente (${n})`;
 }
-async function envoyerNotifsSmsEnAttente(){
+// Construit le texte du SMS "planning modifié" pour un salarié à partir de ses entrées en
+// attente (une ou plusieurs) — factorisé pour être utilisé à l'envoi réel, cf. confirmerEnvoiSmsSelection.
+function texteSmsModifPlanning(emp, entries){
+  // Les noms sont stockés en majuscules (ex: "EMILIE PATRIS") — capitalisation correcte pour
+  // un SMS qui se veut dans un français soigné.
+  const prenomBrut=emp.name.split(' ')[0];
+  const prenom=prenomBrut.charAt(0)+prenomBrut.slice(1).toLowerCase();
+  // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
+  // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
+  const lienAppli='https://ok-la.github.io/okla-planning/';
+  if(entries.length===1){
+    return `Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. Consultez : ${lienAppli}`;
+  }
+  const liste=entries.slice(0,4).map(e=>`${e.dl} (${e.det})`).join(', ');
+  const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
+  return `Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. Consultez : ${lienAppli}`;
+}
+// Étape de revue avant envoi (Antoine, 2026-09-15) : le bouton envoyait auparavant directement à
+// TOUS les salariés en attente, sans que le gestionnaire sache qui était concerné — risque de
+// prévenir quelqu'un dont le planning est encore en cours de préparation. Affiche maintenant la
+// liste (regroupée par salarié) avec une case à décocher pour exclure ceux pas encore prêts.
+function ouvrirRevueSmsEnAttente(){
+  const pending=S.params.pendingSms||[];
+  if(!pending.length){toast('Aucun SMS en attente');return;}
+  const parEmploye={};
+  pending.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
+  const el=document.getElementById('revueSmsListe');
+  el.innerHTML=Object.keys(parEmploye).map(empId=>{
+    const emp=S.employees.find(e=>e.id===empId);
+    const entries=parEmploye[empId];
+    const resume=entries.map(e=>`${e.dl} (${e.det})`).join(', ');
+    const sansTel=!emp?.tel;
+    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:${sansTel?'not-allowed':'pointer'};${sansTel?'opacity:.55;':''}">
+      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'':'checked'} ${sansTel?'disabled':''} style="margin-top:3px;width:auto;">
+      <div style="flex:1;"><div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#DC2626;font-weight:400;">(pas de téléphone — ne sera pas envoyé)</span>':''}</div>
+      <div style="font-size:11px;color:var(--muted);">${resume}</div></div>
+    </label>`;
+  }).join('');
+  openModal('mRevueSms');
+}
+async function confirmerEnvoiSmsSelection(){
+  const empsCoches=new Set([...document.querySelectorAll('.revue-sms-chk:checked')].map(el=>el.dataset.emp));
+  closeModal('mRevueSms');
+  if(!empsCoches.size){toast('Aucun salarié sélectionné');return;}
   if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
   // Lecture + vidage atomiques côté serveur (RPC claim_pending_sms) plutôt que de faire confiance
   // à S.params.pendingSms en mémoire — la file est partagée entre Antoine et Gwen sur des
@@ -1599,30 +1655,35 @@ async function envoyerNotifsSmsEnAttente(){
   if(!pending.length){toast('Aucun SMS en attente');return;}
   const parEmploye={};
   pending.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
-  let nbEnvoyes=0, nbSansTel=0;
+  let nbEnvoyes=0, nbSansTel=0, nbDiffere=0;
+  const aReporter=[];
   Object.keys(parEmploye).forEach(empId=>{
-    const emp=S.employees.find(e=>e.id===empId);
     const entries=parEmploye[empId];
+    // Décoché (ou apparu dans la file après l'ouverture de la revue) : on ne l'envoie pas
+    // maintenant, mais on ne perd pas non plus ces entrées — remises en attente pour plus tard.
+    if(!empsCoches.has(empId)){ aReporter.push(...entries); nbDiffere+=entries.length; return; }
+    const emp=S.employees.find(e=>e.id===empId);
     if(!emp?.tel){ nbSansTel++; return; }
-    // Les noms sont stockés en majuscules (ex: "EMILIE PATRIS") — capitalisation correcte pour
-    // un SMS qui se veut dans un français soigné.
-    const prenomBrut=emp.name.split(' ')[0];
-    const prenom=prenomBrut.charAt(0)+prenomBrut.slice(1).toLowerCase();
-    // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
-    // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
-    const lienAppli='https://ok-la.github.io/okla-planning/';
-    let texte;
-    if(entries.length===1){
-      texte=`Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. Consultez : ${lienAppli}`;
-    } else {
-      const liste=entries.slice(0,4).map(e=>`${e.dl} (${e.det})`).join(', ');
-      const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
-      texte=`Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. Consultez : ${lienAppli}`;
-    }
-    envoyerNotifSms(emp.tel, texte);
+    envoyerNotifSms(emp.tel, texteSmsModifPlanning(emp, entries));
     nbEnvoyes++;
   });
-  toast(`✓ SMS envoyé(s) à ${nbEnvoyes} salarié(s)${nbSansTel?` (${nbSansTel} sans téléphone, ignoré(s))`:''}`);
+  if(aReporter.length){
+    // Remise en attente atomique côté serveur (RPC append_pending_sms) — un simple persist()
+    // enverrait la valeur COMPLÈTE et déjà périmée de S.params, écrasant au passage tout ce
+    // qu'un autre gestionnaire, sur un autre appareil, aurait pu ajouter à la file entre-temps
+    // (persist()/supaWriteParams ne fait pas de fusion, juste un PATCH intégral de la ligne).
+    try {
+      const rAppend = await fetch(`${supaBase()}/rest/v1/rpc/append_pending_sms`, {
+        method:'POST', headers: supaHeaders(), body: JSON.stringify({entries: aReporter})
+      });
+      if(!rAppend.ok) console.warn('append_pending_sms error', rAppend.status, await rAppend.text());
+    } catch(e){ console.warn('append_pending_sms error', e); }
+    // Reflet local immédiat pour le bouton/badge — sera de toute façon recalé par la prochaine
+    // resynchro si un autre gestionnaire a ajouté autre chose entre-temps.
+    S.params.pendingSms=aReporter;
+    renderPendingSmsBtn();
+  }
+  toast(`✓ SMS envoyé(s) à ${nbEnvoyes} salarié(s)${nbDiffere?`, ${nbDiffere} entrée(s) laissée(s) en attente`:''}${nbSansTel?` (${nbSansTel} sans téléphone, ignoré(s))`:''}`);
 }
 
 // Lecture d'une section depuis Supabase
