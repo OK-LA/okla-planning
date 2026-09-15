@@ -3,3 +3,7 @@
 # propre clé secrète) — désactivé pour ne pas dépendre du format de la clé anon utilisée côté
 # client (l'app supporte déjà l'ancien format eyJ... et le nouveau sb_publishable_...).
 verify_jwt = false
+
+[functions.send-sms]
+# Même raison que send-notification ci-dessus.
+verify_jwt = false

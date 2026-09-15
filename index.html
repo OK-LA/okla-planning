@@ -748,6 +748,14 @@ tbody tr:hover td{background:#FAFAF8;}
         <button class="btn btn-primary btn-sm mt-10" onclick="saveNotifEmails()">✓ Enregistrer</button>
       </div>
       <div class="param-card" style="margin-top:14px;">
+        <h3>📱 Notifications par SMS</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Mêmes déclencheurs que l'email ci-dessus, par SMS (Capitole Mobile). Un ou plusieurs numéros, séparés par une virgule, format 06XXXXXXXX. Laisser vide = pas de SMS envoyé.
+        </div>
+        <div class="fg"><input type="text" id="paramNotifPhones" placeholder="0612345678, 0687654321"></div>
+        <button class="btn btn-primary btn-sm mt-10" onclick="saveNotifPhones()">✓ Enregistrer</button>
+      </div>
+      <div class="param-card" style="margin-top:14px;">
         <h3>🔵 Événements & pastilles</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
           Créez vos propres types d'événements (vacances scolaires, soldes, inventaire...) avec la couleur de votre choix. Ils apparaîtront en petite pastille sur les cases du planning.
@@ -1504,6 +1512,27 @@ async function envoyerNotifEmail(to, subject, html){
 function emailsGestionnaire(){
   return (S.params?.notifEmails||[]).filter(Boolean);
 }
+// ══ NOTIFICATIONS SMS (Capitole Mobile, via la Edge Function Supabase send-sms) ══
+// Même principe que l'email ci-dessus : best-effort, jamais bloquant, pas de `await` aux points
+// d'appel. Les deux canaux (email/SMS) sont indépendants — chacun s'active seulement si au
+// moins une adresse/numéro est configuré en Paramètres.
+async function envoyerNotifSms(to, text){
+  if(!_supaUrl || !_supaKey) return;
+  // Numéros libres saisis un peu partout (fiche employé, Paramètres...) avec espaces/points/tirets
+  // ("06 12 34 56 78") — l'API Capitole attend une suite de chiffres (garde le "+" éventuel pour
+  // un format international), donc on normalise ici plutôt que de risquer un échec d'envoi silencieux.
+  const recipients = (Array.isArray(to)?to:[to]).filter(Boolean).map(n=>n.replace(/[^\d+]/g,'')).filter(Boolean);
+  if(!recipients.length) return;
+  try {
+    await fetch(`${supaBase()}/functions/v1/send-sms`, {
+      method:'POST', headers: supaHeaders(),
+      body: JSON.stringify({to:recipients, text})
+    });
+  } catch(e){ console.warn('envoyerNotifSms error', e); }
+}
+function telephonesGestionnaire(){
+  return (S.params?.notifPhones||[]).filter(Boolean);
+}
 
 // Lecture d'une section depuis Supabase
 async function supaRead(section) {
@@ -1957,6 +1986,7 @@ async function supaWriteParams(params) {
       custom_types: params.customTypes || [],
       type_labels: params.typeLabels || {},
       notif_emails: params.notifEmails || [],
+      notif_phones: params.notifPhones || [],
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2161,6 +2191,7 @@ async function supaReadParams(empRows) {
       customTypes: app.custom_types || [],
       typeLabels: app.type_labels || {},
       notifEmails: app.notif_emails || [],
+      notifPhones: app.notif_phones || [],
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -2415,6 +2446,7 @@ async function loadAll(force=false){
     if(!Array.isArray(S.params.customTypes)) S.params.customTypes=[];
     if(!S.params.typeLabels) S.params.typeLabels={};
     if(!Array.isArray(S.params.notifEmails)) S.params.notifEmails=[];
+    if(!Array.isArray(S.params.notifPhones)) S.params.notifPhones=[];
     if(!S.params.reposFixe) S.params.reposFixe={};
     // Résoudre les repos fixes par défaut
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
@@ -2962,22 +2994,24 @@ function notifierNouvelleDemande(req, emp){
     : `${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}`;
   if(req.type==='echange'){
     const cible=S.employees.find(e=>e.id===req.cibleId);
-    if(!cible?.email) return;
-    envoyerNotifEmail(cible.email, `Proposition d'échange — ${emp.name}`,
+    if(!cible) return;
+    if(cible.email) envoyerNotifEmail(cible.email, `Proposition d'échange — ${emp.name}`,
       `<p><strong>${emp.name}</strong> vous propose un échange de jour :</p>
       <p>Son ${fmtFR(new Date(req.dateA+'T12:00'),{day:'numeric',month:'long'})} contre votre ${fmtFR(new Date(req.dateB+'T12:00'),{day:'numeric',month:'long'})}.</p>
       ${req.note?`<p>Note : ${req.note}</p>`:''}
       <p>Répondez directement depuis l'application OK-LA Planning.</p>`);
+    if(cible.tel) envoyerNotifSms(cible.tel, `OK-LA Planning: ${emp.name} vous propose un echange (repondez dans l'appli)`);
     return;
   }
-  const emails=emailsGestionnaire();
-  if(!emails.length) return;
   const label=LABELS_TYPE_DEMANDE[req.type]||req.type;
-  envoyerNotifEmail(emails, `Nouvelle demande — ${label} — ${emp.name}`,
+  const emails=emailsGestionnaire();
+  if(emails.length) envoyerNotifEmail(emails, `Nouvelle demande — ${label} — ${emp.name}`,
     `<p><strong>${emp.name}</strong> (${emp.site}) a envoyé une nouvelle demande :</p>
     <p><strong>${label}</strong> — ${periode}${req.joursOuvres?` (${req.joursOuvres} jour(s) ouvré(s))`:''}</p>
     ${req.note?`<p>Note : ${req.note}</p>`:''}
     <p>À traiter depuis l'application OK-LA Planning.</p>`);
+  const phones=telephonesGestionnaire();
+  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: nouvelle demande (${label}) - ${emp.name} - ${periode}`);
 }
 
 // ══ GESTIONNAIRE ══
@@ -3878,6 +3912,8 @@ async function saveRetardEmp(){
       <p>${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long',year:'numeric'})} — estimé ${duree}</p>
       ${note?`<p>Note : ${note}</p>`:''}`);
   }
+  const phones=telephonesGestionnaire();
+  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: retard signale - ${emp.name} - ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})} (${duree})`);
   toast(`✓ Retard signalé — ${duree} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 
@@ -3983,6 +4019,8 @@ async function saveAbsenceEmp(){
       ${note?`<p>Note : ${note}</p>`:''}
       <p>À traiter depuis l'application OK-LA Planning.</p>`);
   }
+  const phones=telephonesGestionnaire();
+  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: absence signalee - ${emp.name} - ${motifFinal} - ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
   toast(`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 function renderEmpAbsList(){
@@ -4674,6 +4712,8 @@ function renderParams(){
   renderParamCustomTypes();
   const notifEl=document.getElementById('paramNotifEmails');
   if(notifEl) notifEl.value=(S.params.notifEmails||[]).join(', ');
+  const notifPhoneEl=document.getElementById('paramNotifPhones');
+  if(notifPhoneEl) notifPhoneEl.value=(S.params.notifPhones||[]).join(', ');
   renderParamEvents();
   renderSoldesInitiaux();
   initVerrouUI();
@@ -4828,6 +4868,12 @@ function saveNotifEmails(){
   S.params.notifEmails = raw.split(',').map(e=>e.trim()).filter(Boolean);
   persist();
   toast('✓ Adresses enregistrées');
+}
+function saveNotifPhones(){
+  const raw=document.getElementById('paramNotifPhones').value;
+  S.params.notifPhones = raw.split(',').map(p=>p.trim()).filter(Boolean);
+  persist();
+  toast('✓ Numéros enregistrés');
 }
 function ajouterTypePersonnalise(){
   const nom = prompt('Nom du nouveau type de planning (ex : Inventaire, Mission spéciale...) :');
