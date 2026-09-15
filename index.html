@@ -466,9 +466,9 @@ tbody tr:hover td{background:#FAFAF8;}
 
     <div class="quota-card mt-10" id="empQuotaCard">
       <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🏖️ Mes congés payés</div>
-      <div class="quota-grid" id="empQuotaGrid"></div>
-      <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Jokers utilisés</div>
-      <div id="empJokers"></div>
+      <div class="quota-grid" id="empQuotaGrid" style="display:none;"></div>
+      <div id="empJokersTitre" style="display:none;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Jokers utilisés</div>
+      <div id="empJokers" style="display:none;"></div>
       <div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mes demandes</div>
       <div id="empCongesList"></div>
     </div>
@@ -1119,10 +1119,15 @@ tbody tr:hover td{background:#FAFAF8;}
   <div class="modal">
     <div class="modal-title">✏️ Mes informations</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Le gestionnaire est prévenu à chaque modification.</div>
+    <div class="fg"><label>Email</label><input type="email" id="miEmail" placeholder="prenom@ok-la.fr"></div>
     <div class="fg"><label>Téléphone</label><input type="tel" id="miTel" placeholder="06 12 34 56 78"></div>
     <div class="fg"><label>Adresse</label><input type="text" id="miAddr" placeholder="12 rue des Lilas"></div>
     <div class="fg"><label>Code postal</label><input type="text" id="miCodePostal" placeholder="80000"></div>
     <div class="fg"><label>Ville</label><input type="text" id="miVille" placeholder="Amiens"></div>
+    <div class="fg"><label>Enfant(s)</label>
+      <div id="miEnfantsList"></div>
+      <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterEnfantPerso()">+ Ajouter un enfant</button>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mMesInfos')">Annuler</button>
       <button class="btn btn-save" onclick="enregistrerMesInfos()">✓ Enregistrer</button>
@@ -1535,8 +1540,9 @@ async function supaWriteEmployees(employees) {
     // Un employé qui part est archivé (active=false), jamais supprimé de la table — voir deleteEmp().
     const ids = (employees || []).map(e => e.id).filter(Boolean);
     if (!ids.length) return true;
-    const rows = employees.map(e => ({
+    const rows = employees.map((e, i) => ({
       id: e.id,
+      order_index: i,
       code: e.code || '',
       name: e.name || '',
       email: e.email || null,
@@ -1571,7 +1577,7 @@ async function supaWriteEmployees(employees) {
 async function supaReadEmployees() {
   if(!_supaUrl || !_supaKey) return null;
   try {
-    const r = await fetch(`${supaBase()}/rest/v1/employees?select=*`, { headers: supaHeaders() });
+    const r = await fetch(`${supaBase()}/rest/v1/employees?select=*&order=order_index.asc.nullslast,id.asc`, { headers: supaHeaders() });
     if(!r.ok) return null;
     const rows = await r.json();
     return rows.map(row => ({
@@ -1686,6 +1692,7 @@ async function supaWriteRequests(requests) {
       cible_email: r.cibleEmail || null,
       jours_ouvres: (r.joursOuvres === '' || r.joursOuvres == null) ? null : r.joursOuvres,
       note: r.note || null,
+      planning_snapshot: r.planningSnapshot || null,
     }));
     const r2 = await fetch(`${supaBase()}/rest/v1/requests?on_conflict=id`, {
       method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
@@ -1707,6 +1714,7 @@ async function supaReadRequests() {
       empEmail: row.emp_email, dateDebut: row.date_debut, dateFin: row.date_fin,
       dateA: row.date_a, dateB: row.date_b, cibleId: row.cible_id, cibleName: row.cible_name,
       cibleEmail: row.cible_email, joursOuvres: row.jours_ouvres, note: row.note,
+      planningSnapshot: row.planning_snapshot || null,
       date: row.date_debut,
     }));
   } catch(e) { console.warn('supaReadRequests error', e); return null; }
@@ -2171,9 +2179,25 @@ async function supaReadAll() {
 
 // Écriture différée (debounce 1.5s pour éviter les appels en rafale)
 let _supaWriteTimers = {};
+// Compteur de writes en attente par section (annulé-et-reprogrammé compte pour 1, mais un envoi
+// déjà parti — en vol sur un réseau lent — ET un nouveau ré-programmé pour la même section
+// comptent chacun pour 1, jamais perdus l'un pour l'autre) — une resync (resyncIfPossible)
+// pendant cette fenêtre remplacerait S.* par une version serveur pas encore à jour, et une
+// modification locale suivante (ex: cliquer ▲▼ deux fois de suite) écraserait silencieusement
+// la précédente.
+let _pendingWrites = {};
+function hasPendingWrites(){ return Object.values(_pendingWrites).some(n=>n>0); }
 function supaWriteDebounced(section, data) {
-  clearTimeout(_supaWriteTimers[section]);
-  _supaWriteTimers[section] = setTimeout(() => supaWrite(section, data), 1500);
+  if(_supaWriteTimers[section]){
+    clearTimeout(_supaWriteTimers[section]);
+    _pendingWrites[section] = Math.max(0, (_pendingWrites[section]||0) - 1);
+  }
+  _pendingWrites[section] = (_pendingWrites[section]||0) + 1;
+  _supaWriteTimers[section] = setTimeout(async () => {
+    _supaWriteTimers[section] = null;
+    await supaWrite(section, data);
+    _pendingWrites[section] = Math.max(0, (_pendingWrites[section]||0) - 1);
+  }, 1500);
 }
 
 // ══ STATE ══
@@ -3733,6 +3757,10 @@ function appliquerMotifAbsence(motifId, empId, dateStr){
       dateDebut:dateStr, dateFin:dateStr, date:dateStr,
       note:'Absence déclarée — décompte CP automatique',
       joursOuvres:countJoursOuvresReels(dateStr,dateStr),
+      // Capturé ici (avant que l'appelant n'écrase la case) pour que cette "CP" reste
+      // annulable/restaurable exactement comme une demande de congé classique — voir
+      // snapshotPlanningAvant/retirerCongePlanning.
+      planningSnapshot: snapshotPlanningAvant(empId, dateStr, dateStr),
     });
     return 'conge';
   }
@@ -3790,30 +3818,67 @@ async function saveRetardEmp(){
 }
 
 // ── Mes informations (salarié modifie ses propres coordonnées) ──
+// État temporaire pendant l'édition des enfants par le salarié lui-même (distinct de
+// `editingEnfants`, utilisé côté fiche gestionnaire — les deux modals ne sont jamais ouverts
+// en même temps mais autant garder les états séparés pour éviter toute confusion future).
+let editingEnfantsPerso=[];
 function ouvrirMesInfos(){
   const emp=S.user; if(!emp) return;
+  document.getElementById('miEmail').value=emp.email||'';
   document.getElementById('miTel').value=emp.tel||'';
   document.getElementById('miAddr').value=emp.addr||'';
   document.getElementById('miCodePostal').value=emp.codePostal||'';
   document.getElementById('miVille').value=emp.ville||'';
+  editingEnfantsPerso=JSON.parse(JSON.stringify(emp.enfants||[]));
+  renderEnfantsPerso();
   openModal('mMesInfos');
+}
+function renderEnfantsPerso(){
+  const el=document.getElementById('miEnfantsList');
+  if(!el) return;
+  el.innerHTML = editingEnfantsPerso.map((e,i)=>`
+    <div class="magasin-row" style="gap:6px;">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
+      <input type="date" class="magasin-name-input" id="miEnfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <button class="btn-del" onclick="supprimerEnfantPerso(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
+}
+function ajouterEnfantPerso(){
+  editingEnfantsPerso.push({dateNaissance:''});
+  renderEnfantsPerso();
+}
+function supprimerEnfantPerso(idx){
+  editingEnfantsPerso.splice(idx,1);
+  renderEnfantsPerso();
 }
 function enregistrerMesInfos(){
   const emp=S.user; if(!emp) return;
   const nouveaux={
+    email: document.getElementById('miEmail').value.trim(),
     tel: document.getElementById('miTel').value.trim(),
     addr: document.getElementById('miAddr').value.trim(),
     codePostal: document.getElementById('miCodePostal').value.trim(),
     ville: document.getElementById('miVille').value.trim(),
   };
-  const labels={tel:'Téléphone',addr:'Adresse',codePostal:'Code postal',ville:'Ville'};
+  const labels={email:'Email',tel:'Téléphone',addr:'Adresse',codePostal:'Code postal',ville:'Ville'};
   const changements=Object.keys(nouveaux).filter(champ=>(emp[champ]||'')!==nouveaux[champ]);
-  if(!changements.length){toast('Aucune modification');closeModal('mMesInfos');return;}
+  editingEnfantsPerso.forEach((e,i)=>{
+    const dateEl=document.getElementById('miEnfantDate_'+i);
+    if(dateEl) e.dateNaissance=dateEl.value;
+  });
+  const nouveauxEnfants=editingEnfantsPerso.filter(e=>e.dateNaissance);
+  const enfantsChanges = JSON.stringify((emp.enfants||[]).map(e=>e.dateNaissance).sort()) !== JSON.stringify(nouveauxEnfants.map(e=>e.dateNaissance).sort());
+  if(!changements.length && !enfantsChanges){toast('Aucune modification');closeModal('mMesInfos');return;}
   changements.forEach(champ=>{ emp[champ]=nouveaux[champ]; });
+  if(enfantsChanges){
+    emp.enfants=nouveauxEnfants;
+    emp.hasChildren=nouveauxEnfants.length>0;
+  }
+  const champsModifies=[...changements.map(c=>labels[c]), ...(enfantsChanges?['Enfants']:[])];
   if(!S.profilNotifs) S.profilNotifs=[];
   S.profilNotifs.push({
     id: Date.now(), empId: emp.id, empName: emp.name, seen:false,
-    message: `${emp.name} a modifié : ${changements.map(c=>labels[c]).join(', ')}`,
+    message: `${emp.name} a modifié : ${champsModifies.join(', ')}`,
   });
   persist();
   closeModal('mMesInfos');
@@ -5493,11 +5558,19 @@ async function supaUploadAll(){
     ['events', S.events],
     ['sc', SC],
   ];
+  // Marque toutes les sections comme "en attente" pour toute la durée de l'envoi (pas seulement
+  // section par section) — un envoi manuel prend plusieurs secondes, largement de quoi croiser
+  // une resync en arrière-plan sinon (voir le commentaire sur _pendingWrites plus haut).
+  sections.forEach(([section])=>{ _pendingWrites[section]=(_pendingWrites[section]||0)+1; });
   let ok = 0, errors = [];
-  for(const [section, data] of sections){
-    const success = await supaWrite(section, data);
-    if(success) ok++;
-    else errors.push(section);
+  try {
+    for(const [section, data] of sections){
+      const success = await supaWrite(section, data);
+      if(success) ok++;
+      else errors.push(section);
+    }
+  } finally {
+    sections.forEach(([section])=>{ _pendingWrites[section]=Math.max(0,(_pendingWrites[section]||0)-1); });
   }
   if(ok === sections.length){
     if(statusEl) statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">✅ ${ok}/${sections.length} sections envoyées. Toutes vos données sont dans Supabase.</span>`;
@@ -6059,13 +6132,33 @@ function renderCongesMgr() {
 
 // Retire les jours de congé posés sur le planning pour une plage donnée (les jours de repos
 // fixe, jamais marqués 'conge' au départ, sont laissés tels quels).
-function retirerCongePlanning(empId, dateDebut, dateFin){
-  const emp = S.employees.find(e=>e.id===empId);
+// Capture l'état actuel du planning sur une période, juste avant d'y poser un congé — permet de
+// le restaurer exactement (jour travaillé habituel, mais aussi une exception ponctuelle comme une
+// formation) si le CP est ensuite annulé ou modifié, plutôt que de tout remettre à "repos".
+function snapshotPlanningAvant(empId, dateDebut, dateFin){
+  const snap = {};
   let cur = new Date(dateDebut+'T12:00');
   const fin = new Date(dateFin+'T12:00');
   while(cur<=fin){
     const key = `${empId}_${fmt(cur)}`;
-    if(S.planning[key]?.type==='conge') S.planning[key] = {type:'off', site:emp?.site||'', note:''};
+    snap[fmt(cur)] = S.planning[key] ? {...S.planning[key]} : {type:'off', site:'', note:''};
+    cur = addDays(cur,1);
+  }
+  return snap;
+}
+// Restaure le planning d'une demande de congé à partir de son instantané (`req.planningSnapshot`)
+// — repose exactement ce qu'il y avait avant (jour travaillé, exception...). Une demande approuvée
+// avant l'existence de cet instantané (pas de `planningSnapshot`) retombe sur l'ancien comportement
+// (repos), par sécurité plutôt que de planter.
+function retirerCongePlanning(req){
+  const emp = S.employees.find(e=>e.id===req.empId);
+  const snap = req.planningSnapshot || {};
+  let cur = new Date(req.dateDebut+'T12:00');
+  const fin = new Date(req.dateFin+'T12:00');
+  while(cur<=fin){
+    const dStr = fmt(cur);
+    const key = `${req.empId}_${dStr}`;
+    if(S.planning[key]?.type==='conge') S.planning[key] = snap[dStr] ? {...snap[dStr]} : {type:'off', site:emp?.site||'', note:''};
     cur = addDays(cur,1);
   }
 }
@@ -6074,13 +6167,13 @@ function annulerCongeValide(id){
   if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
   const req = S.requests.find(r=>r.id==id);
   if(!req) return;
-  if(!confirm(`Annuler le CP de ${req.empName} du ${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long'})} ? Les jours redeviennent disponibles au planning.`)) return;
-  retirerCongePlanning(req.empId, req.dateDebut, req.dateFin);
+  if(!confirm(`Annuler le CP de ${req.empName} du ${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long'})} ? Le planning de cette période reprend son état d'origine.`)) return;
+  retirerCongePlanning(req);
   req.status = 'cancelled';
   persist();
   renderCongesMgr();
   refreshActiveView();
-  toast('✓ CP annulé, jours remis à disposition');
+  toast('✓ CP annulé, planning restauré');
 }
 
 let _modifCongeId = null;
@@ -6106,11 +6199,15 @@ function enregistrerModifConge(){
   // règles là où une vraie nouvelle demande les aurait respectées.
   const check = verifierRegleConges(req.empId, nouveauDebut, nouveauFin);
   if(check.warnings.length && !check.errors.length) incrementJoker(req.empId);
-  // Libère l'ancienne période, puis repose la nouvelle exactement comme une validation normale
-  // (respecte le repos fixe de l'employé).
-  retirerCongePlanning(req.empId, req.dateDebut, req.dateFin);
+  // Libère l'ancienne période (restaure son état d'origine), puis capture un nouvel instantané
+  // pour la nouvelle période — après la restauration, pour que les jours communs aux deux
+  // périodes (période juste raccourcie/allongée) capturent bien leur vrai état d'origine et non
+  // "conge". Repose ensuite la nouvelle période exactement comme une validation normale (respecte
+  // le repos fixe de l'employé).
+  retirerCongePlanning(req);
   req.dateDebut = nouveauDebut;
   req.dateFin = nouveauFin;
+  req.planningSnapshot = snapshotPlanningAvant(req.empId, nouveauDebut, nouveauFin);
   const emp = S.employees.find(e=>e.id===req.empId);
   let cur = new Date(nouveauDebut+'T12:00');
   const fin = new Date(nouveauFin+'T12:00');
@@ -6138,6 +6235,7 @@ async function validerConge(id) {
     incrementJoker(req.empId);
   }
   req.status = 'approved';
+  req.planningSnapshot = snapshotPlanningAvant(req.empId, req.dateDebut, req.dateFin);
   // Marquer dans le planning
   const emp = S.employees.find(e => e.id === req.empId);
   let cur = new Date(req.dateDebut);
@@ -6469,6 +6567,9 @@ function resyncIfPossible(){
   if (!S.role || !_supaUrl || !_supaKey) return;
   // On évite de resynchroniser en plein milieu d'une saisie (une modale est ouverte)
   if (document.querySelector('.modal-overlay.open')) return;
+  // Idem pendant qu'une écriture débouncée n'est pas encore partie — sinon on remplacerait
+  // S.* par une version serveur pas encore à jour et une modif locale suivante écraserait la précédente.
+  if (hasPendingWrites()) return;
   lastVisibilitySync = Date.now();
   loadAll();
 }
