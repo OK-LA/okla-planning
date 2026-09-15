@@ -1293,7 +1293,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg" style="flex:1;"><label>Code postal</label><input type="text" id="ficheCodePostal" maxlength="10"></div>
         <div class="fg" style="flex:2;"><label>Ville</label><input type="text" id="ficheVille"></div>
       </div>
-      <div class="fg"><label>Code employé</label><input type="text" id="ficheCode" readonly style="background:#f9f9f9;color:var(--muted);cursor:not-allowed;"></div>
+      <div class="fg"><label>Code d'accès (pour se connecter)</label><input type="text" id="ficheCode" maxlength="8" style="text-transform:uppercase;letter-spacing:2px;"></div>
       <div class="fg"><label>Site principal</label>
         <select id="ficheSite">
           <option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option>
@@ -1583,13 +1583,16 @@ async function envoyerNotifsSmsEnAttente(){
     // un SMS qui se veut dans un français soigné.
     const prenomBrut=emp.name.split(' ')[0];
     const prenom=prenomBrut.charAt(0)+prenomBrut.slice(1).toLowerCase();
+    // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
+    // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
+    const lienAppli='https://ok-la.github.io/okla-planning/';
     let texte;
     if(entries.length===1){
-      texte=`Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. OK-LA Planning`;
+      texte=`Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. Consultez : ${lienAppli}`;
     } else {
       const liste=entries.slice(0,4).map(e=>`${e.dl} (${e.det})`).join(', ');
       const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
-      texte=`Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. OK-LA Planning`;
+      texte=`Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. Consultez : ${lienAppli}`;
     }
     envoyerNotifSms(emp.tel, texte);
     nbEnvoyes++;
@@ -4607,6 +4610,30 @@ async function saveFicheEmp(){
   const emp = S.employees.find(e=>e.id===empId);
   if(!emp) return;
   const ancienSite = emp.site;
+  // Code d'accès (identifiant de connexion, ex: "MAR01") — jusqu'ici en lecture seule, donc
+  // aucun moyen de le retrouver/changer en cas d'oubli, ni pour le salarié ni pour le
+  // gestionnaire (Antoine, 2026-09-15). Modifiable ici désormais, avec vérification qu'aucun
+  // autre employé n'a déjà ce code (le login s'appuie dessus pour identifier l'employé).
+  const nouveauCode = document.getElementById('ficheCode').value.trim().toUpperCase();
+  if(!nouveauCode){toast('Le code d\'accès ne peut pas être vide');return;}
+  const codeChange = nouveauCode !== (emp.code||'').toUpperCase();
+  if(codeChange){
+    const codeDejaPris = S.employees.some(e=>e.id!==empId && (e.code||'').toUpperCase()===nouveauCode);
+    if(codeDejaPris){toast(`⚠️ Le code "${nouveauCode}" est déjà utilisé par un autre employé`);return;}
+    // Re-vérification en direct côté serveur juste avant d'enregistrer (en plus du contrôle
+    // ci-dessus contre la copie locale) — réduit la fenêtre où un autre gestionnaire, sur un
+    // autre appareil, pourrait attribuer le même code entre-temps ; la contrainte unique en base
+    // (migration 019) reste le dernier filet de sécurité si ça arrive quand même.
+    if(_supaUrl && _supaKey){
+      try {
+        const rCheck = await fetch(`${supaBase()}/rest/v1/employees?select=id&code=eq.${encodeURIComponent(nouveauCode)}`, {headers:supaHeaders()});
+        const existants = rCheck.ok ? await rCheck.json() : [];
+        if(existants.some(e=>e.id!==empId)){toast(`⚠️ Le code "${nouveauCode}" vient d'être attribué à un autre employé — choisissez-en un autre`);return;}
+      } catch(e){ console.warn('vérification code en direct échouée', e); }
+    }
+    if(!confirm(`Changer le code de connexion de ${emp.name} de "${emp.code||'—'}" à "${nouveauCode}" ? L'ancien code ne fonctionnera plus.`)) return;
+  }
+  emp.code = nouveauCode;
   emp.name = document.getElementById('ficheNom').value.trim()||emp.name;
   emp.email = document.getElementById('ficheEmail').value.trim();
   emp.tel = document.getElementById('ficheTel').value.trim();
