@@ -1533,6 +1533,15 @@ async function envoyerNotifSms(to, text){
 function telephonesGestionnaire(){
   return (S.params?.notifPhones||[]).filter(Boolean);
 }
+// Sens inverse des notifications ci-dessus : prévenir le SALARIÉ (pas le gestionnaire) quand SON
+// planning est modifié par quelqu'un d'autre — reprend exactement les 3 endroits qui alimentaient
+// déjà S.mods (la bannière "Planning modifié" vue seulement à la prochaine ouverture de l'appli),
+// pour ajouter un SMS proactif au même moment plutôt qu'un nouveau mécanisme.
+function notifierModifPlanning(empId, dl, det){
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp?.tel) return;
+  envoyerNotifSms(emp.tel, `OK-LA Planning: votre planning du ${dl} a change - ${det}`);
+}
 
 // Lecture d'une section depuis Supabase
 async function supaRead(section) {
@@ -3751,7 +3760,7 @@ function updNotif(){
   const emp=S.employees.find(e=>e.id===S.editing.empId);if(!emp)return;
   const t=getAllTypes().find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(S.editing.dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
-  let det=t?t.info:'';
+  let det=t?(t.info||t.label):'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   if(S.editType==='remplacement'){
     const cible=document.getElementById('remplacementCibleSel')?.value||'';
@@ -3774,10 +3783,11 @@ async function saveShift(){
   S.planning[`${empId}_${dateStr}`]=shift;
   const t=getAllTypes().find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
-  let det=t?t.info:'';
+  let det=t?(t.info||t.label):'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   if(S.editType==='remplacement') det=`Remplacement — ${siteEffectif}`;
   S.mods.push({empId,dl,det,seen:false});
+  notifierModifPlanning(empId,dl,det);
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
@@ -3866,7 +3876,9 @@ async function saveAbsence(){
   const emp=S.employees.find(e=>e.id===empId);
   const type=appliquerMotifAbsence(motif,empId,dateStr);
   S.planning[`${empId}_${dateStr}`]={type,site:emp.site,note:`Absent: ${note||motif}`};
-  S.mods.push({empId,dl:fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'}),det:'Absence',seen:false});
+  const dlAbs=fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'});
+  S.mods.push({empId,dl:dlAbs,det:'Absence',seen:false});
+  notifierModifPlanning(empId,dlAbs,'Absence enregistrée');
   const absId=Date.now();
   const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
   S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
@@ -4211,7 +4223,10 @@ async function validerRemp(){
     ?{type:'remplacement',site:abs.empSite,note:`Remplacement ${abs.empName}`}
     :{type:remp.slot||'magasin',site:abs.empSite,note:`Remplacement ${abs.empName}`};
   abs.resolved=true;abs.rempId=rempId;abs.rempName=remp.name;
-  S.mods.push({empId:rempId,dl:fmtFR(new Date(abs.dateStr+'T12:00'),{day:'numeric',month:'long'}),det:`Remplacement à ${abs.empSite}`,seen:false});
+  const dlRemp=fmtFR(new Date(abs.dateStr+'T12:00'),{day:'numeric',month:'long'});
+  const detRemp=`Remplacement à ${abs.empSite}`;
+  S.mods.push({empId:rempId,dl:dlRemp,det:detRemp,seen:false});
+  notifierModifPlanning(rempId,dlRemp,detRemp);
   persist();updStats();closeModal('mRemp');renderWeek();if(S.view==='mois')renderMonth();renderAbsList();
   toast(`✓ ${remp.name} affecté(e)`);
 }
