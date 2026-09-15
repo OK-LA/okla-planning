@@ -1070,6 +1070,21 @@ tbody tr:hover td{background:#FAFAF8;}
   </div>
 </div>
 
+<!-- MODAL CODE D'ACCÈS OUBLIÉ -->
+<div class="modal-overlay" id="mCodeOublie">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-title">🔑 Code d'accès oublié</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Sélectionnez votre nom — le gestionnaire sera prévenu et vous communiquera votre code.</div>
+    <div class="fg"><label>Mon nom</label>
+      <select id="codeOublieEmpSel"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('mCodeOublie')">Annuler</button>
+      <button class="btn btn-save" onclick="envoyerDemandeCodeOublie()">→ Prévenir le gestionnaire</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL INFOS ÉVÉNEMENT INTERNE (clic sur un badge réunion/formation/livraison/autre) -->
 <div class="modal-overlay" id="mEvInfo">
   <div class="modal" style="max-width:340px;">
@@ -7068,8 +7083,43 @@ function renderEmpComms(){
   el.innerHTML=h;
 }
 
+// "Code oublié ?" ne faisait qu'afficher un message statique demandant au salarié d'écrire lui-même
+// à Gwen — Antoine a signalé qu'aucun email n'était réellement envoyé. /code-review a soulevé un
+// vrai souci sur la première version de ce correctif : envoyer le code en clair au(x)
+// gestionnaire(s) permettait à n'importe qui, sur l'écran de connexion partagé, de choisir le nom
+// d'un COLLÈGUE et de faire transiter son code par un canal partagé (SMS/email du gestionnaire),
+// sans aucune vérification d'identité. Corrigé : le code part directement sur le téléphone déjà
+// enregistré pour CET employé (jamais vu par un tiers) — le gestionnaire n'est prévenu, et sans le
+// code lui-même, que si l'employé n'a pas de téléphone enregistré (repli, cas rare).
 function motDePasseOublie(){
-  toast('Contactez le gestionnaire à gwen.bruchet@ok-la.fr pour récupérer votre code d\'accès');
+  const sel=document.getElementById('codeOublieEmpSel');
+  sel.innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
+  openModal('mCodeOublie');
+}
+function envoyerDemandeCodeOublie(){
+  const empId=document.getElementById('codeOublieEmpSel').value;
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!emp){toast('Sélectionnez votre nom');return;}
+  closeModal('mCodeOublie');
+  if(emp.tel){
+    envoyerNotifSms(emp.tel, `OK-LA Planning: votre code d'acces est : ${emp.code}`);
+    toast('✓ Votre code vous a été envoyé par SMS');
+    return;
+  }
+  // Pas de téléphone enregistré pour cet employé — on ne peut pas le lui envoyer directement.
+  // Le gestionnaire est prévenu qu'il faut le lui communiquer lui-même, sans que le code
+  // transite par le canal partagé.
+  const emails=emailsGestionnaire();
+  const phones=telephonesGestionnaire();
+  if(!emails.length && !phones.length){
+    toast('Contactez le gestionnaire à gwen.bruchet@ok-la.fr pour récupérer votre code d\'accès');
+    return;
+  }
+  if(emails.length) envoyerNotifEmail(emails, `Code d'accès oublié — ${emp.name}`,
+    `<p><strong>${emp.name}</strong> (${emp.site}) a demandé son code d'accès, mais n'a pas de téléphone enregistré pour un envoi automatique.</p>
+    <p>Merci de le lui communiquer directement (fiche employé).</p>`);
+  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: ${emp.name} a demande son code d'acces (pas de tel enregistre pour lui envoyer directement)`);
+  toast('✓ Le gestionnaire a été prévenu, il va vous communiquer votre code');
 }
 
 // ══ DÉTAIL DES STATS ══
