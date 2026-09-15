@@ -4850,6 +4850,9 @@ function appliquerGenerationPlanning(){
   if(!_genPlanningStaging || !_genPlanningStaging.changes.length) return;
   const {empId, site, changes} = _genPlanningStaging;
   changes.forEach(c=>{ S.planning[`${empId}_${c.dateStr}`] = {type:c.newType, site, note:c.note}; });
+  const detGen=`Planning régénéré (${changes.length} jour(s))`;
+  S.mods.push({empId, dl:'plusieurs jours', det:detGen, seen:false});
+  notifierModifPlanning(empId, 'plusieurs jours', detGen);
   persist();
   refreshActiveView();
   toast(`✓ ${changes.length} case(s) de planning généré(es)`);
@@ -5843,6 +5846,16 @@ function confirmExcelImport(){
   changes.forEach(c=>{
     S.planning[`${c.empId}_${c.dateStr}`] = {type:c.newType, site:c.newSite, note:c.newNote};
   });
+  // Une notification par salarié concerné (pas par case) — un import peut toucher des centaines
+  // de cases sur plusieurs employés d'un coup, jamais notifié jusqu'ici.
+  const nbParEmploye={};
+  changes.forEach(c=>{ nbParEmploye[c.empId]=(nbParEmploye[c.empId]||0)+1; });
+  Object.keys(nbParEmploye).forEach(empId=>{
+    const nb=nbParEmploye[empId];
+    const detImport=`Planning importé depuis Excel (${nb} jour${nb>1?'s':''})`;
+    S.mods.push({empId, dl:'plusieurs jours', det:detImport, seen:false});
+    notifierModifPlanning(empId, 'plusieurs jours', detImport);
+  });
   persist();
   refreshActiveView();
   toast(`✓ ${changes.length} case(s) de planning mise(s) à jour`);
@@ -6506,6 +6519,14 @@ function retirerCongePlanning(req){
   }
 }
 
+// Résumé de période pour la bannière "Planning modifié"/le SMS — utilisé par validerConge,
+// enregistrerModifConge, annulerCongeValide (qui, jusqu'ici, ne prévenaient jamais le salarié
+// du tout : ni bannière ni SMS, un vrai trou repéré par Antoine le 2026-09-15).
+function formaterPeriode(dateDebut, dateFin){
+  return dateDebut===dateFin
+    ? fmtFR(new Date(dateDebut+'T12:00'),{day:'numeric',month:'long'})
+    : `${fmtFR(new Date(dateDebut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(dateFin+'T12:00'),{day:'numeric',month:'long'})}`;
+}
 function annulerCongeValide(id){
   if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
   const req = S.requests.find(r=>r.id==id);
@@ -6513,6 +6534,9 @@ function annulerCongeValide(id){
   if(!confirm(`Annuler le CP de ${req.empName} du ${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} au ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long'})} ? Le planning de cette période reprend son état d'origine.`)) return;
   retirerCongePlanning(req);
   req.status = 'cancelled';
+  const dl=formaterPeriode(req.dateDebut,req.dateFin);
+  S.mods.push({empId:req.empId, dl, det:'CP annulé, planning restauré', seen:false});
+  notifierModifPlanning(req.empId, dl, 'CP annulé, planning restauré');
   persist();
   renderCongesMgr();
   refreshActiveView();
@@ -6561,6 +6585,9 @@ function enregistrerModifConge(){
     }
     cur = addDays(cur,1);
   }
+  const dl=formaterPeriode(nouveauDebut,nouveauFin);
+  S.mods.push({empId:req.empId, dl, det:'Congé payé modifié', seen:false});
+  notifierModifPlanning(req.empId, dl, 'Congé payé modifié');
   persist();
   closeModal('mModifierConge');
   renderCongesMgr();
@@ -6594,6 +6621,9 @@ async function validerConge(id) {
     }
     cur = addDays(cur, 1);
   }
+  const dl=formaterPeriode(req.dateDebut,req.dateFin);
+  S.mods.push({empId:req.empId, dl, det:'Congé payé validé', seen:false});
+  notifierModifPlanning(req.empId, dl, 'Congé payé validé');
   persist();
   renderCongesMgr();
   renderWeek();
@@ -6648,6 +6678,9 @@ async function validerCongeSansSolde(id){
     }
     cur = addDays(cur,1);
   }
+  const dl=formaterPeriode(req.dateDebut,req.dateFin);
+  S.mods.push({empId:req.empId, dl, det:'Congé sans solde validé', seen:false});
+  notifierModifPlanning(req.empId, dl, 'Congé sans solde validé');
   persist();
   renderCongeSansSoldeMgr();
   renderWeek();
@@ -6704,6 +6737,13 @@ async function validerEchange(id){
   S.planning[`${req.cibleId}_${req.dateA}`] = cellCibleDateA;
   S.planning[`${req.cibleId}_${req.dateB}`] = cellCibleDateB;
   req.status = 'approved';
+  // Les deux employés sont concernés, chacun sur sa propre date — jamais notifié jusqu'ici.
+  const dlA=fmtFR(new Date(req.dateA+'T12:00'),{day:'numeric',month:'long'});
+  const dlB=fmtFR(new Date(req.dateB+'T12:00'),{day:'numeric',month:'long'});
+  S.mods.push({empId:req.empId, dl:dlA, det:`Échange validé avec ${req.cibleName}`, seen:false});
+  notifierModifPlanning(req.empId, dlA, `Échange validé avec ${req.cibleName}`);
+  S.mods.push({empId:req.cibleId, dl:dlB, det:`Échange validé avec ${req.empName}`, seen:false});
+  notifierModifPlanning(req.cibleId, dlB, `Échange validé avec ${req.empName}`);
   persist();
   renderEchangesMgr();
   renderWeek();
