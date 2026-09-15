@@ -8,7 +8,9 @@
 // fonction ne se sert jamais du JWT de l'appelant). Puis dans les Secrets de la fonction,
 // ajouter CAPITOLE_USERNAME et CAPITOLE_PASSWORD (Mon compte Capitole Mobile → SMS → Mon API).
 // CAPITOLE_SENDER est optionnel (nom d'expéditeur affiché, 11 caractères max — sinon un code
-// court par défaut est utilisé).
+// court par défaut est utilisé). `long=yes` est toujours activé pour ne jamais tronquer un
+// message un peu long (motif + plusieurs dates) : Capitole facture alors plusieurs segments SMS
+// si le texte dépasse ~160 caractères, mais le message reste complet et lisible.
 //
 // Appelé depuis index.html via POST ${SUPABASE_URL}/functions/v1/send-sms avec les mêmes
 // headers que les appels REST habituels (apikey + Authorization Bearer anon key).
@@ -49,7 +51,7 @@ Deno.serve(async (req: Request) => {
     const xml =
       `<SMS><authentification><username>${escapeXml(CAPITOLE_USERNAME)}</username>` +
       `<password>${escapeXml(CAPITOLE_PASSWORD)}</password></authentification>` +
-      `<message><text>${escapeXml(text)}</text><sender>${escapeXml(CAPITOLE_SENDER)}</sender></message>` +
+      `<message><text>${escapeXml(text)}</text><sender>${escapeXml(CAPITOLE_SENDER)}</sender><long>yes</long></message>` +
       `<recipients>${gsmTags}</recipients></SMS>`;
     const capitoleRes = await fetch("https://sms.capitolemobile.com/api/sendsms/xml_v2", {
       method: "POST",

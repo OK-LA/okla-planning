@@ -1579,13 +1579,17 @@ async function envoyerNotifsSmsEnAttente(){
     const emp=S.employees.find(e=>e.id===empId);
     const entries=parEmploye[empId];
     if(!emp?.tel){ nbSansTel++; return; }
+    // Les noms sont stockés en majuscules (ex: "EMILIE PATRIS") — capitalisation correcte pour
+    // un SMS qui se veut dans un français soigné.
+    const prenomBrut=emp.name.split(' ')[0];
+    const prenom=prenomBrut.charAt(0)+prenomBrut.slice(1).toLowerCase();
     let texte;
     if(entries.length===1){
-      texte=`OK-LA Planning: votre planning (${entries[0].dl}) a change - ${entries[0].det}`;
+      texte=`Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. OK-LA Planning`;
     } else {
-      const apercu=entries.slice(0,3).map(e=>`${e.dl}: ${e.det}`).join(' / ');
-      const reste=entries.length>3?` (+${entries.length-3} autre(s))`:'';
-      texte=`OK-LA Planning: votre planning a change sur ${entries.length} points - ${apercu}${reste}`;
+      const liste=entries.slice(0,4).map(e=>`${e.dl} (${e.det})`).join(', ');
+      const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
+      texte=`Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. OK-LA Planning`;
     }
     envoyerNotifSms(emp.tel, texte);
     nbEnvoyes++;
