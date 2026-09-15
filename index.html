@@ -574,6 +574,9 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="btn btn-sm" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:12px;" onclick="openEventModal()">
         🎨 Colorer une période (vacances, soldes, férié...)
       </button>
+      <button id="btnEnvoyerSms" onclick="envoyerNotifsSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés concernés ne sont prévenus par SMS qu'à ce moment-là, pas à chaque modification">
+        📤 Envoyer les SMS en attente (0)
+      </button>
       <div class="view-bar">
         <button class="btn btn-ghost btn-sm" onclick="mNavPrev()">←</button>
         <div class="week-label" id="mWLbl"></div>
@@ -1534,13 +1537,60 @@ function telephonesGestionnaire(){
   return (S.params?.notifPhones||[]).filter(Boolean);
 }
 // Sens inverse des notifications ci-dessus : prévenir le SALARIÉ (pas le gestionnaire) quand SON
-// planning est modifié par quelqu'un d'autre — reprend exactement les 3 endroits qui alimentaient
-// déjà S.mods (la bannière "Planning modifié" vue seulement à la prochaine ouverture de l'appli),
-// pour ajouter un SMS proactif au même moment plutôt qu'un nouveau mécanisme.
+// planning est modifié par quelqu'un d'autre — reprend les mêmes endroits qui alimentent déjà
+// S.mods (la bannière "Planning modifié" vue à la prochaine ouverture de l'appli, elle reste
+// immédiate, inchangée). Le SMS, lui, n'est PAS envoyé tout de suite : le gestionnaire prépare
+// parfois un planning sur plusieurs jours avant de le considérer définitif (Antoine, 2026-09-15)
+// — donc on accumule dans une file d'attente synchronisée (S.params.pendingSms, partagée entre
+// Antoine/Gwen quel que soit l'appareil) et un bouton dédié (envoyerNotifsSmsEnAttente) envoie
+// tout d'un coup, groupé par salarié, quand le gestionnaire juge que c'est prêt.
 function notifierModifPlanning(empId, dl, det){
   const emp=S.employees.find(e=>e.id===empId);
   if(!emp?.tel) return;
-  envoyerNotifSms(emp.tel, `OK-LA Planning: votre planning (${dl}) a change - ${det}`);
+  if(!Array.isArray(S.params.pendingSms)) S.params.pendingSms=[];
+  S.params.pendingSms.push({empId, dl, det, ts:Date.now()});
+  renderPendingSmsBtn();
+}
+function renderPendingSmsBtn(){
+  const btn=document.getElementById('btnEnvoyerSms');
+  if(!btn) return;
+  const n=(S.params.pendingSms||[]).length;
+  btn.style.display = n>0 ? 'inline-block' : 'none';
+  btn.textContent = `📤 Envoyer les SMS en attente (${n})`;
+}
+async function envoyerNotifsSmsEnAttente(){
+  if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
+  // Lecture + vidage atomiques côté serveur (RPC claim_pending_sms) plutôt que de faire confiance
+  // à S.params.pendingSms en mémoire — la file est partagée entre Antoine et Gwen sur des
+  // appareils différents, un simple "lire en JS puis écrire []" créerait une fenêtre où les deux
+  // pourraient envoyer les mêmes SMS en double.
+  let pending;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/rpc/claim_pending_sms`, { method:'POST', headers: supaHeaders() });
+    if(!r.ok){ toast('Erreur lors de la récupération de la file d\'attente'); return; }
+    pending = await r.json() || [];
+  } catch(e){ console.warn('claim_pending_sms error', e); toast('Erreur réseau'); return; }
+  S.params.pendingSms=[]; renderPendingSmsBtn();
+  if(!pending.length){toast('Aucun SMS en attente');return;}
+  const parEmploye={};
+  pending.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
+  let nbEnvoyes=0, nbSansTel=0;
+  Object.keys(parEmploye).forEach(empId=>{
+    const emp=S.employees.find(e=>e.id===empId);
+    const entries=parEmploye[empId];
+    if(!emp?.tel){ nbSansTel++; return; }
+    let texte;
+    if(entries.length===1){
+      texte=`OK-LA Planning: votre planning (${entries[0].dl}) a change - ${entries[0].det}`;
+    } else {
+      const apercu=entries.slice(0,3).map(e=>`${e.dl}: ${e.det}`).join(' / ');
+      const reste=entries.length>3?` (+${entries.length-3} autre(s))`:'';
+      texte=`OK-LA Planning: votre planning a change sur ${entries.length} points - ${apercu}${reste}`;
+    }
+    envoyerNotifSms(emp.tel, texte);
+    nbEnvoyes++;
+  });
+  toast(`✓ SMS envoyé(s) à ${nbEnvoyes} salarié(s)${nbSansTel?` (${nbSansTel} sans téléphone, ignoré(s))`:''}`);
 }
 
 // Lecture d'une section depuis Supabase
@@ -1996,6 +2046,7 @@ async function supaWriteParams(params) {
       type_labels: params.typeLabels || {},
       notif_emails: params.notifEmails || [],
       notif_phones: params.notifPhones || [],
+      pending_sms: params.pendingSms || [],
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2201,6 +2252,7 @@ async function supaReadParams(empRows) {
       typeLabels: app.type_labels || {},
       notifEmails: app.notif_emails || [],
       notifPhones: app.notif_phones || [],
+      pendingSms: app.pending_sms || [],
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -2456,6 +2508,7 @@ async function loadAll(force=false){
     if(!S.params.typeLabels) S.params.typeLabels={};
     if(!Array.isArray(S.params.notifEmails)) S.params.notifEmails=[];
     if(!Array.isArray(S.params.notifPhones)) S.params.notifPhones=[];
+    if(!Array.isArray(S.params.pendingSms)) S.params.pendingSms=[];
     if(!S.params.reposFixe) S.params.reposFixe={};
     // Résoudre les repos fixes par défaut
     if(S.params.reposFixeParCode && (!S.params.reposFixe || Object.keys(S.params.reposFixe).length===0)){
@@ -3026,7 +3079,7 @@ function notifierNouvelleDemande(req, emp){
 // ══ GESTIONNAIRE ══
 function renderMgr(resetView=true){
   document.getElementById('mgrSub').textContent=fmtFR(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  updStats();buildLegend('mgrLeg');
+  updStats();buildLegend('mgrLeg');renderPendingSmsBtn();
   buildSelects();initFiltres();
   // Ouverture réelle de l'appli : vue Mois par défaut (setView gère aussi les classes des
   // boutons Semaine/Mois et l'affichage des conteneurs, contrairement à refreshActiveView()).
