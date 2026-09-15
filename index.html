@@ -1540,7 +1540,7 @@ function telephonesGestionnaire(){
 function notifierModifPlanning(empId, dl, det){
   const emp=S.employees.find(e=>e.id===empId);
   if(!emp?.tel) return;
-  envoyerNotifSms(emp.tel, `OK-LA Planning: votre planning du ${dl} a change - ${det}`);
+  envoyerNotifSms(emp.tel, `OK-LA Planning: votre planning (${dl}) a change - ${det}`);
 }
 
 // Lecture d'une section depuis Supabase
@@ -3175,9 +3175,11 @@ function renderSelBar(){
 }
 
 async function appliquerSelectionType(type, targetSite){
+  if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
   if(selCells.size===0){toast('Aucune cellule sélectionnée');return;}
   const keys = [...selCells];
   let dejaSurCeSite = 0;
+  const nbJoursParEmp = {};
   for(const key of keys){
     const [empId, dateStr] = key.split('_');
     const emp = S.employees.find(e=>e.id===empId);
@@ -3187,7 +3189,17 @@ async function appliquerSelectionType(type, targetSite){
     const site = type==='remplacement' ? (targetSite||emp.site) : emp.site;
     if(type==='remplacement' && site===emp.site) dejaSurCeSite++;
     S.planning[key] = {type, site, note:''};
+    nbJoursParEmp[empId] = (nbJoursParEmp[empId]||0)+1;
   }
+  // Une notification par salarié concerné (pas par case) — la sélection peut mélanger plusieurs
+  // employés et des dates non contiguës, donc pas de plage de dates unique à annoncer.
+  const label = getAllTypes().find(x=>x.key===type)?.label || type;
+  Object.keys(nbJoursParEmp).forEach(empId=>{
+    const nb = nbJoursParEmp[empId];
+    const det = `${label} (${nb} jour${nb>1?'s':''})`;
+    S.mods.push({empId, dl:'Plusieurs jours', det, seen:false});
+    notifierModifPlanning(empId, 'plusieurs jours', det);
+  });
   persist();
   annulerSelection();
   refreshActiveView();
@@ -3826,6 +3838,15 @@ async function saveShiftPeriode(){
       S.planning[`${empId}_${dStr}`]={type:S.editType,site:siteEffectif,note};
     }
   });
+  // Une seule notification pour toute la période (pas une par jour, pour ne pas spammer) —
+  // ce mode n'alimentait jusqu'ici ni la bannière "Planning modifié" ni les notifications.
+  const t=getAllTypes().find(x=>x.key===S.editType);
+  let detPeriode=t?(t.info||t.label):'';
+  if(['magasin','entrepotA','entrepotB'].includes(S.editType)) detPeriode=`${emp.site} — ${t.info}`;
+  if(S.editType==='remplacement') detPeriode=`Remplacement — ${siteEffectif}`;
+  const dlPeriode = debut===fin ? fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'}) : `${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'long'})}`;
+  S.mods.push({empId,dl:dlPeriode,det:detPeriode,seen:false});
+  notifierModifPlanning(empId,dlPeriode,detPeriode);
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
