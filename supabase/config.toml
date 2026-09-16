@@ -7,3 +7,8 @@ verify_jwt = false
 [functions.send-sms]
 # Même raison que send-notification ci-dessus.
 verify_jwt = false
+
+[functions.login]
+# C'est le point d'entrée AVANT authentification (login lui-même) — impossible d'exiger un JWT
+# préalable ici. La vérification se fait manuellement dans la fonction (code → employees).
+verify_jwt = false
