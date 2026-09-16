@@ -873,11 +873,6 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg"><label>Magasin concerné par ce fichier</label>
           <select id="excelImportSite">
             <option value="">— Choisir —</option>
-            <option value="Breteuil">Breteuil</option>
-            <option value="Entrepôt">Entrepôt</option>
-            <option value="Ham">Ham</option>
-            <option value="Longueau">Longueau</option>
-            <option value="Roye">Roye</option>
           </select>
         </div>
         <div class="fg" style="display:flex;align-items:center;gap:6px;">
@@ -1274,7 +1269,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="fg" style="flex:2;"><label>Ville</label><input type="text" id="aeVille" placeholder="Ham"></div>
     </div>
     <div class="fg"><label>Magasin principal</label>
-      <select id="aeSite"><option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option></select>
+      <select id="aeSite"></select>
     </div>
     <div class="fg"><label>Créneau habituel</label>
       <select id="aeSlot">
@@ -1333,9 +1328,7 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
       </div>
       <div class="fg"><label>Site principal</label>
-        <select id="ficheSite">
-          <option>Ham</option><option>Longueau</option><option>Roye</option><option>Breteuil</option><option>Entrepôt</option>
-        </select>
+        <select id="ficheSite"></select>
       </div>
       <div class="fg"><label>Créneau habituel</label>
         <select id="ficheSlot">
@@ -3651,6 +3644,19 @@ function renderWeek(){
 
 function buildSelects(){
   document.getElementById('moEmpSel').innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  // Les magasins (SC) sont ajoutables/renommables/supprimables depuis Paramètres, mais ces 3
+  // select étaient du HTML figé avec seulement les 5 sites d'origine — un nouveau magasin
+  // n'apparaissait jamais pour l'assigner à un employé ni pour cibler un import Excel
+  // (Antoine, 2026-09-16). Rebâtis ici à chaque appel (buildSelects tourne déjà à chaque
+  // ajout/suppression/renommage de magasin, et à chaque connexion/resynchro).
+  const sites=Object.keys(SC);
+  const optionsSites=sites.map(s=>`<option value="${s}">${s}</option>`).join('');
+  const aeSiteEl=document.getElementById('aeSite');
+  if(aeSiteEl){ const prev=aeSiteEl.value; aeSiteEl.innerHTML=optionsSites; if(sites.includes(prev)) aeSiteEl.value=prev; }
+  const ficheSiteEl=document.getElementById('ficheSite');
+  if(ficheSiteEl){ const prev=ficheSiteEl.value; ficheSiteEl.innerHTML=optionsSites; if(sites.includes(prev)) ficheSiteEl.value=prev; }
+  const excelSiteEl=document.getElementById('excelImportSite');
+  if(excelSiteEl){ const prev=excelSiteEl.value; excelSiteEl.innerHTML='<option value="">— Choisir —</option>'+optionsSites; excelSiteEl.value=sites.includes(prev)?prev:''; }
 }
 
 function renderMonth(){
