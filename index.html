@@ -512,6 +512,7 @@ tbody tr:hover td{background:#FAFAF8;}
           <option value="enfant_malade">Enfant malade (- de 16 ans)</option>
           <option value="maladie">Arrêt maladie</option>
           <option value="echange">Échange avec un collègue</option>
+          <option value="echange_ab" id="rTypeEchangeAB" style="display:none;">Échanger mon créneau A/B (Entrepôt)</option>
           <option value="medical">Rendez-vous médical</option>
           <option value="autre">Autre</option>
         </select>
@@ -537,6 +538,13 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
         <div class="fg"><label>Date de repos prévu</label><input type="date" id="rEchangeDateCollegue"></div>
         <div id="echangeCheck" style="margin-bottom:10px;font-size:12px;"></div>
+      </div>
+      <div id="echangeABFields" style="display:none;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue de l'Entrepôt d'échanger vos créneaux du jour : vous prenez son horaire (A ou B), il/elle prend le vôtre.</div>
+        <div class="fg"><label>Date</label><input type="date" id="rEchangeABDate"></div>
+        <div class="fg"><label>Collègue (Entrepôt)</label>
+          <select id="rEchangeABCollegue"><option value="">Choisir un collègue...</option></select>
+        </div>
       </div>
       <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
       <button class="btn btn-primary btn-full" onclick="sendReq()">Envoyer la demande</button>
@@ -1205,6 +1213,7 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label>Remplaçant retenu</label><select id="rempChoisi"></select></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mRemp')">Fermer</button>
+      <button class="btn btn-ghost" onclick="validerSansRemp()">Sans remplaçant</button>
       <button class="btn btn-save" onclick="validerRemp()">✓ Valider</button>
     </div>
   </div>
@@ -2929,6 +2938,8 @@ function renderEmp(resetView=true){
   myMods.forEach(m=>m.seen=true);
   buildTypeLegend('empLeg');
   document.getElementById('rDate').value=fmt(new Date());
+  // Échange de créneau A/B réservé à l'Entrepôt — masqué dans le menu pour les autres sites.
+  document.getElementById('rTypeEchangeAB').style.display = emp.site==='Entrepôt' ? '' : 'none';
   toggleCongeFields();
   initCongeListeners();
   renderEmpWeek();
@@ -3163,6 +3174,21 @@ async function sendReq(){
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'echange',dateA,dateB,cibleId,cibleName:cible.name,cibleEmail:cible.email,
       date:dateA,dateDebut:dateA,dateFin:dateA,note,status:'pending_collegue'};
+  } else if(type==='echange_ab'){
+    if(emp.site!=='Entrepôt'){toast('Réservé aux salariés de l\'Entrepôt');return;}
+    const dateA=document.getElementById('rEchangeABDate')?.value;
+    const cibleId=document.getElementById('rEchangeABCollegue')?.value;
+    if(!dateA||!cibleId){toast('Complétez la date et le collègue');return;}
+    const cible=S.employees.find(e=>e.id===cibleId);
+    if(!cible||cible.site!=='Entrepôt'){toast('Collègue introuvable');return;}
+    const shMe=S.planning[`${emp.id}_${dateA}`];
+    const shCible=S.planning[`${cibleId}_${dateA}`];
+    if(!shMe||!['entrepotA','entrepotB'].includes(shMe.type)){toast('Vous n\'êtes pas sur un créneau A/B ce jour-là');return;}
+    if(!shCible||!['entrepotA','entrepotB'].includes(shCible.type)){toast('Ce collègue n\'est pas sur un créneau A/B ce jour-là');return;}
+    if(shMe.type===shCible.type){toast('Vous êtes déjà sur le même créneau ce jour-là');return;}
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'echange_ab',dateA,cibleId,cibleName:cible.name,cibleEmail:cible.email,
+      date:dateA,dateDebut:dateA,dateFin:dateA,note,status:'pending_collegue'};
   } else {
     const date=document.getElementById('rDate')?.value||fmt(new Date());
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
@@ -3193,6 +3219,17 @@ function notifierNouvelleDemande(req, emp){
       ${req.note?`<p>Note : ${req.note}</p>`:''}
       <p>Répondez directement depuis l'application OK-LA Planning.</p>`);
     if(cible.tel) envoyerNotifSms(cible.tel, `OK-LA Planning: ${emp.name} vous propose un echange (repondez dans l'appli)`);
+    return;
+  }
+  if(req.type==='echange_ab'){
+    const cible=S.employees.find(e=>e.id===req.cibleId);
+    if(!cible) return;
+    const dl=fmtFR(new Date(req.dateA+'T12:00'),{day:'numeric',month:'long'});
+    if(cible.email) envoyerNotifEmail(cible.email, `Proposition d'échange de créneau — ${emp.name}`,
+      `<p><strong>${emp.name}</strong> vous propose d'échanger vos créneaux du ${dl} (Entrepôt A/B).</p>
+      ${req.note?`<p>Note : ${req.note}</p>`:''}
+      <p>Répondez directement depuis l'application OK-LA Planning.</p>`);
+    if(cible.tel) envoyerNotifSms(cible.tel, `OK-LA Planning: ${emp.name} vous propose un echange de creneau le ${dl} (repondez dans l'appli)`);
     return;
   }
   const label=LABELS_TYPE_DEMANDE[req.type]||req.type;
@@ -4263,7 +4300,7 @@ function renderEmpAbsList(){
   let h='';
   mine.forEach(a=>{
     const dl=fmtFR(new Date(a.dateStr+'T12:00'),{day:'numeric',month:'short'});
-    const statutTxt = a.motif==='retard' ? (a.resolved?'Vu':'Signalé') : (a.resolved?'Remplacé':'En attente');
+    const statutTxt = a.motif==='retard' ? (a.resolved?'Vu':'Signalé') : (a.resolved?(a.rempId?'Remplacé':'Traité (sans remplaçant)'):'En attente');
     h+=`<div class="conge-item">
       <div style="flex:1">
         <div style="font-weight:600;font-size:12px">${dl} — ${motifLabels[a.motif]||a.motif}</div>
@@ -4299,12 +4336,13 @@ function renderEmpCongeSansSolde(){
 
 // ── Échanges d'horaire (vue salarié) ──
 function dlEchange(r){
+  if(r.type==='echange_ab') return `${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'short'})} — créneaux A/B`;
   return `${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'short'})} ↔ ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'short'})}`;
 }
 function renderEmpEchanges(){
   const emp=S.user; if(!emp) return;
-  // Reçus : demandes où je suis la cible, en attente de MA réponse
-  const recus=S.requests.filter(r=>r.type==='echange'&&r.cibleId===emp.id&&r.status==='pending_collegue');
+  // Reçus : demandes où je suis la cible, en attente de MA réponse (échange classique + créneau A/B)
+  const recus=S.requests.filter(r=>(r.type==='echange'||r.type==='echange_ab')&&r.cibleId===emp.id&&r.status==='pending_collegue');
   const cardRecus=document.getElementById('empEchangesRecusCard');
   if(recus.length){
     cardRecus.style.display='block';
@@ -4323,7 +4361,7 @@ function renderEmpEchanges(){
     cardRecus.style.display='none';
   }
   // Envoyés : mes propres demandes d'échange, avec statut
-  const envoyes=S.requests.filter(r=>r.type==='echange'&&r.empId===emp.id).sort((a,b)=>b.id-a.id);
+  const envoyes=S.requests.filter(r=>(r.type==='echange'||r.type==='echange_ab')&&r.empId===emp.id).sort((a,b)=>b.id-a.id);
   const cardEnvoyes=document.getElementById('empEchangesEnvoyesCard');
   if(envoyes.length){
     cardEnvoyes.style.display='block';
@@ -4448,6 +4486,15 @@ async function validerRemp(){
   persist();updStats();closeModal('mRemp');renderWeek();if(S.view==='mois')renderMonth();renderAbsList();
   toast(`✓ ${remp.name} affecté(e)`);
 }
+// Marque l'absence comme traitée sans affecter personne — aucune case de planning créée, aucune
+// notification envoyée (contrairement à validerRemp), à la différence de "Fermer" qui laisse
+// l'absence non résolue pour y revenir plus tard.
+function validerSansRemp(){
+  const abs=S.absences.find(a=>a.id===S.editingAbs);if(!abs)return;
+  abs.resolved=true;abs.rempId=null;abs.rempName=null;
+  persist();updStats();closeModal('mRemp');renderAbsList();
+  toast('✓ Absence marquée sans remplaçant');
+}
 
 function renderAbsList(){
   const list=[...S.absences].sort((a,b)=>(a.resolved===b.resolved?0:a.resolved?1:-1)||b.dateStr.localeCompare(a.dateStr));
@@ -4462,7 +4509,7 @@ function renderAbsList(){
     // une prise de connaissance par le gestionnaire.
     const action=abs.motif==='retard'
       ?(abs.resolved?`<span style="font-size:12px;font-weight:600;color:#059669;">✓ Vu</span>`:`<button class="btn btn-sm btn-blue" onclick="marquerRetardVu(${abs.id})">Marquer comme vu</button>`)
-      :(abs.resolved?`<span style="font-size:12px;font-weight:600;color:#059669;">✓ ${abs.rempName}</span>`:`<button class="btn btn-sm btn-blue" onclick="openRempModal(${abs.id})">Trouver remplaçant</button>`);
+      :(abs.resolved?`<span style="font-size:12px;font-weight:600;color:#059669;">✓ ${abs.rempName||'Sans remplaçant'}</span>`:`<button class="btn btn-sm btn-blue" onclick="openRempModal(${abs.id})">Trouver remplaçant</button>`);
     h+=`<div class="abs-card">
       <div class="abs-head">
         <div>
@@ -6121,6 +6168,11 @@ function getDelaiRequis(dateDebut, dateFin) {
   const nbJours = countJoursOuvresReels(dateDebut, dateFin);
   const today = new Date(); today.setHours(0,0,0,0);
 
+  // Une demande d'UN SEUL jour reste soumise au préavis court normal (14j), même si elle tombe
+  // dans une période à dépôt limité (juin-sept / décembre) — la règle de dépôt avant le 30/03 ou
+  // 30/09 vise les séjours dans ces périodes, pas une simple journée isolée (Antoine, 2026-09-16).
+  if (nbJours === 1) return { jours: 14, regle: '1 journée : 2 semaines de préavis', depasseLimite: false };
+
   // Période juin-septembre : demande avant le 30/03
   if (moisDebut >= 6 && moisDebut <= 9) {
     const limite = new Date(debut.getFullYear(), 2, 30); // 30 mars
@@ -6137,8 +6189,6 @@ function getDelaiRequis(dateDebut, dateFin) {
     }
     return { jours: 0, regle: 'Décembre : demande avant le 30/09', depasseLimite: false };
   }
-  // 1 journée → 14 jours
-  if (nbJours === 1) return { jours: 14, regle: '1 journée : 2 semaines de préavis', depasseLimite: false };
   // 1 semaine ou plus → 60 jours
   if (nbJours >= 5) return { jours: 60, regle: '1 semaine ou + : 2 mois de préavis', depasseLimite: false };
   // Autre → 14 jours par défaut
@@ -6312,10 +6362,13 @@ function toggleCongeFields() {
   const isConge = type === 'conge' || type === 'conge_sans_solde';
   const isEnfant = type === 'enfant_malade';
   const isEchange = type === 'echange';
+  const isEchangeAB = type === 'echange_ab';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
-  document.getElementById('autreFields').style.display = (!isConge && !isEchange) ? 'block' : 'none';
+  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB) ? 'block' : 'none';
   document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
+  document.getElementById('echangeABFields').style.display = isEchangeAB ? 'block' : 'none';
   if(isEchange) remplirSelectCollegues();
+  if(isEchangeAB) remplirSelectCollegueEntrepot();
   // Afficher info enfant malade, avec le quota calculé selon les enfants déclarés du salarié
   const infoEl = document.getElementById('enfantMaladeInfo');
   if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
@@ -6335,6 +6388,14 @@ function remplirSelectCollegues(){
   const emp = S.user; if(!emp) return;
   const sel = document.getElementById('rEchangeCollegue');
   const collegues = S.employees.filter(e=>e.site===emp.site && e.id!==emp.id && estVisibleDansPlanning(e,new Date()));
+  sel.innerHTML = '<option value="">Choisir un collègue...</option>' +
+    collegues.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+// Remplit le select des collègues de l'Entrepôt (échange de créneau A/B — réservé à ce site)
+function remplirSelectCollegueEntrepot(){
+  const emp = S.user; if(!emp) return;
+  const sel = document.getElementById('rEchangeABCollegue');
+  const collegues = S.employees.filter(e=>e.site==='Entrepôt' && e.id!==emp.id && estVisibleDansPlanning(e,new Date()));
   sel.innerHTML = '<option value="">Choisir un collègue...</option>' +
     collegues.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
 }
@@ -6734,29 +6795,33 @@ async function refuserCongeSansSolde(id){
 
 // ── Échanges d'horaire (vue gestionnaire) ──
 function renderEchangesMgr(){
-  const enAttente = S.requests.filter(r=>r.type==='echange'&&r.status==='pending_gestionnaire');
+  const enAttente = S.requests.filter(r=>(r.type==='echange'||r.type==='echange_ab')&&r.status==='pending_gestionnaire');
   const el = document.getElementById('echangesListeMgr');
   if(!enAttente.length){
     el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Aucun échange en attente de validation</div>';
     return;
   }
-  el.innerHTML = enAttente.map(r=>`
+  el.innerHTML = enAttente.map(r=>{
+    const detail = r.type==='echange_ab'
+      ? `Échange des créneaux A/B du ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} entre ${r.empName.split(' ')[0]} et ${r.cibleName.split(' ')[0]}`
+      : `${r.empName.split(' ')[0]} cède le ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} et prend le ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'long'})} de ${r.cibleName.split(' ')[0]}`;
+    const validerFn = r.type==='echange_ab' ? 'validerEchangeAB' : 'validerEchange';
+    return `
     <div class="quota-card" style="margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="flex:1;min-width:200px;">
           <div style="font-weight:600;font-size:13px;">${r.empName} ↔ ${r.cibleName}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">
-            ${r.empName.split(' ')[0]} cède le ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} et prend le ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'long'})} de ${r.cibleName.split(' ')[0]}
-          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${detail}</div>
           ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
           <div style="font-size:11px;color:#059669;margin-top:4px;">✓ Accepté par ${r.cibleName.split(' ')[0]}</div>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm btn-ok" onclick="validerEchange(${r.id})">✓ Valider</button>
+          <button class="btn btn-sm btn-ok" onclick="${validerFn}(${r.id})">✓ Valider</button>
           <button class="btn btn-sm btn-no" onclick="refuserEchangeGestionnaire(${r.id})">✗ Refuser</button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 async function validerEchange(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
@@ -6787,6 +6852,31 @@ async function validerEchange(id){
   renderWeek();
   updStats();
   toast('✓ Échange validé, planning mis à jour');
+}
+// Échange de créneau A/B (Entrepôt) : contrairement à validerEchange (deux dates différentes),
+// ici les deux employés sont concernés par LA MÊME date — on échange directement leurs deux
+// cases plutôt que de calculer un "repos" de compensation.
+async function validerEchangeAB(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  const empA = S.employees.find(e=>e.id===req.empId);
+  const empB = S.employees.find(e=>e.id===req.cibleId);
+  if(!empA||!empB){toast('Employé introuvable');return;}
+  const shA = S.planning[`${req.empId}_${req.dateA}`];
+  const shB = S.planning[`${req.cibleId}_${req.dateA}`];
+  if(!shA||!shB){toast('Planning introuvable pour ce jour');return;}
+  S.planning[`${req.empId}_${req.dateA}`] = {type:shB.type, site:shA.site, note:'Échange créneau avec '+req.cibleName};
+  S.planning[`${req.cibleId}_${req.dateA}`] = {type:shA.type, site:shB.site, note:'Échange créneau avec '+req.empName};
+  req.status = 'approved';
+  const dl=fmtFR(new Date(req.dateA+'T12:00'),{day:'numeric',month:'long'});
+  S.mods.push({empId:req.empId, dl, det:`Échange de créneau validé avec ${req.cibleName}`, seen:false});
+  notifierModifPlanning(req.empId, dl, `Échange de créneau validé avec ${req.cibleName}`);
+  S.mods.push({empId:req.cibleId, dl, det:`Échange de créneau validé avec ${req.empName}`, seen:false});
+  notifierModifPlanning(req.cibleId, dl, `Échange de créneau validé avec ${req.empName}`);
+  persist();
+  renderEchangesMgr();
+  renderWeek();
+  updStats();
+  toast('✓ Échange de créneau validé, planning mis à jour');
 }
 async function refuserEchangeGestionnaire(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
@@ -7361,7 +7451,7 @@ function showStatDetail(type){
     } else {
       html = pending.map(r=>{
         const emp = S.employees.find(e=>e.id===r.empId);
-        const typeLabels = {conge:'🏖️ Congé',conge_sans_solde:'🏖️ CSS',maladie:'🤒 Maladie',echange:'🔄 Échange',enfant_malade:'👶 Enfant malade',medical:'🏥 RDV médical',autre:'📌 Autre'};
+        const typeLabels = {conge:'🏖️ Congé',conge_sans_solde:'🏖️ CSS',maladie:'🤒 Maladie',echange:'🔄 Échange',echange_ab:'🔄 Échange A/B',enfant_malade:'👶 Enfant malade',medical:'🏥 RDV médical',autre:'📌 Autre'};
         const statusLabels = {pending:'En attente',pending_gestionnaire:'En attente (gestionnaire)',pending_collegue:'En attente (collègue)'};
         const dDeb = r.dateDebut ? fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'}) : (r.date1||r.date) ? fmtFR(new Date((r.date1||r.date)+'T12:00'),{day:'numeric',month:'short'}) : '?';
         const dFin = r.dateFin && r.dateFin!==r.dateDebut ? ' → '+fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'}) : '';
