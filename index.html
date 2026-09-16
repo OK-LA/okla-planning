@@ -1724,6 +1724,7 @@ async function supaWrite(section, data) {
   // plutôt que le blob JSON okla_store — corrige le bug où un remplacement en bloc
   // pouvait effacer des données créées sur un autre appareil entre-temps.
   if (section === 'employees') return supaWriteEmployees(data);
+  if (section === 'employees_dirty') return supaWriteEmployeesRows(data);
   if (section === 'planning') return supaWritePlanning(data);
   if (section === 'requests') return supaWriteRequests(data);
   if (section === 'absences') return supaWriteAbsences(data);
@@ -1755,40 +1756,50 @@ async function supaWrite(section, data) {
   } catch(e) { console.warn('supaWrite error', e); return false; }
 }
 
-// Écriture des employés dans la table relationnelle `employees` (upsert + suppression
-// de ceux qui ne sont plus présents, puisque persist() envoie toujours la liste complète).
+// Construit la ligne `employees` pour un salarié donné — factorisé pour être partagé entre
+// l'envoi complet (supaWriteEmployees, réservé à supaUploadAll) et l'envoi incrémental des
+// seules lignes modifiées (supaWriteEmployeesRows). Attention : repos_fixe_weekday est lu
+// depuis S.params.reposFixe[id], pas depuis l'objet employé — tout futur code qui modifie
+// S.params.reposFixe doit aussi appeler marquerEmployesModifies(id), sinon la synchro de ce
+// champ se romprait silencieusement pour le chemin incrémental.
+function empToRow(e, orderIndex) {
+  return {
+    id: e.id,
+    order_index: orderIndex,
+    code: e.code || '',
+    name: e.name || '',
+    email: e.email || null,
+    tel: e.tel || null,
+    addr: e.addr || null,
+    site: e.site || '',
+    slot: e.slot || null,
+    has_children: !!e.hasChildren,
+    enfants: e.enfants || [],
+    contrat_type: e.typeContrat || null,
+    date_fin: e.dateFin || null,
+    solde_cp_manuel: e.soldeCPManuel ?? null,
+    solde_cp_manuel_date: e.soldeCPManuelDate || null,
+    repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
+    active: e.active !== false,
+    ville: e.ville || null,
+    code_postal: e.codePostal || null,
+    date_embauche: e.dateEmbauche || null,
+    jours_ecole: e.joursEcole || [],
+  };
+}
+
+// Écriture COMPLÈTE des employés dans la table relationnelle `employees` (upsert de tout
+// S.employees). Réservée désormais à supaUploadAll() (bouton manuel "Tout envoyer") — le
+// chemin normal via persist() utilise supaWriteEmployeesRows ci-dessous, qui n'envoie que
+// les lignes réellement modifiées (voir marquerEmployesModifies).
 async function supaWriteEmployees(employees) {
   if(!_supaUrl || !_supaKey) return false;
   try {
-    // Upsert seulement — jamais de suppression basée sur l'instantané local (persist()
-    // envoie toujours TOUT S.employees, et un onglet resté ouvert avec une copie en
-    // mémoire incomplète effacerait silencieusement les employés créés ailleurs entre-temps).
-    // Un employé qui part est archivé (active=false), jamais supprimé de la table — voir deleteEmp().
+    // Upsert seulement — jamais de suppression basée sur l'instantané local. Un employé qui
+    // part est archivé (active=false), jamais supprimé de la table — voir deleteEmp().
     const ids = (employees || []).map(e => e.id).filter(Boolean);
     if (!ids.length) return true;
-    const rows = employees.map((e, i) => ({
-      id: e.id,
-      order_index: i,
-      code: e.code || '',
-      name: e.name || '',
-      email: e.email || null,
-      tel: e.tel || null,
-      addr: e.addr || null,
-      site: e.site || '',
-      slot: e.slot || null,
-      has_children: !!e.hasChildren,
-      enfants: e.enfants || [],
-      contrat_type: e.typeContrat || null,
-      date_fin: e.dateFin || null,
-      solde_cp_manuel: e.soldeCPManuel ?? null,
-      solde_cp_manuel_date: e.soldeCPManuelDate || null,
-      repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
-      active: e.active !== false,
-      ville: e.ville || null,
-      code_postal: e.codePostal || null,
-      date_embauche: e.dateEmbauche || null,
-      jours_ecole: e.joursEcole || [],
-    }));
+    const rows = employees.map((e, i) => empToRow(e, i));
     const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
       method: 'POST',
       headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
@@ -1797,6 +1808,38 @@ async function supaWriteEmployees(employees) {
     if(!r.ok) { console.warn('supaWriteEmployees upsert error', r.status, await r.text()); return false; }
     return true;
   } catch(e) { console.warn('supaWriteEmployees error', e); return false; }
+}
+
+// Écriture INCRÉMENTALE : upsert des seules lignes `employees` dont l'id est dans `ids`
+// (Set d'ids "sales" alimenté par marquerEmployesModifies). C'est le chemin normal utilisé
+// par persist() — évite qu'une modification sur UN salarié ré-envoie toute la table en un
+// seul upsert group (ce qui ferait échouer l'écriture entière si une future policy RLS
+// refuse ne serait-ce qu'une des autres lignes du lot, non concernées par cette action).
+async function supaWriteEmployeesRows(ids) {
+  if (!_supaUrl || !_supaKey) return false;
+  const idList = [...ids]; // snapshot avant l'appel réseau, voir note plus bas sur la race condition
+  if (!idList.length) return true;
+  // Défensif : un id "sale" peut ne plus correspondre à un employé de S.employees (ne devrait
+  // pas arriver, archivage != suppression) — foundIds ne garde que ceux réellement envoyés, pour
+  // que _dirtyEmployeeIds ne soit jamais purgé d'un id qui n'a pas vraiment été synchronisé.
+  const foundIds = idList.filter(id => S.employees.some(e => e.id === id));
+  const rows = foundIds.map(id => S.employees.find(e => e.id === id)).map(e => empToRow(e, S.employees.indexOf(e)));
+  if (!rows.length) return true; // rien à envoyer ; les ids introuvables restent "sales" (pas d'oubli silencieux)
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
+      method: 'POST',
+      headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify(rows)
+    });
+    if (!r.ok) { console.warn('supaWriteEmployeesRows upsert error', r.status, await r.text()); return false; }
+    // Ne retirer du set que les ids réellement envoyés dans CETTE requête — si une autre
+    // modification a ajouté un nouvel id pendant l'attente réseau, il reste marqué "sale"
+    // et sera repris par le prochain persist()/flush.
+    foundIds.forEach(id => _dirtyEmployeeIds.delete(id));
+    return true;
+  } catch(e) { console.warn('supaWriteEmployeesRows error', e); return false; }
+  // En cas d'échec : les ids restent dans _dirtyEmployeeIds (pas de delete), donc un prochain
+  // persist() les reprendra — même absence de retry automatique qu'avant.
 }
 
 // Lecture des employés depuis la table relationnelle `employees`.
@@ -2419,6 +2462,18 @@ let _supaWriteTimers = {};
 // la précédente.
 let _pendingWrites = {};
 function hasPendingWrites(){ return Object.values(_pendingWrites).some(n=>n>0); }
+
+// Ids d'employés modifiés depuis le dernier envoi réussi vers Supabase — permet à persist()
+// de n'envoyer que les lignes réellement changées (supaWriteEmployeesRows) au lieu de
+// ré-uploader tout S.employees à chaque sauvegarde. Alimenté explicitement par chaque endroit
+// qui modifie un employé (objet S.employees[i] OU S.params.reposFixe[id], qui fait aussi
+// partie de la ligne `employees` via repos_fixe_weekday) — pas de diff automatique, car
+// reposFixe vit hors de l'objet employé et un diff le raterait.
+let _dirtyEmployeeIds = new Set();
+function marquerEmployesModifies(...ids){
+  ids.flat().forEach(id => { if(id) _dirtyEmployeeIds.add(id); });
+}
+
 function supaWriteDebounced(section, data) {
   if(_supaWriteTimers[section]){
     clearTimeout(_supaWriteTimers[section]);
@@ -2464,7 +2519,12 @@ const S={
       'PM05':3, // Petit Maxime — mercredi
       'BM05':5, // Berleque Marina — vendredi
     },
-    reposFixe:{}, // rempli automatiquement à l'init à partir de reposFixeParCode (clé = id employé)
+    // Rempli automatiquement à l'init à partir de reposFixeParCode (clé = id employé). ATTENTION :
+    // ce champ fait aussi partie de la ligne Supabase `employees` (repos_fixe_weekday, voir
+    // empToRow) même s'il vit ici et pas sur l'objet employé — tout code qui modifie
+    // reposFixe[id] doit aussi appeler marquerEmployesModifies(id), sinon la synchro
+    // incrémentale (supaWriteEmployeesRows) ne verra jamais passer ce changement.
+    reposFixe:{},
     // Motifs disponibles dans "Signaler une absence" (salarié) — configurable par le gestionnaire.
     motifsAbsence:[
       {id:'maladie',label:'Maladie',classification:'neutre'},
@@ -2513,7 +2573,7 @@ function persist(){
   lsSet('profilNotifs',S.profilNotifs);
   // 2. Synchronisation Supabase (différée pour éviter les appels en rafale)
   if(_supaUrl && _supaKey) {
-    supaWriteDebounced('employees', S.employees);
+    if (_dirtyEmployeeIds.size) supaWriteDebounced('employees_dirty', _dirtyEmployeeIds);
     supaWriteDebounced('planning', S.planning);
     supaWriteDebounced('requests', S.requests);
     supaWriteDebounced('absences', S.absences);
@@ -2626,7 +2686,7 @@ async function loadAll(force=false){
       S.params.reposFixe = {};
       S.employees.forEach(emp=>{
         const rf = S.params.reposFixeParCode[emp.code];
-        if(rf!==undefined) S.params.reposFixe[emp.id] = rf;
+        if(rf!==undefined){ S.params.reposFixe[emp.id] = rf; marquerEmployesModifies(emp.id); }
       });
       persist();
     }
@@ -4190,6 +4250,7 @@ function enregistrerMesInfos(){
     id: Date.now(), empId: emp.id, empName: emp.name, seen:false,
     message: `${emp.name} a modifié : ${champsModifies.join(', ')}`,
   });
+  marquerEmployesModifies(emp.id);
   persist();
   closeModal('mMesInfos');
   renderEmp(false);
@@ -4473,6 +4534,7 @@ function moveEmp(empId,dir){
   const newIdx=idx+dir;
   if(idx<0||newIdx<0||newIdx>=S.employees.length) return;
   [S.employees[idx],S.employees[newIdx]]=[S.employees[newIdx],S.employees[idx]];
+  marquerEmployesModifies(S.employees[idx].id, S.employees[newIdx].id);
   persist();
   renderEmpList();
   buildSelects();
@@ -4490,6 +4552,7 @@ function moveEmpInSite(empId,dir){
   if(newPos<0||newPos>=siteIndices.length) return;
   const idxA=siteIndices[pos],idxB=siteIndices[newPos];
   [S.employees[idxA],S.employees[idxB]]=[S.employees[idxB],S.employees[idxA]];
+  marquerEmployesModifies(S.employees[idxA].id, S.employees[idxB].id);
   persist();
   renderEmpList();
   buildSelects();
@@ -4553,6 +4616,7 @@ function reactiverEmp(empId){
   const emp=S.employees.find(e=>e.id===empId);
   if(!emp) return;
   emp.active=true;
+  marquerEmployesModifies(emp.id);
   persist();
   renderEmpList();
   buildSelects();
@@ -4799,6 +4863,7 @@ async function saveFicheEmp(){
   const nouveauSolde = soldeInput===''? null : parseFloat(soldeInput);
   emp.soldeCPManuel = nouveauSolde;
   emp.soldeCPManuelDate = nouveauSolde!=null ? (document.getElementById('ficheSoldeCPManuelDate').value || fmt(new Date())) : null;
+  marquerEmployesModifies(empId);
   persist();
   renderEmpList();
   refreshActiveView();
@@ -4902,6 +4967,7 @@ async function deleteEmp(){
   if(!emp) return;
   if(!confirm(`Marquer ${emp.name} comme parti ? Son historique (planning, congés, absences) reste consultable dans les employés archivés. Continuer ?`)) return;
   emp.active = false;
+  marquerEmployesModifies(empId);
   persist();
   renderEmpList();
   buildSelects();
@@ -4947,6 +5013,7 @@ async function saveNewEmp(){
   // Initialiser le planning sur 3 mois
   const today=new Date();today.setHours(0,0,0,0);
   for(let d=-28;d<=84;d++){const dt=addDays(today,d);S.planning[`${emp.id}_${fmt(dt)}`]={type:isJourRepos(emp,dt)?'off':slot,site,note:''};}
+  marquerEmployesModifies(emp.id);
   persist();updStats();closeModal('mEmp');renderEmpList();buildSelects();renderWeek();
   toast(`✓ ${name} ajouté(e) — Code : ${emp.code}`);
 }
@@ -5605,7 +5672,7 @@ async function saveMagasins(){
     newAdresses[newNom] = newAddr;
     if(newNom !== oldSite) {
       // Renommer dans les employés et le planning
-      S.employees.forEach(emp => { if(emp.site===oldSite) emp.site=newNom; });
+      S.employees.forEach(emp => { if(emp.site===oldSite){ emp.site=newNom; marquerEmployesModifies(emp.id); } });
       Object.keys(S.planning).forEach(key => {
         if(S.planning[key].site===oldSite) S.planning[key].site=newNom;
       });
@@ -5936,7 +6003,7 @@ async function supaUploadAll(){
   const statusEl = document.getElementById('supaStatus');
   if(statusEl) statusEl.innerHTML = '<span style="color:#F59E0B;">⏳ Envoi en cours...</span>';
   const sections = [
-    ['employees', S.employees],
+    ['employees', S.employees], // envoi complet volontaire (réparation manuelle) — persist() normal utilise 'employees_dirty'
     ['planning', S.planning],
     ['requests', S.requests],
     ['absences', S.absences],
@@ -6831,8 +6898,10 @@ function saveSoldesInitiaux(){
   S.employees.forEach(emp=>{
     const solEl=document.getElementById('sol_'+emp.id);
     const dateEl=document.getElementById('solDate_'+emp.id);
-    if(solEl&&solEl.value!=='') emp.soldeCPManuel=parseFloat(solEl.value)||0;
-    if(dateEl&&dateEl.value) emp.soldeCPManuelDate=dateEl.value;
+    let touched=false;
+    if(solEl&&solEl.value!==''){ emp.soldeCPManuel=parseFloat(solEl.value)||0; touched=true; }
+    if(dateEl&&dateEl.value){ emp.soldeCPManuelDate=dateEl.value; touched=true; }
+    if(touched) marquerEmployesModifies(emp.id);
   });
   persist();
   renderSoldesInitiaux();
@@ -6908,7 +6977,9 @@ function saveReposFixe() {
   if (!S.params.reposFixe) S.params.reposFixe = {};
   S.employees.forEach(emp => {
     const el = document.getElementById('rf_'+emp.id);
-    if (el) S.params.reposFixe[emp.id] = parseInt(el.value) || 0;
+    if (!el) return;
+    const nv = parseInt(el.value) || 0;
+    if ((S.params.reposFixe[emp.id]||0) !== nv) { S.params.reposFixe[emp.id] = nv; marquerEmployesModifies(emp.id); }
   });
   persist();
   toast('✓ Jours de repos fixes enregistrés');
