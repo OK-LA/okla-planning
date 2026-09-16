@@ -6211,11 +6211,18 @@ function updSimuDelai() {
     limite = addDays(today, 60);
     regle = '1 semaine ou plus : 2 mois (60 jours) de préavis minimum';
   } else if (type === 'ete') {
-    const annee = today.getMonth() >= 9 ? today.getFullYear()+1 : today.getFullYear();
+    // Bascule sur l'année suivante dès que le 30/03 de l'année en cours est dépassé (pas
+    // seulement à partir d'octobre) — sinon, de avril à septembre, le simulateur affichait encore
+    // l'échéance du 30/03 de cette même année (déjà passée) au lieu de celle de l'été suivant,
+    // laissant croire à tort qu'il était trop tard pour poser des congés d'été (Antoine, 2026-09-16).
+    const limite30MarsCetteAnnee = new Date(today.getFullYear(), 2, 30);
+    const annee = today > limite30MarsCetteAnnee ? today.getFullYear()+1 : today.getFullYear();
     limite = new Date(annee, 2, 30); // 30 mars
     regle = "Vacances d'été (juin → septembre) : demande obligatoire avant le 30 mars";
   } else { // noel
-    const annee = today.getFullYear();
+    // Même correction que ci-dessus, pour le 30/09.
+    const limite30SeptCetteAnnee = new Date(today.getFullYear(), 8, 30);
+    const annee = today > limite30SeptCetteAnnee ? today.getFullYear()+1 : today.getFullYear();
     limite = new Date(annee, 8, 30); // 30 sept
     regle = 'Vacances de Noël (décembre) : demande obligatoire avant le 30 septembre';
   }
