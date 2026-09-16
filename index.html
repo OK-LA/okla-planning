@@ -1621,13 +1621,38 @@ function ouvrirRevueSmsEnAttente(){
     const entries=parEmploye[empId];
     const resume=entries.map(e=>`${e.dl} (${e.det})`).join(', ');
     const sansTel=!emp?.tel;
-    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:${sansTel?'not-allowed':'pointer'};${sansTel?'opacity:.55;':''}">
-      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'':'checked'} ${sansTel?'disabled':''} style="margin-top:3px;width:auto;">
-      <div style="flex:1;"><div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#DC2626;font-weight:400;">(pas de téléphone — ne sera pas envoyé)</span>':''}</div>
-      <div style="font-size:11px;color:var(--muted);">${resume}</div></div>
-    </label>`;
+    return `<div id="revueSmsRow_${empId}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);${sansTel?'opacity:.55;':''}">
+      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'':'checked'} ${sansTel?'disabled':''} style="margin-top:3px;width:auto;cursor:${sansTel?'not-allowed':'pointer'};">
+      <div style="flex:1;cursor:${sansTel?'not-allowed':'pointer'};" onclick="${sansTel?'':`document.querySelector('.revue-sms-chk[data-emp=\\'${empId}\\']').click()`}">
+        <div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#DC2626;font-weight:400;">(pas de téléphone — ne sera pas envoyé)</span>':''}</div>
+        <div style="font-size:11px;color:var(--muted);">${resume}</div>
+      </div>
+      <button type="button" class="btn-del" onclick="supprimerPersonneSmsEnAttente('${empId}')" title="Retirer définitivement de la file d'attente">✕</button>
+    </div>`;
   }).join('');
   openModal('mRevueSms');
+}
+// Retire un salarié de la file d'attente (pas juste "pas maintenant" comme décocher — définitif,
+// utile pour une modification qu'on ne veut finalement jamais notifier). Antoine, 2026-09-16.
+async function supprimerPersonneSmsEnAttente(empId){
+  const emp=S.employees.find(e=>e.id===empId);
+  if(!confirm(`Retirer ${emp?emp.name:empId} de la file d'attente SMS ? Ses modifications en attente ne seront jamais envoyées.`)) return;
+  if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
+  // Contrairement à append_pending_sms (où un échec silencieux laisse juste l'entrée en attente
+  // — sens sûr par défaut), un échec silencieux ICI afficherait "retiré" alors que l'entrée est
+  // toujours bien là côté serveur et repartirait au prochain envoi — donc on bloque et on prévient
+  // au lieu de continuer optimiste, comme claim_pending_sms.
+  try {
+    const r=await fetch(`${supaBase()}/rest/v1/rpc/remove_pending_sms_for_employee`, {
+      method:'POST', headers: supaHeaders(), body: JSON.stringify({target_emp_id: empId})
+    });
+    if(!r.ok){ console.warn('remove_pending_sms_for_employee error', r.status, await r.text()); toast('Erreur, réessayez'); return; }
+  } catch(e){ console.warn('remove_pending_sms_for_employee error', e); toast('Erreur réseau, réessayez'); return; }
+  S.params.pendingSms=(S.params.pendingSms||[]).filter(p=>p.empId!==empId);
+  renderPendingSmsBtn();
+  document.getElementById('revueSmsRow_'+empId)?.remove();
+  if(!document.querySelectorAll('#revueSmsListe > div').length) closeModal('mRevueSms');
+  toast(`✓ ${emp?emp.name:empId} retiré(e) de la file d'attente`);
 }
 async function confirmerEnvoiSmsSelection(){
   const empsCoches=new Set([...document.querySelectorAll('.revue-sms-chk:checked')].map(el=>el.dataset.emp));
