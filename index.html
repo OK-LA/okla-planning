@@ -1874,7 +1874,12 @@ async function supaWriteEmployeesRows(ids) {
     const r = await fetch(`${supaBase()}/rest/v1/employees?on_conflict=id`, {
       method: 'POST',
       headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
-      body: JSON.stringify(rows)
+      body: JSON.stringify(rows),
+      // keepalive : la requête (petite, 1-2 lignes typiquement) continue même si la page se ferme
+      // juste après l'appel — sans ça, fermer l'appli aussitôt après "Enregistrer" (très courant
+      // sur mobile) pouvait couper la requête avant qu'elle ne parte réellement, perdant la
+      // modification malgré le toast de succès (Antoine, 2026-09-18).
+      keepalive: true,
     });
     if (!r.ok) { console.warn('supaWriteEmployeesRows upsert error', r.status, await r.text()); return false; }
     // Ne retirer du set que les ids réellement envoyés dans CETTE requête — si une autre
@@ -4316,7 +4321,7 @@ function supprimerEnfantPerso(idx){
   editingEnfantsPerso.splice(idx,1);
   renderEnfantsPerso();
 }
-function enregistrerMesInfos(){
+async function enregistrerMesInfos(){
   const emp=S.user; if(!emp) return;
   const nouveaux={
     email: document.getElementById('miEmail').value.trim(),
@@ -4347,9 +4352,17 @@ function enregistrerMesInfos(){
   });
   marquerEmployesModifies(emp.id);
   persist();
+  // Écriture immédiate, sans attendre le debounce de 1.5s : "Mes infos" est une action ponctuelle
+  // et délibérée (pas un cas où grouper plusieurs écritures rapides sert à quelque chose) — le
+  // debounce ne faisait ici que créer un vrai risque de perte silencieuse si le salarié ferme
+  // l'appli juste après avoir enregistré (courant sur mobile). Confirmé en conditions réelles :
+  // un rechargement immédiat après la sauvegarde perdait la modification (Antoine, 2026-09-18).
+  // L'id reste marqué "sale" tant que cet appel n'a pas réussi, donc le debounce déjà programmé
+  // par persist() sert de filet de secours automatique si cette tentative immédiate échoue.
+  const ok = await supaWriteEmployeesRows([emp.id]);
   closeModal('mMesInfos');
   renderEmp(false);
-  toast('✓ Vos informations ont été mises à jour');
+  toast(ok ? '✓ Vos informations ont été mises à jour' : '⚠️ Enregistré localement, la synchronisation a échoué — réessayez avec une meilleure connexion');
 }
 
 function toggleAbsMotifLibre(){
@@ -5017,10 +5030,14 @@ async function saveFicheEmp(){
   emp.heuresSupp = heuresSuppInput==='' ? null : parseFloat(heuresSuppInput);
   marquerEmployesModifies(empId);
   persist();
+  // Écriture immédiate plutôt que d'attendre le debounce — même raison que enregistrerMesInfos()
+  // ci-dessus : une sauvegarde de fiche est une action ponctuelle, fermer la fenêtre/l'onglet dans
+  // les 1.5s qui suivent perdrait sinon la modification silencieusement.
+  const ok = await supaWriteEmployeesRows([empId]);
   renderEmpList();
   refreshActiveView();
   closeModal('mFicheEmp');
-  toast(`✓ Fiche de ${emp.name.split(' ')[0]} mise à jour`);
+  toast(ok ? `✓ Fiche de ${emp.name.split(' ')[0]} mise à jour` : `⚠️ Enregistré localement, la synchronisation a échoué — réessayez avec une meilleure connexion`);
 }
 
 // ── Génération du planning normal depuis le repos hebdomadaire ──
