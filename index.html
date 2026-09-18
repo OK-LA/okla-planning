@@ -484,6 +484,12 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empCongeSansSoldeList"></div>
     </div>
 
+    <!-- MES DEMANDES DE RÉCUPÉRATION -->
+    <div class="quota-card mt-10" id="empRecupCard" style="display:none;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">⏱️ Mes récupérations</div>
+      <div id="empRecupList"></div>
+    </div>
+
     <!-- MES DEMANDES D'ÉCHANGE ENVOYÉES -->
     <div class="quota-card mt-10" id="empEchangesEnvoyesCard" style="display:none;">
       <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🔄 Mes demandes d'échange</div>
@@ -510,6 +516,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <select id="rType" onchange="toggleCongeFields()">
           <option value="conge">Demande de congé payé</option>
           <option value="conge_sans_solde">Congé sans solde</option>
+          <option value="recup" id="rTypeRecup" style="display:none;">Récupération d'heures</option>
           <option value="enfant_malade">Enfant malade (- de 16 ans)</option>
           <option value="maladie">Arrêt maladie</option>
           <option value="echange">Échange avec un collègue</option>
@@ -546,6 +553,11 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg"><label>Collègue (Entrepôt)</label>
           <select id="rEchangeABCollegue"><option value="">Choisir un collègue...</option></select>
         </div>
+      </div>
+      <div id="recupFields" style="display:none;">
+        <div id="recupSoldeInfo" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <div class="fg"><label>Date</label><input type="date" id="rRecupDate"></div>
+        <div class="fg"><label>Heures souhaitées</label><input type="number" step="0.5" min="0.5" id="rRecupHeures"></div>
       </div>
       <div class="fg"><label>Précisions</label><textarea id="rNote" rows="2" placeholder="Détails..."></textarea></div>
       <button class="btn btn-primary btn-full" onclick="sendReq()">Envoyer la demande</button>
@@ -673,6 +685,9 @@ tbody tr:hover td{background:#FAFAF8;}
 
       <div style="font-weight:600;font-size:14px;margin:18px 0 12px;">📋 Congés sans solde — en attente</div>
       <div id="congeSansSoldeListeMgr"></div>
+
+      <div style="font-weight:600;font-size:14px;margin:18px 0 12px;">⏱️ Récupérations d'heures — en attente</div>
+      <div id="recupListeMgr"></div>
     </div>
 
     <div class="tab-content" id="tab-remplace">
@@ -870,6 +885,21 @@ tbody tr:hover td{background:#FAFAF8;}
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-sm" onclick="verifierNettoyagePlanning()">🔍 Voir combien de lignes seraient supprimées</button>
           <button class="btn btn-sm" id="pNettoyageBtn" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" disabled onclick="nettoyerHistoriquePlanning()">🗑️ Supprimer définitivement</button>
+        </div>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>🗑️ Effacer les demandes en attente</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Supprime les demandes (congés, échanges, récupérations...) restées <strong>en attente</strong> avant une date choisie — n'affecte jamais les demandes déjà validées ou refusées. <strong>Action irréversible.</strong>
+        </div>
+        <div class="fg"><label>Supprimer les demandes en attente créées avant le</label>
+          <input type="date" id="pNettoyageDemandesCutoff">
+        </div>
+        <div id="pNettoyageDemandesResultat" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="verifierNettoyageDemandes()">🔍 Voir combien de demandes seraient supprimées</button>
+          <button class="btn btn-sm" id="pNettoyageDemandesBtn" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" disabled onclick="nettoyerDemandesEnAttente()">🗑️ Supprimer définitivement</button>
         </div>
       </div>
 
@@ -1453,6 +1483,7 @@ const TYPES=[
   {key:'vip',       label:'★ VIP',        short:'VIP',    info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
   {key:'conge',     label:'Congé',         short:'CP',    info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
   {key:'congeSansSolde', label:'Congé sans solde', short:'CSS', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
+  {key:'recup',     label:'Récupération',  short:'Récup',  info:'Récupération d\'heures', color:'#0D9488',bg:'#F0FDFA',border:'#99F6E4'},
   {key:'maladie',   label:'Maladie',       short:'Malad.', info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
   {key:'formation', label:'Formation',     short:'Form.',  info:'Apprenti en centre de formation', color:'#F59E0B',bg:'#FFFBEB',border:'#FDE68A'},
   {key:'off',       label:'Repos',         short:'',       info:'Non travaillé',        color:'#D1D5DB',bg:'transparent',border:'#D1D5DB'},
@@ -1964,6 +1995,7 @@ async function supaWriteRequests(requests) {
       cible_name: r.cibleName || null,
       cible_email: r.cibleEmail || null,
       jours_ouvres: (r.joursOuvres === '' || r.joursOuvres == null) ? null : r.joursOuvres,
+      heures_demandees: r.heuresDemandees ?? null,
       note: r.note || null,
       planning_snapshot: r.planningSnapshot || null,
     }));
@@ -1986,7 +2018,7 @@ async function supaReadRequests() {
       id: row.id, type: row.type, status: row.status, empId: row.emp_id, empName: row.emp_name,
       empEmail: row.emp_email, dateDebut: row.date_debut, dateFin: row.date_fin,
       dateA: row.date_a, dateB: row.date_b, cibleId: row.cible_id, cibleName: row.cible_name,
-      cibleEmail: row.cible_email, joursOuvres: row.jours_ouvres, note: row.note,
+      cibleEmail: row.cible_email, joursOuvres: row.jours_ouvres, heuresDemandees: row.heures_demandees, note: row.note,
       planningSnapshot: row.planning_snapshot || null,
       date: row.date_debut,
     }));
@@ -2976,12 +3008,15 @@ function renderEmp(resetView=true){
   document.getElementById('rDate').value=fmt(new Date());
   // Échange de créneau A/B réservé à l'Entrepôt — masqué dans le menu pour les autres sites.
   document.getElementById('rTypeEchangeAB').style.display = emp.site==='Entrepôt' ? '' : 'none';
+  // Récupération d'heures : proposée uniquement si le compteur est positif.
+  document.getElementById('rTypeRecup').style.display = (emp.heuresSupp>0) ? '' : 'none';
   toggleCongeFields();
   initCongeListeners();
   renderEmpWeek();
   renderEmpQuota();
   renderEmpAbsList();
   renderEmpCongeSansSolde();
+  renderEmpRecup();
   renderEmpEchanges();
   updSimuDelai();
   if(resetView){
@@ -3225,6 +3260,15 @@ async function sendReq(){
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'echange_ab',dateA,cibleId,cibleName:cible.name,cibleEmail:cible.email,
       date:dateA,dateDebut:dateA,dateFin:dateA,note,status:'pending_collegue'};
+  } else if(type==='recup'){
+    const date=document.getElementById('rRecupDate')?.value;
+    const heures=parseFloat(document.getElementById('rRecupHeures')?.value);
+    const solde=emp.heuresSupp||0;
+    if(!date||!heures){toast('Complétez la date et le nombre d\'heures');return;}
+    if(heures<=0){toast('Le nombre d\'heures doit être positif');return;}
+    if(heures>solde){toast(`Solde insuffisant (${solde}h disponible(s))`);return;}
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'recup',date,dateDebut:date,dateFin:date,heuresDemandees:heures,note,status:'pending'};
   } else {
     const date=document.getElementById('rDate')?.value||fmt(new Date());
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
@@ -3235,13 +3279,14 @@ async function sendReq(){
   document.getElementById('rNote').value='';
   renderEmpQuota();
   renderEmpCongeSansSolde();
+  renderEmpRecup();
   renderEmpEchanges();
   notifierNouvelleDemande(req, emp);
   toast('✓ Demande envoyée');
 }
 // Email best-effort à chaque nouvelle demande — un échange va au collègue concerné (c'est lui
 // qui doit répondre en premier), tout le reste va au(x) gestionnaire(s) configuré(s) en Paramètres.
-const LABELS_TYPE_DEMANDE={conge:'Congé payé',conge_sans_solde:'Congé sans solde',enfant_malade:'Enfant malade',maladie:'Arrêt maladie',medical:'Rendez-vous médical',autre:'Autre'};
+const LABELS_TYPE_DEMANDE={conge:'Congé payé',conge_sans_solde:'Congé sans solde',recup:'Récupération d\'heures',enfant_malade:'Enfant malade',maladie:'Arrêt maladie',medical:'Rendez-vous médical',autre:'Autre'};
 function notifierNouvelleDemande(req, emp){
   const periode = req.dateDebut===req.dateFin
     ? fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long',year:'numeric'})
@@ -3272,7 +3317,7 @@ function notifierNouvelleDemande(req, emp){
   const emails=emailsGestionnaire();
   if(emails.length) envoyerNotifEmail(emails, `Nouvelle demande — ${label} — ${emp.name}`,
     `<p><strong>${emp.name}</strong> (${emp.site}) a envoyé une nouvelle demande :</p>
-    <p><strong>${label}</strong> — ${periode}${req.joursOuvres?` (${req.joursOuvres} jour(s) ouvré(s))`:''}</p>
+    <p><strong>${label}</strong> — ${periode}${req.joursOuvres?` (${req.joursOuvres} jour(s) ouvré(s))`:''}${req.heuresDemandees?` (${req.heuresDemandees}h)`:''}</p>
     ${req.note?`<p>Note : ${req.note}</p>`:''}
     <p>À traiter depuis l'application OK-LA Planning.</p>`);
   const phones=telephonesGestionnaire();
@@ -3289,7 +3334,7 @@ function renderMgr(resetView=true){
   // resetView=false = resynchronisation en arrière-plan (toutes les 30s) : on garde la vue déjà
   // choisie par l'utilisateur, refreshActiveView() suffit alors (respecte S.view).
   if(resetView) setView('mois'); else refreshActiveView();
-  renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
+  renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderRecupMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
 }
 function switchTab(n){
   const mgrScreen = document.getElementById('sMgr');
@@ -4364,6 +4409,25 @@ function renderEmpCongeSansSolde(){
       <div style="flex:1">
         <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
         <div style="font-size:11px;color:var(--muted)">${r.joursOuvres} jour(s) ouvré(s) — non rémunéré</div>
+      </div>
+      <span class="conge-status ${statusCls}">${statusLbl}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderEmpRecup(){
+  const emp=S.user;if(!emp)return;
+  const mine=S.requests.filter(r=>r.empId===emp.id && r.type==='recup').sort((a,b)=>b.id-a.id);
+  const card=document.getElementById('empRecupCard');
+  if(!mine.length){card.style.display='none';return;}
+  card.style.display='block';
+  document.getElementById('empRecupList').innerHTML = mine.map(r=>{
+    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
+    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
+    return `<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.date+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-size:11px;color:var(--muted)">${r.heuresDemandees}h demandée(s)</div>
       </div>
       <span class="conge-status ${statusCls}">${statusLbl}</span>
     </div>`;
@@ -5862,6 +5926,67 @@ async function nettoyerHistoriquePlanning(){
   toast('✓ Historique du planning nettoyé');
 }
 
+// ══ NETTOYAGE DES DEMANDES EN ATTENTE ══
+// Même principe de sécurité que le nettoyage du planning ci-dessus : le bouton de suppression
+// reste désactivé tant que le comptage réel n'a pas été fait. N'affecte que les statuts "en
+// attente" (pending/pending_collegue/pending_gestionnaire) — jamais les demandes déjà tranchées
+// (approved/refused), qui restent l'historique des décisions prises (Antoine, 2026-09-18).
+// L'id d'une demande est un timestamp (Date.now() à la création) — utilisé directement comme
+// date de création, pas de colonne dédiée nécessaire.
+const STATUTS_EN_ATTENTE = ['pending','pending_collegue','pending_gestionnaire'];
+let _nettoyageDemandesCount = null;
+async function verifierNettoyageDemandes(){
+  const cutoff = document.getElementById('pNettoyageDemandesCutoff').value;
+  const btn = document.getElementById('pNettoyageDemandesBtn');
+  const resEl = document.getElementById('pNettoyageDemandesResultat');
+  btn.disabled = true; _nettoyageDemandesCount = null;
+  if(!cutoff){ toast('Choisissez une date'); return; }
+  if(cutoff >= fmt(new Date())){ toast('La date doit être dans le passé'); return; }
+  if(!_supaUrl || !_supaKey){ toast('Supabase non configuré'); return; }
+  const cutoffTs = new Date(cutoff+'T00:00:00').getTime();
+  resEl.textContent = 'Comptage en cours...';
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/requests?select=id&status=in.(${STATUTS_EN_ATTENTE.join(',')})&id=lt.${cutoffTs}`, {
+      method:'HEAD', headers: supaHeaders({'Prefer':'count=exact'})
+    });
+    const range = r.headers.get('content-range');
+    const count = range ? parseInt(range.split('/')[1]) : null;
+    if(count == null || isNaN(count)){ resEl.textContent = 'Erreur lors du comptage.'; return; }
+    _nettoyageDemandesCount = count;
+    resEl.innerHTML = count>0
+      ? `<strong>${count}</strong> demande(s) en attente seraient supprimées définitivement (créées avant le ${fmtFR(new Date(cutoff+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}).`
+      : 'Aucune demande en attente à supprimer avant cette date.';
+    btn.disabled = count===0;
+  } catch(e){ resEl.textContent = 'Erreur lors du comptage.'; console.warn('verifierNettoyageDemandes error', e); }
+}
+async function nettoyerDemandesEnAttente(){
+  const cutoff = document.getElementById('pNettoyageDemandesCutoff').value;
+  if(!cutoff || _nettoyageDemandesCount == null){ toast('Vérifiez d\'abord le nombre de demandes concernées'); return; }
+  if(cutoff >= fmt(new Date())){ toast('La date doit être dans le passé'); return; }
+  if(!confirm(`Supprimer définitivement ${_nettoyageDemandesCount} demande(s) en attente créées avant le ${cutoff} ? Cette action est IRRÉVERSIBLE.`)) return;
+  const cutoffTs = new Date(cutoff+'T00:00:00').getTime();
+  const resEl = document.getElementById('pNettoyageDemandesResultat');
+  resEl.textContent = 'Suppression en cours...';
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/requests?status=in.(${STATUTS_EN_ATTENTE.join(',')})&id=lt.${cutoffTs}`, {
+      method:'DELETE', headers: supaHeaders({'Prefer':'return=minimal'})
+    });
+    if(!r.ok){ toast('Erreur lors de la suppression'); resEl.textContent=''; return; }
+  } catch(e){ toast('Erreur lors de la suppression'); console.warn('nettoyerDemandesEnAttente error', e); resEl.textContent=''; return; }
+  // Purge aussi la copie locale pour rester cohérent jusqu'au prochain rechargement.
+  S.requests = S.requests.filter(r => !(STATUTS_EN_ATTENTE.includes(r.status) && r.id < cutoffTs));
+  lsSet('requests', S.requests);
+  document.getElementById('pNettoyageDemandesBtn').disabled = true;
+  _nettoyageDemandesCount = null;
+  resEl.textContent = '✓ Demandes en attente nettoyées.';
+  toast('✓ Demandes en attente nettoyées');
+  updStats();
+  renderCongesMgr();
+  renderCongeSansSoldeMgr();
+  renderRecupMgr();
+  renderEchangesMgr();
+}
+
 // ══ IMPORT EXCEL RÉCURRENT (fichier planning réel, mise à jour périodique) ══
 // Correspondance nom de fichier / cellule A1 -> site de l'appli (CORBIE = ancien nom de Longueau)
 const EXCEL_SITE_TOKENS = {BRETEUIL:'Breteuil', ENTREPOT:'Entrepôt', HAM:'Ham', LONGUEAU:'Longueau', CORBIE:'Longueau', ROYE:'Roye'};
@@ -6172,6 +6297,20 @@ function getCongesEmp(empId) {
     new Date(r.dateFin+'T12:00') <= periode.fin
   );
 }
+// Comme getCongesEmp, mais sans restriction à la période de référence en cours — nécessaire pour
+// la liste "à gérer" côté gestionnaire (renderCongesMgr) : les règles de dépôt (ex: juin-sept
+// avant le 30/03) imposent de déposer une demande parfois plus d'un an à l'avance, donc une
+// demande pour juillet 2027 doit rester gérable dès aujourd'hui, pas seulement une fois la
+// période 2027-2028 en cours (bug signalé par Antoine, 2026-09-18 : la demande était visible côté
+// salarié mais invisible côté gestionnaire, filtrée hors de la période courante).
+function getCongesEmpToutesPeriodes(empId) {
+  return S.requests.filter(r =>
+    r.empId === empId &&
+    (r.type === 'conge' || r.type === 'conge_sans_solde') &&
+    r.status !== 'refused' &&
+    r.dateFin
+  );
+}
 
 function getJoursPris(empId) {
   // Solde initial au 31/05 + congés payés approuvés
@@ -6464,12 +6603,19 @@ function toggleCongeFields() {
   const isEnfant = type === 'enfant_malade';
   const isEchange = type === 'echange';
   const isEchangeAB = type === 'echange_ab';
+  const isRecup = type === 'recup';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
-  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB) ? 'block' : 'none';
+  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB && !isRecup) ? 'block' : 'none';
   document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
   document.getElementById('echangeABFields').style.display = isEchangeAB ? 'block' : 'none';
+  document.getElementById('recupFields').style.display = isRecup ? 'block' : 'none';
   if(isEchange) remplirSelectCollegues();
   if(isEchangeAB) remplirSelectCollegueEntrepot();
+  if(isRecup && S.user){
+    const solde = S.user.heuresSupp || 0;
+    document.getElementById('recupSoldeInfo').textContent = `Solde disponible : ${solde}h`;
+    document.getElementById('rRecupHeures').max = solde;
+  }
   // Afficher info enfant malade, avec le quota calculé selon les enfants déclarés du salarié
   const infoEl = document.getElementById('enfantMaladeInfo');
   if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
@@ -6627,11 +6773,11 @@ function renderCongesMgr() {
     const restants = getQuotaAnnuel() - pris - attente;
     const jokers = getJokersUtilises(emp.id);
     const pct = Math.round((pris / getQuotaAnnuel()) * 100);
-    const demandes = getCongesEmp(emp.id).filter(r => r.status === 'pending');
+    const demandes = getCongesEmpToutesPeriodes(emp.id).filter(r => r.status === 'pending');
     // CP déjà validés, à venir ou en cours — permet de corriger une erreur de saisie sans passer
     // par une demande de congé sans solde ou un rattrapage manuel case par case.
     const todayStr = fmt(new Date());
-    const congesValides = getCongesEmp(emp.id).filter(r => r.status === 'approved' && r.type === 'conge' && r.dateFin >= todayStr);
+    const congesValides = getCongesEmpToutesPeriodes(emp.id).filter(r => r.status === 'approved' && r.type === 'conge' && r.dateFin >= todayStr);
 
     h += `<div class="quota-card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
@@ -6892,6 +7038,62 @@ async function refuserCongeSansSolde(id){
   persist();
   renderCongeSansSoldeMgr();
   toast('Congé sans solde refusé');
+}
+
+// ── Récupérations d'heures (vue gestionnaire) ──
+function renderRecupMgr(){
+  const enAttente = S.requests.filter(r=>r.type==='recup' && r.status==='pending');
+  const el = document.getElementById('recupListeMgr');
+  if(!el) return;
+  if(!enAttente.length){
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px;">Aucune récupération en attente</div>';
+    return;
+  }
+  el.innerHTML = enAttente.map(r=>{
+    const emp = S.employees.find(e=>e.id===r.empId);
+    const solde = emp?.heuresSupp ?? 0;
+    return `
+    <div class="quota-card" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:180px;">
+          <div style="font-weight:600;font-size:13px;">${r.empName}</div>
+          <div style="font-size:12px;color:var(--muted);">
+            ${fmtFR(new Date(r.date+'T12:00'),{day:'numeric',month:'short'})} · ${r.heuresDemandees}h demandée(s) (solde actuel : ${solde}h)
+          </div>
+          ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
+        </div>
+        <div style="display:flex;gap:5px;">
+          <button class="btn btn-sm btn-ok" onclick="validerRecup(${r.id})">✓</button>
+          <button class="btn btn-sm btn-no" onclick="refuserRecup(${r.id})">✗</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function validerRecup(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  const emp = S.employees.find(e=>e.id===req.empId);
+  if(!emp){toast('Employé introuvable');return;}
+  const solde = emp.heuresSupp ?? 0;
+  if(req.heuresDemandees > solde){toast(`Solde insuffisant (${solde}h disponible(s), ${req.heuresDemandees}h demandées)`);return;}
+  req.status = 'approved';
+  emp.heuresSupp = solde - req.heuresDemandees;
+  S.planning[`${req.empId}_${req.date}`] = {type:'recup', site:emp.site||'', note:`Récupération ${req.heuresDemandees}h`};
+  marquerEmployesModifies(emp.id);
+  const dl=fmtFR(new Date(req.date+'T12:00'),{day:'numeric',month:'long'});
+  S.mods.push({empId:req.empId, dl, det:`Récupération de ${req.heuresDemandees}h validée`, seen:false});
+  notifierModifPlanning(req.empId, dl, `Récupération de ${req.heuresDemandees}h validée`);
+  persist();
+  renderRecupMgr();
+  renderWeek();
+  toast('✓ Récupération validée');
+}
+async function refuserRecup(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  req.status = 'refused';
+  persist();
+  renderRecupMgr();
+  toast('Récupération refusée');
 }
 
 // ── Échanges d'horaire (vue gestionnaire) ──
