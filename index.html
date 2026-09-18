@@ -660,6 +660,15 @@ tbody tr:hover td{background:#FAFAF8;}
         <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;">RÈGLES EN VIGUEUR</div>
         <div style="font-size:13px;display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="congesRegles"></div>
       </div>
+
+      <!-- Remonté au-dessus de la longue liste des 21 employés (Antoine, 2026-09-18) : une
+           demande de récupération restait invisible sans faire défiler toute la page. -->
+      <div style="font-weight:600;font-size:14px;margin-bottom:12px;">⏱️ Récupérations d'heures — en attente</div>
+      <div id="recupListeMgr" style="margin-bottom:18px;"></div>
+
+      <div style="font-weight:600;font-size:14px;margin-bottom:12px;">📋 Congés sans solde — en attente</div>
+      <div id="congeSansSoldeListeMgr" style="margin-bottom:18px;"></div>
+
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
           <div style="font-size:12px;font-weight:600;color:var(--muted);">RÉCAPITULATIF GLOBAL — TOUS EMPLOYÉS</div>
@@ -682,12 +691,6 @@ tbody tr:hover td{background:#FAFAF8;}
         </table></div>
       </div>
       <div id="congesListeMgr"></div>
-
-      <div style="font-weight:600;font-size:14px;margin:18px 0 12px;">📋 Congés sans solde — en attente</div>
-      <div id="congeSansSoldeListeMgr"></div>
-
-      <div style="font-weight:600;font-size:14px;margin:18px 0 12px;">⏱️ Récupérations d'heures — en attente</div>
-      <div id="recupListeMgr"></div>
     </div>
 
     <div class="tab-content" id="tab-remplace">
@@ -7806,7 +7809,7 @@ function showStatDetail(type){
     } else {
       html = pending.map(r=>{
         const emp = S.employees.find(e=>e.id===r.empId);
-        const typeLabels = {conge:'🏖️ Congé',conge_sans_solde:'🏖️ CSS',maladie:'🤒 Maladie',echange:'🔄 Échange',echange_ab:'🔄 Échange A/B',enfant_malade:'👶 Enfant malade',medical:'🏥 RDV médical',autre:'📌 Autre'};
+        const typeLabels = {conge:'🏖️ Congé',conge_sans_solde:'🏖️ CSS',recup:'⏱️ Récupération',maladie:'🤒 Maladie',echange:'🔄 Échange',echange_ab:'🔄 Échange A/B',enfant_malade:'👶 Enfant malade',medical:'🏥 RDV médical',autre:'📌 Autre'};
         const statusLabels = {pending:'En attente',pending_gestionnaire:'En attente (gestionnaire)',pending_collegue:'En attente (collègue)'};
         const dDeb = r.dateDebut ? fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'}) : (r.date1||r.date) ? fmtFR(new Date((r.date1||r.date)+'T12:00'),{day:'numeric',month:'short'}) : '?';
         const dFin = r.dateFin && r.dateFin!==r.dateDebut ? ' → '+fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'}) : '';
