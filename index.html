@@ -1350,6 +1350,13 @@ tbody tr:hover td{background:#FAFAF8;}
           <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('ficheCode').value=genererCodeAleatoire()" title="Générer un nouveau code aléatoire">🎲</button>
         </div>
       </div>
+      <div class="fg" id="ficheCodeSalarieWrap" style="display:none;">
+        <label>Code accès salarié (optionnel — pour se connecter côté salarié malgré le statut gestionnaire)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="ficheCodeSalarie" maxlength="8" style="text-transform:uppercase;letter-spacing:2px;flex:1;" placeholder="Laisser vide = pas d'accès salarié séparé">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('ficheCodeSalarie').value=genererCodeAleatoire()" title="Générer un nouveau code aléatoire">🎲</button>
+        </div>
+      </div>
       <div class="fg"><label>Site principal</label>
         <select id="ficheSite"></select>
       </div>
@@ -1813,6 +1820,7 @@ function empToRow(e, orderIndex) {
     solde_cp_manuel: e.soldeCPManuel ?? null,
     solde_cp_manuel_date: e.soldeCPManuelDate || null,
     heures_supp: e.heuresSupp ?? null,
+    code_salarie: e.codeSalarie || null,
     repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
     active: e.active !== false,
     ville: e.ville || null,
@@ -1899,6 +1907,8 @@ async function supaReadEmployees() {
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
       heuresSupp: row.heures_supp,
+      codeSalarie: row.code_salarie,
+      is_manager: !!row.is_manager,
       active: row.active !== false,
       ville: row.ville,
       codePostal: row.code_postal,
@@ -2630,17 +2640,21 @@ function setSyncing(on,err=false){
   txt.textContent=on?'Synchronisation...':(err?'Hors ligne':'Connecté');
 }
 
-// Restaure l'écran (gestionnaire/salarié/login) à partir de la session locale. Le rôle est
-// dérivé de emp.is_manager à CHAQUE restauration (pas figé dans la session stockée) : une
-// révocation du statut gestionnaire prend effet dès le prochain rechargement, pas seulement
-// à la prochaine connexion complète.
+// Restaure l'écran (gestionnaire/salarié/login) à partir de la session locale. Le rôle stocké à
+// la connexion (session.role) est respecté tel quel — nécessaire depuis qu'un gestionnaire peut
+// se connecter en mode salarié via son code accès salarié (code_salarie) : sa fiche reste
+// is_manager=true, donc re-dériver le rôle depuis emp.is_manager à chaque restauration le
+// repasserait de force en gestionnaire, ignorant le choix fait à la connexion. Un seul cas est
+// corrigé de force : si la session prétend "mgr" mais que le statut gestionnaire de la fiche a
+// depuis été révoqué, on downgrade quand même — la révocation doit prendre effet dès le prochain
+// rechargement, pas seulement à la prochaine connexion complète (Antoine, 2026-09-18).
 function restoreSession(){
   const session=lsGet('session',null);
   const sessionValide=session&&(Date.now()-session.ts)<8*3600*1000;
   if(sessionValide){
     const emp=activeEmployees().find(e=>e.id===session.empId);
     if(emp){
-      S.user=emp; S.role = emp.is_manager?'mgr':'emp';
+      S.user=emp; S.role = (session.role==='mgr' && !emp.is_manager) ? 'emp' : session.role;
       showScr(S.role==='mgr'?'sMgr':'sEmp');
       S.role==='mgr'?renderMgr():renderEmp();
     } else { lsSet('session',null); showScr('sLogin'); }
@@ -4742,6 +4756,11 @@ function openFicheEmp(empId){
   document.getElementById('ficheCodePostal').value = emp.codePostal||'';
   document.getElementById('ficheVille').value = emp.ville||'';
   document.getElementById('ficheCode').value = emp.code||'';
+  // Code accès salarié : concerne uniquement les gestionnaires (is_manager), qui n'ont sinon
+  // aucun moyen de se connecter en tant que simple salarié une fois leur code principal toujours
+  // routé vers l'écran gestionnaire (Antoine, 2026-09-18).
+  document.getElementById('ficheCodeSalarieWrap').style.display = emp.is_manager ? 'block' : 'none';
+  document.getElementById('ficheCodeSalarie').value = emp.codeSalarie||'';
   document.getElementById('ficheSite').value = emp.site||'Ham';
   document.getElementById('ficheSlot').value = emp.slot||'magasin';
   document.getElementById('ficheChildren').checked = !!emp.hasChildren;
@@ -4921,6 +4940,25 @@ async function saveFicheEmp(){
       } catch(e){ console.warn('vérification code en direct échouée', e); }
     }
     if(!confirm(`Changer le code de connexion de ${emp.name} de "${emp.code||'—'}" à "${nouveauCode}" ? L'ancien code ne fonctionnera plus.`)) return;
+  }
+  // Code accès salarié (gestionnaires uniquement, champ masqué sinon) — même vérification
+  // d'unicité que le code principal, contre les DEUX colonnes (code et code_salarie) de tous les
+  // employés, puisque la connexion peut matcher l'une ou l'autre.
+  if(emp.is_manager){
+    const nouveauCodeSalarie = document.getElementById('ficheCodeSalarie').value.trim().toUpperCase();
+    const codeSalarieChange = nouveauCodeSalarie !== (emp.codeSalarie||'').toUpperCase();
+    if(codeSalarieChange && nouveauCodeSalarie){
+      const dejaPris = S.employees.some(e=>e.id!==empId && ((e.code||'').toUpperCase()===nouveauCodeSalarie || (e.codeSalarie||'').toUpperCase()===nouveauCodeSalarie));
+      if(dejaPris){toast(`⚠️ Le code "${nouveauCodeSalarie}" est déjà utilisé par un autre employé`);return;}
+      if(_supaUrl && _supaKey){
+        try {
+          const rCheck = await fetch(`${supaBase()}/rest/v1/employees?select=id&or=(code.eq.${encodeURIComponent(nouveauCodeSalarie)},code_salarie.eq.${encodeURIComponent(nouveauCodeSalarie)})`, {headers:supaHeaders()});
+          const existants = rCheck.ok ? await rCheck.json() : [];
+          if(existants.some(e=>e.id!==empId)){toast(`⚠️ Le code "${nouveauCodeSalarie}" vient d'être attribué à un autre employé — choisissez-en un autre`);return;}
+        } catch(e){ console.warn('vérification code salarié en direct échouée', e); }
+      }
+    }
+    emp.codeSalarie = nouveauCodeSalarie || null;
   }
   emp.code = nouveauCode;
   emp.name = document.getElementById('ficheNom').value.trim()||emp.name;

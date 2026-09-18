@@ -51,8 +51,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "code requis" }), { status: 400, headers: jsonHeaders });
     }
     const normalized = code.trim().toUpperCase();
+    // Un employé peut matcher soit son code principal (code), soit son code accès salarié
+    // secondaire (code_salarie, réservé aux gestionnaires qui veulent aussi un accès salarié —
+    // voir 025_code_salarie.sql). Lequel des deux a matché détermine isManager : le code
+    // principal donne le rôle réel de la fiche (is_manager), le code salarié force toujours le
+    // rôle salarié, même si la fiche est is_manager=true.
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/employees?code=eq.${encodeURIComponent(normalized)}&active=eq.true&select=id,auth_uid,is_manager&limit=1`,
+      `${SUPABASE_URL}/rest/v1/employees?active=eq.true&select=id,auth_uid,is_manager,code,code_salarie&or=(code.eq.${encodeURIComponent(normalized)},code_salarie.eq.${encodeURIComponent(normalized)})&limit=1`,
       { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
     );
     if (!r.ok) return new Response(JSON.stringify({ error: "Erreur base de données" }), { status: 502, headers: jsonHeaders });
@@ -61,13 +66,15 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Code non reconnu" }), { status: 401, headers: jsonHeaders });
     }
     const emp = rows[0];
+    const matchedViaCodePrincipal = !!emp.code && emp.code.toUpperCase() === normalized;
+    const isManager = matchedViaCodePrincipal ? !!emp.is_manager : false;
     const now = Math.floor(Date.now() / 1000);
     const exp = now + SESSION_TTL_SECONDS;
     const access_token = await signHS256({
       sub: emp.auth_uid, role: "authenticated", aud: "authenticated",
-      iat: now, exp, employee_id: emp.id, is_manager: !!emp.is_manager,
+      iat: now, exp, employee_id: emp.id, is_manager: isManager,
     });
-    return new Response(JSON.stringify({ access_token, expires_at: exp, employeeId: emp.id, isManager: !!emp.is_manager }), { headers: jsonHeaders });
+    return new Response(JSON.stringify({ access_token, expires_at: exp, employeeId: emp.id, isManager }), { headers: jsonHeaders });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: jsonHeaders });
   }
