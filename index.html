@@ -3002,6 +3002,7 @@ function renderEmp(resetView=true){
   document.getElementById('empHeuresSupp').innerHTML = (hs != null && hs !== 0)
     ? `<div class="alert-mod" style="background:${hs>0?'#ECFDF5':'#FFF7ED'};border-color:${hs>0?'#A7F3D0':'#FED7AA'};color:${hs>0?'#059669':'#C2410C'};">
         ⏱️ <strong>Compteur d'heures : ${hs>0?'+':''}${hs}h</strong> ${hs>0?'(heures supplémentaires)':'(heures à rattraper)'}
+        ${hs>0?`<div style="margin-top:6px;"><a href="#" onclick="demarrerDemandeRecup();return false;" style="font-size:12px;font-weight:600;text-decoration:underline;color:#059669;">→ Faire une demande de récupération</a></div>`:''}
       </div>`
     : '';
   buildTypeLegend('empLeg');
@@ -6595,6 +6596,19 @@ function checkCongeRealtime() {
     html += `<div style="color:#059669;font-size:12px;font-weight:600;">✓ Demande valide — ${result.jouresDemandes} jour(s) ouvré(s)</div>`;
   }
   el.innerHTML = html;
+}
+
+// Raccourci depuis le bandeau "Compteur d'heures" : ouvre directement le formulaire de demande
+// avec "Récupération d'heures" présélectionné, pour ne pas laisser le salarié chercher l'option
+// dans le menu déroulant générique tout en bas de l'onglet (Antoine, 2026-09-18 : un salarié
+// voyait son compteur mais ne trouvait pas comment faire sa demande — l'option existait mais
+// n'était pas assez visible/reliée au compteur).
+function demarrerDemandeRecup(){
+  switchEmpTab('perso');
+  const sel = document.getElementById('rType');
+  sel.value = 'recup';
+  toggleCongeFields();
+  sel.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
 function toggleCongeFields() {
