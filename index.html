@@ -387,6 +387,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="vtoggle" style="margin-right:8px;">
           <button class="vbtn active" id="empVSemBtn" onclick="setEmpView('sem')">Semaine</button>
           <button class="vbtn" id="empVMoisBtn" onclick="setEmpView('mois')">Mois</button>
+          <button class="vbtn" id="empVAnneeBtn" onclick="setEmpView('annee')">Année</button>
         </div>
       </div>
       <div id="empVSemaine">
@@ -407,6 +408,15 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="cal-grid" id="empCalHead" style="margin-bottom:3px;"></div>
         <div class="cal-grid" id="empCalBody"></div>
         <div class="legend mt-10" id="empLegMois"></div>
+      </div>
+      <div id="empVAnnee" style="display:none;">
+        <div class="view-bar">
+          <button class="btn btn-ghost btn-sm" onclick="eA(-1)">←</button>
+          <div class="week-label" id="eALbl"></div>
+          <button class="btn btn-ghost btn-sm" onclick="eA(1)">→</button>
+        </div>
+        <div id="empAnneeGrid"></div>
+        <div class="legend mt-10" id="empLegAnnee"></div>
       </div>
     </div>
 
@@ -2550,7 +2560,7 @@ const S={
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
   profilNotifs:lsGet('profilNotifs',[]),
-  eWO:0,mWO:0,mMO:0,eMO:0,eqWO:0,eqMO:0,empTab:'perso',empView:'sem',empMagView:'sem',
+  eWO:0,mWO:0,mMO:0,eMO:0,eAO:0,eqWO:0,eqMO:0,empTab:'perso',empView:'sem',empMagView:'sem',
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
   filtresEmps:[], // employés spécifiques actifs (vide = tous ceux des sites)
@@ -2992,7 +3002,7 @@ async function doLogin(){
   }catch(e){ toast('Connexion impossible, réessayez'); }
   finally { _loggingIn=false; }
 }
-function logout(){S.user=null;S.role=null;S.eWO=0;S.eMO=0;S.eqWO=0;S.empTab='perso';S.empView='sem';S.filtresSites=[];S.filtresEmps=[];lsSet('session',null);document.getElementById('loginCode').value='';showScr('sLogin');}
+function logout(){S.user=null;S.role=null;S.eWO=0;S.eMO=0;S.eAO=0;S.eqWO=0;S.empTab='perso';S.empView='sem';S.filtresSites=[];S.filtresEmps=[];lsSet('session',null);document.getElementById('loginCode').value='';showScr('sLogin');}
 document.getElementById('loginCode').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
 function showScr(id){
@@ -3053,6 +3063,7 @@ function renderEmp(resetView=true){
     // le gestionnaire sur un autre appareil resterait affichée à l'ancienne dans la légende
     // jusqu'au prochain vrai changement de vue.
     if(S.empView==='mois'){ buildTypeLegend('empLegMois'); renderEmpMonth(); }
+    else if(S.empView==='annee'){ renderEmpAnnee(); }
     if(S.empTab==='magasin'){ renderEmpMagasinActive(); }
     else if(S.empTab==='comms'){ renderEmpComms(); renderMurListe('murListeEmp',false); }
   }
@@ -3098,10 +3109,13 @@ function setEmpView(v){
   S.empView=v;
   document.getElementById('empVSemBtn').classList.toggle('active',v==='sem');
   document.getElementById('empVMoisBtn').classList.toggle('active',v==='mois');
+  document.getElementById('empVAnneeBtn').classList.toggle('active',v==='annee');
   document.getElementById('empVSemaine').style.display=v==='sem'?'block':'none';
   document.getElementById('empVMois').style.display=v==='mois'?'block':'none';
+  document.getElementById('empVAnnee').style.display=v==='annee'?'block':'none';
   if(v==='sem') renderEmpWeek();
-  else { buildTypeLegend('empLegMois'); renderEmpMonth(); }
+  else if(v==='mois') { buildTypeLegend('empLegMois'); renderEmpMonth(); }
+  else renderEmpAnnee();
 }
 
 // ── Vue mois personnelle (calendrier) ──
@@ -3132,6 +3146,43 @@ function renderEmpMonth(){
     cur=addDays(cur,1);
   }
   document.getElementById('empCalBody').innerHTML=h;
+}
+
+// ── Vue année personnelle (aperçu visuel, pas d'édition) — demande d'un salarié pour repérer
+// d'un coup d'œil ses congés/absences sur l'année, sans naviguer mois par mois (Antoine,
+// 2026-09-18). Réutilise getColor()/getAllTypes() pour rester cohérent avec le reste de l'appli.
+function eA(d){S.eAO=(S.eAO||0)+d;renderEmpAnnee();}
+function renderEmpAnnee(){
+  const emp=S.user; if(!emp) return;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const year=today.getFullYear()+(S.eAO||0);
+  document.getElementById('eALbl').textContent=String(year);
+  const allTypes=getAllTypes(); // calculé une seule fois, pas à chaque case du calendrier
+  let h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;">';
+  for(let m=0;m<12;m++){
+    const first=new Date(year,m,1);
+    const last=new Date(year,m+1,0);
+    const startDow=first.getDay()===0?6:first.getDay()-1;
+    let cells='';
+    for(let i=0;i<startDow;i++) cells+='<div></div>';
+    for(let d=1; d<=last.getDate(); d++){
+      const dt=new Date(year,m,d);
+      const dateStr=fmt(dt);
+      const isToday=dateStr===fmt(today);
+      const sh=S.planning[`${emp.id}_${dateStr}`];
+      const type=sh?.type||'off';
+      const c=getColor(type,sh?.site||emp.site);
+      const typeLabel=allTypes.find(t=>t.key===type)?.label||type;
+      cells+=`<div title="${fmtFR(dt,{day:'numeric',month:'long'})} — ${typeLabel}" style="aspect-ratio:1;border-radius:2px;background:${c.color};${isToday?'box-shadow:0 0 0 2px #1A1917 inset;':''}"></div>`;
+    }
+    h+=`<div>
+      <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;">${MOIS_FR[m+1]}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">${cells}</div>
+    </div>`;
+  }
+  h+='</div>';
+  document.getElementById('empAnneeGrid').innerHTML=h;
+  buildTypeLegend('empLegAnnee');
 }
 
 // ── Vue "Mon magasin" : toute l'équipe du site du salarié ──
