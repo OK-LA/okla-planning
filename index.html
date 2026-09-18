@@ -359,6 +359,7 @@ tbody tr:hover td{background:#FAFAF8;}
   <div class="content">
     <div class="emp-hero" id="empHero"></div>
     <div id="empAlert"></div>
+    <div id="empHeuresSupp"></div>
     <div style="display:flex;gap:8px;margin-bottom:14px;">
       <button class="btn" style="flex:1;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" onclick="openAbsEmpModal()">
         🚩 Signaler une absence
@@ -855,6 +856,21 @@ tbody tr:hover td{background:#FAFAF8;}
           Importe les vrais plannings de tes 5 sites (Breteuil, Entrepôt, Ham, Longueau, Roye) basés sur tes fichiers Excel. <strong>Cette action remplace</strong> toutes les données de planning existantes du 29 décembre 2025 au 3 janvier 2027, et ajoute les jours fériés détectés. Synchronisé automatiquement avec Supabase.
         </div>
         <button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" onclick="importPlanningReel()">⚠️ Importer et remplacer (déc 2025 - jan 2027)</button>
+      </div>
+
+      <div class="param-card" style="margin-top:14px;">
+        <h3>🗑️ Nettoyer l'historique du planning</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+          Supprime les anciennes cases de planning avant une date choisie, pour alléger l'application au fil du temps (elle grossit d'environ 7 500 lignes par an). Ne touche jamais aux jours à venir. <strong>Action irréversible.</strong>
+        </div>
+        <div class="fg"><label>Supprimer tout ce qui est avant le</label>
+          <input type="date" id="pNettoyageCutoff">
+        </div>
+        <div id="pNettoyageResultat" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="verifierNettoyagePlanning()">🔍 Voir combien de lignes seraient supprimées</button>
+          <button class="btn btn-sm" id="pNettoyageBtn" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;" disabled onclick="nettoyerHistoriquePlanning()">🗑️ Supprimer définitivement</button>
+        </div>
       </div>
 
       <div class="param-card" style="margin-top:14px;">
@@ -1395,6 +1411,16 @@ tbody tr:hover td{background:#FAFAF8;}
       </div>
     </div>
 
+    <!-- Heures supplémentaires -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Compteur d'heures</div>
+      <div class="fg">
+        <label>Heures supplémentaires / à rattraper</label>
+        <input type="number" step="0.5" id="ficheHeuresSupp" placeholder="Laisser vide = pas de compteur">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Positif = heures supplémentaires dues au salarié, négatif = heures à rattraper. Visible côté salarié uniquement si différent de zéro.</div>
+      </div>
+    </div>
+
     <div class="modal-actions" style="justify-content:space-between;">
       <button class="btn btn-ghost" style="color:#DC2626;" onclick="deleteEmp()">📤 Marquer comme parti</button>
       <div style="display:flex;gap:8px;">
@@ -1755,6 +1781,7 @@ function empToRow(e, orderIndex) {
     date_fin: e.dateFin || null,
     solde_cp_manuel: e.soldeCPManuel ?? null,
     solde_cp_manuel_date: e.soldeCPManuelDate || null,
+    heures_supp: e.heuresSupp ?? null,
     repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
     active: e.active !== false,
     ville: e.ville || null,
@@ -1840,6 +1867,7 @@ async function supaReadEmployees() {
       dateFin: row.date_fin,
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
+      heuresSupp: row.heures_supp,
       active: row.active !== false,
       ville: row.ville,
       codePostal: row.code_postal,
@@ -2936,6 +2964,14 @@ function renderEmp(resetView=true){
   document.getElementById('empAlert').innerHTML=myMods.length
     ?`<div class="alert-mod">⚠️ <strong>Planning modifié :</strong> ${myMods.map(m=>`${m.dl} : ${m.det}`).join(' · ')}</div>`:'';
   myMods.forEach(m=>m.seen=true);
+  // Compteur d'heures : visible uniquement si le gestionnaire a saisi une valeur non nulle
+  // (positif = heures supplémentaires dues, négatif = heures à rattraper).
+  const hs = emp.heuresSupp;
+  document.getElementById('empHeuresSupp').innerHTML = (hs != null && hs !== 0)
+    ? `<div class="alert-mod" style="background:${hs>0?'#ECFDF5':'#FFF7ED'};border-color:${hs>0?'#A7F3D0':'#FED7AA'};color:${hs>0?'#059669':'#C2410C'};">
+        ⏱️ <strong>Compteur d'heures : ${hs>0?'+':''}${hs}h</strong> ${hs>0?'(heures supplémentaires)':'(heures à rattraper)'}
+      </div>`
+    : '';
   buildTypeLegend('empLeg');
   document.getElementById('rDate').value=fmt(new Date());
   // Échange de créneau A/B réservé à l'Entrepôt — masqué dans le menu pour les autres sites.
@@ -4675,6 +4711,7 @@ function openFicheEmp(empId){
   // Date par défaut si aucune n'est encore renseignée : le 31/05 le plus récent (fin de période légale)
   document.getElementById('ficheSoldeCPManuelDate').value = emp.soldeCPManuelDate || fmt(addDays(getPeriodeRef().debut,-1));
   document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
+  document.getElementById('ficheHeuresSupp').value = emp.heuresSupp!=null ? emp.heuresSupp : '';
   // Stocker l'id courant
   document.getElementById('mFicheEmp').dataset.empId = empId;
   openModal('mFicheEmp');
@@ -4869,6 +4906,9 @@ async function saveFicheEmp(){
   const nouveauSolde = soldeInput===''? null : parseFloat(soldeInput);
   emp.soldeCPManuel = nouveauSolde;
   emp.soldeCPManuelDate = nouveauSolde!=null ? (document.getElementById('ficheSoldeCPManuelDate').value || fmt(new Date())) : null;
+  // Heures supplémentaires / à rattraper : signé (positif = dues au salarié, négatif = à rattraper).
+  const heuresSuppInput = document.getElementById('ficheHeuresSupp').value;
+  emp.heuresSupp = heuresSuppInput==='' ? null : parseFloat(heuresSuppInput);
   marquerEmployesModifies(empId);
   persist();
   renderEmpList();
@@ -5766,6 +5806,60 @@ async function importPlanningReel(){
   persist();
   refreshActiveView();
   toast(`✓ Planning importé : ${applied} jour(s) appliqué(s)${skipped?`, ${skipped} ignoré(s) (code inconnu)`:''}${ferieAdded?`, ${ferieAdded} jour(s) férié(s) ajouté(s)`:''}`);
+}
+
+// ══ NETTOYAGE HISTORIQUE PLANNING ══
+// Supprime les cases de planning antérieures à une date choisie, pour alléger l'appli au fil du
+// temps (loadAll() télécharge toute la table à chaque ouverture). Le bouton de suppression reste
+// désactivé tant que verifierNettoyagePlanning() n'a pas donné un compte réel — jamais de
+// suppression "à l'aveugle" (Antoine, 2026-09-18).
+let _nettoyageCount = null;
+async function verifierNettoyagePlanning(){
+  const cutoff = document.getElementById('pNettoyageCutoff').value;
+  const btn = document.getElementById('pNettoyageBtn');
+  const resEl = document.getElementById('pNettoyageResultat');
+  btn.disabled = true; _nettoyageCount = null;
+  if(!cutoff){ toast('Choisissez une date'); return; }
+  if(cutoff >= fmt(new Date())){ toast('La date doit être dans le passé'); return; }
+  if(!_supaUrl || !_supaKey){ toast('Supabase non configuré'); return; }
+  resEl.textContent = 'Comptage en cours...';
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/planning_entries?select=employee_id&entry_date=lt.${cutoff}`, {
+      method:'HEAD', headers: supaHeaders({'Prefer':'count=exact'})
+    });
+    const range = r.headers.get('content-range'); // format "0-24/25"
+    const count = range ? parseInt(range.split('/')[1]) : null;
+    if(count == null || isNaN(count)){ resEl.textContent = 'Erreur lors du comptage.'; return; }
+    _nettoyageCount = count;
+    resEl.innerHTML = count>0
+      ? `<strong>${count}</strong> case(s) de planning seraient supprimées définitivement (avant le ${fmtFR(new Date(cutoff+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}).`
+      : 'Aucune case à supprimer avant cette date.';
+    btn.disabled = count===0;
+  } catch(e){ resEl.textContent = 'Erreur lors du comptage.'; console.warn('verifierNettoyagePlanning error', e); }
+}
+async function nettoyerHistoriquePlanning(){
+  const cutoff = document.getElementById('pNettoyageCutoff').value;
+  if(!cutoff || _nettoyageCount == null){ toast('Vérifiez d\'abord le nombre de lignes concernées'); return; }
+  if(cutoff >= fmt(new Date())){ toast('La date doit être dans le passé'); return; }
+  if(!confirm(`Supprimer définitivement ${_nettoyageCount} case(s) de planning avant le ${cutoff} ? Cette action est IRRÉVERSIBLE.`)) return;
+  const resEl = document.getElementById('pNettoyageResultat');
+  resEl.textContent = 'Suppression en cours...';
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/planning_entries?entry_date=lt.${cutoff}`, {
+      method:'DELETE', headers: supaHeaders({'Prefer':'return=minimal'})
+    });
+    if(!r.ok){ toast('Erreur lors de la suppression'); resEl.textContent=''; return; }
+  } catch(e){ toast('Erreur lors de la suppression'); console.warn('nettoyerHistoriquePlanning error', e); resEl.textContent=''; return; }
+  // Purge aussi la copie locale pour rester cohérent jusqu'au prochain rechargement.
+  Object.keys(S.planning).forEach(key=>{
+    const dateStr = key.slice(-10);
+    if(dateStr < cutoff) delete S.planning[key];
+  });
+  lsSet('planning', S.planning);
+  document.getElementById('pNettoyageBtn').disabled = true;
+  _nettoyageCount = null;
+  resEl.textContent = '✓ Historique nettoyé.';
+  toast('✓ Historique du planning nettoyé');
 }
 
 // ══ IMPORT EXCEL RÉCURRENT (fichier planning réel, mise à jour périodique) ══
