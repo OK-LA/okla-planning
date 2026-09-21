@@ -4355,6 +4355,29 @@ async function saveRetardEmp(){
   toast(`✓ Retard signalé — ${duree} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 
+// ── Saisie de date au format JJ/MM/AAAA (au lieu du calendrier natif "type=date", pénible pour
+// remonter jusqu'à une date ancienne comme une naissance) — l'utilisateur tape directement les
+// chiffres, "/" insérés automatiquement. Le stockage interne reste au format ISO (AAAA-MM-JJ)
+// partout ailleurs dans le code, inchangé (Antoine, 2026-09-21).
+function formatDateSaisie(el){
+  let v = el.value.replace(/[^\d]/g,'').slice(0,8);
+  if(v.length>=5) v = v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+  else if(v.length>=3) v = v.slice(0,2)+'/'+v.slice(2);
+  el.value = v;
+}
+function dateSaisieToISO(str){
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((str||'').trim());
+  if(!m) return '';
+  const jj=+m[1], mm=+m[2], aaaa=+m[3];
+  const d = new Date(aaaa, mm-1, jj);
+  if(d.getDate()!==jj || d.getMonth()!==mm-1 || d.getFullYear()!==aaaa) return '';
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+function isoToDateSaisie(iso){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||'');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
+
 // ── Mes informations (salarié modifie ses propres coordonnées) ──
 // État temporaire pendant l'édition des enfants par le salarié lui-même (distinct de
 // `editingEnfants`, utilisé côté fiche gestionnaire — les deux modals ne sont jamais ouverts
@@ -4377,7 +4400,7 @@ function renderEnfantsPerso(){
   el.innerHTML = editingEnfantsPerso.map((e,i)=>`
     <div class="magasin-row" style="gap:6px;">
       <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
-      <input type="date" class="magasin-name-input" id="miEnfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <input type="text" inputmode="numeric" placeholder="JJ/MM/AAAA" maxlength="10" oninput="formatDateSaisie(this)" class="magasin-name-input" id="miEnfantDate_${i}" value="${isoToDateSaisie(e.dateNaissance)}" style="flex:1;">
       <button class="btn-del" onclick="supprimerEnfantPerso(${i})" title="Supprimer">✕</button>
     </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
 }
@@ -4400,10 +4423,15 @@ async function enregistrerMesInfos(){
   };
   const labels={email:'Email',tel:'Téléphone',addr:'Adresse',codePostal:'Code postal',ville:'Ville'};
   const changements=Object.keys(nouveaux).filter(champ=>(emp[champ]||'')!==nouveaux[champ]);
+  let dateEnfantInvalide=false;
   editingEnfantsPerso.forEach((e,i)=>{
     const dateEl=document.getElementById('miEnfantDate_'+i);
-    if(dateEl) e.dateNaissance=dateEl.value;
+    if(!dateEl) return;
+    const brut=dateEl.value.trim();
+    e.dateNaissance=dateSaisieToISO(brut);
+    if(brut && !e.dateNaissance) dateEnfantInvalide=true;
   });
+  if(dateEnfantInvalide){toast('⚠️ Date de naissance invalide — format attendu JJ/MM/AAAA');return;}
   const nouveauxEnfants=editingEnfantsPerso.filter(e=>e.dateNaissance);
   const enfantsChanges = JSON.stringify((emp.enfants||[]).map(e=>e.dateNaissance).sort()) !== JSON.stringify(nouveauxEnfants.map(e=>e.dateNaissance).sort());
   if(!changements.length && !enfantsChanges){toast('Aucune modification');closeModal('mMesInfos');return;}
@@ -4969,7 +4997,7 @@ function renderFicheEnfants(){
   el.innerHTML = editingEnfants.map((e,i)=>`
     <div class="magasin-row" style="gap:6px;">
       <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
-      <input type="date" class="magasin-name-input" id="enfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <input type="text" inputmode="numeric" placeholder="JJ/MM/AAAA" maxlength="10" oninput="formatDateSaisie(this)" class="magasin-name-input" id="enfantDate_${i}" value="${isoToDateSaisie(e.dateNaissance)}" style="flex:1;">
       <button class="btn-del" onclick="supprimerEnfantFiche(${i})" title="Supprimer">✕</button>
     </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
 }
@@ -5072,10 +5100,15 @@ async function saveFicheEmp(){
     });
   }
   // Enfants : relit les dates de naissance saisies, ignore les lignes vides
+  let dateEnfantInvalideFiche=false;
   editingEnfants.forEach((e,i)=>{
     const dateEl = document.getElementById('enfantDate_'+i);
-    if(dateEl) e.dateNaissance = dateEl.value;
+    if(!dateEl) return;
+    const brut=dateEl.value.trim();
+    e.dateNaissance = dateSaisieToISO(brut);
+    if(brut && !e.dateNaissance) dateEnfantInvalideFiche=true;
   });
+  if(dateEnfantInvalideFiche){toast('⚠️ Date de naissance invalide — format attendu JJ/MM/AAAA');return;}
   emp.enfants = editingEnfants.filter(e=>e.dateNaissance);
   emp.typeContrat = document.getElementById('ficheTypeContrat').value;
   emp.dateFin = document.getElementById('ficheDateFin').value||null;
@@ -5234,7 +5267,7 @@ function renderAeEnfants(){
   el.innerHTML = editingEnfantsAe.map((e,i)=>`
     <div class="magasin-row" style="gap:6px;">
       <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
-      <input type="date" class="magasin-name-input" id="aeEnfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <input type="text" inputmode="numeric" placeholder="JJ/MM/AAAA" maxlength="10" oninput="formatDateSaisie(this)" class="magasin-name-input" id="aeEnfantDate_${i}" value="${isoToDateSaisie(e.dateNaissance)}" style="flex:1;">
       <button class="btn-del" onclick="supprimerEnfantAe(${i})" title="Supprimer">✕</button>
     </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
 }
@@ -5258,10 +5291,15 @@ async function saveNewEmp(){
   const slot=document.getElementById('aeSlot').value;
   const _existingENums=S.employees.map(e=>{const m=/^E(\d+)$/.exec(e.id);return m?parseInt(m[1],10):0;});
   const _nextENum=(_existingENums.length?Math.max(..._existingENums):0)+1;
+  let dateEnfantInvalideAe=false;
   editingEnfantsAe.forEach((e,i)=>{
     const dateEl=document.getElementById('aeEnfantDate_'+i);
-    if(dateEl) e.dateNaissance=dateEl.value;
+    if(!dateEl) return;
+    const brut=dateEl.value.trim();
+    e.dateNaissance=dateSaisieToISO(brut);
+    if(brut && !e.dateNaissance) dateEnfantInvalideAe=true;
   });
+  if(dateEnfantInvalideAe){toast('⚠️ Date de naissance invalide — format attendu JJ/MM/AAAA');return;}
   const enfants=editingEnfantsAe.filter(e=>e.dateNaissance);
   const emp={id:'E'+String(_nextENum).padStart(2,'0'),
     code,name,email,
