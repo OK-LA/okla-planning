@@ -7706,6 +7706,14 @@ function ajouterEvInterne(){
     if(partSel) [...partSel.options].forEach(o=>o.selected=false);
   }
   S.params.evInternes.sort((a,b)=>a.date.localeCompare(b.date));
+  // Notifier les participants concernés — jusqu'ici jamais fait, un salarié n'était donc jamais
+  // prévenu d'une réunion/formation/livraison ajoutée à sa journée (Antoine, 2026-09-21).
+  const dl=fmtFR(new Date(date+'T12:00'),{day:'numeric',month:'long'});
+  const det=`${EV_INTERNE_LABELS[type]||'Événement'} : ${label}${heureDebut?` (${heureDebut}${heureFin?'–'+heureFin:''})`:''}`;
+  participants.forEach(empId=>{
+    S.mods.push({empId, dl, det, seen:false});
+    notifierModifPlanning(empId, dl, det);
+  });
   persist();
   renderEvInternes();
   refreshActiveView();
@@ -7720,6 +7728,16 @@ function supprimerEvInterne(i){
   // internal_events absents de l'instantané local (voir le commentaire dans supaWritePlanning).
   if(ie && _supaUrl && _supaKey){
     fetch(`${supaBase()}/rest/v1/internal_events?id=eq.${encodeURIComponent(ie.id)}`, {method:'DELETE', headers:supaHeaders({'Prefer':'return=minimal'})}).catch(()=>{});
+  }
+  // Prévenir les participants d'une annulation — sinon ils se présenteraient à un événement qui
+  // n'existe plus (même raison que la notification à l'ajout, Antoine, 2026-09-21).
+  if(ie && Array.isArray(ie.participants) && ie.participants.length){
+    const dl=fmtFR(new Date(ie.date+'T12:00'),{day:'numeric',month:'long'});
+    const det=`Événement annulé — ${EV_INTERNE_LABELS[ie.type]||'Autre'} : ${ie.label}`;
+    ie.participants.forEach(empId=>{
+      S.mods.push({empId, dl, det, seen:false});
+      notifierModifPlanning(empId, dl, det);
+    });
   }
   persist();
   renderEvInternes();
