@@ -1323,6 +1323,12 @@ tbody tr:hover td{background:#FAFAF8;}
     <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
       <input type="checkbox" id="aeChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
     </label></div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Enfants (date de naissance)</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Utilisé pour calculer automatiquement le quota "enfant malade" (nombre d'enfants + majoration si moins d'1 an).</div>
+      <div id="aeEnfantsList"></div>
+      <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterEnfantAe()">+ Ajouter un enfant</button>
+    </div>
     <div class="fg"><label>Date d'arrivée dans l'entreprise</label><input type="date" id="aeDateEmbauche"></div>
     <div class="fg"><label>Type de contrat</label>
       <select id="aeTypeContrat"></select>
@@ -5219,7 +5225,28 @@ function genererCodeAleatoire(){
   } while(S.employees.some(e=>(e.code||'').toUpperCase()===code));
   return code;
 }
-function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCodePostal','aeVille','aeDateEmbauche','aeDateFin'].forEach(id=>document.getElementById(id).value='');document.getElementById('aeCode').value=genererCodeAleatoire();populerSelectTypeContrat('aeTypeContrat');openModal('mEmp');}
+// État temporaire pendant la saisie des enfants à la création d'un employé (même mécanique que
+// editingEnfants pour la fiche d'un employé existant — non persisté tant que "Ajouter" n'est pas cliqué).
+let editingEnfantsAe = [];
+function renderAeEnfants(){
+  const el = document.getElementById('aeEnfantsList');
+  if(!el) return;
+  el.innerHTML = editingEnfantsAe.map((e,i)=>`
+    <div class="magasin-row" style="gap:6px;">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap;">Né(e) le</span>
+      <input type="date" class="magasin-name-input" id="aeEnfantDate_${i}" value="${e.dateNaissance||''}" style="flex:1;">
+      <button class="btn-del" onclick="supprimerEnfantAe(${i})" title="Supprimer">✕</button>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Aucun enfant renseigné</div>';
+}
+function ajouterEnfantAe(){
+  editingEnfantsAe.push({dateNaissance:''});
+  renderAeEnfants();
+}
+function supprimerEnfantAe(idx){
+  editingEnfantsAe.splice(idx,1);
+  renderAeEnfants();
+}
+function openAddEmp(){['aeName','aeEmail','aeTel','aeAddr','aeCodePostal','aeVille','aeDateEmbauche','aeDateFin'].forEach(id=>document.getElementById(id).value='');document.getElementById('aeCode').value=genererCodeAleatoire();document.getElementById('aeChildren').checked=false;editingEnfantsAe=[];renderAeEnfants();populerSelectTypeContrat('aeTypeContrat');openModal('mEmp');}
 async function saveNewEmp(){
   const name=document.getElementById('aeName').value.trim();
   const email=document.getElementById('aeEmail').value.trim();
@@ -5231,12 +5258,18 @@ async function saveNewEmp(){
   const slot=document.getElementById('aeSlot').value;
   const _existingENums=S.employees.map(e=>{const m=/^E(\d+)$/.exec(e.id);return m?parseInt(m[1],10):0;});
   const _nextENum=(_existingENums.length?Math.max(..._existingENums):0)+1;
+  editingEnfantsAe.forEach((e,i)=>{
+    const dateEl=document.getElementById('aeEnfantDate_'+i);
+    if(dateEl) e.dateNaissance=dateEl.value;
+  });
+  const enfants=editingEnfantsAe.filter(e=>e.dateNaissance);
   const emp={id:'E'+String(_nextENum).padStart(2,'0'),
     code,name,email,
     tel:document.getElementById('aeTel').value,addr:document.getElementById('aeAddr').value,
     codePostal:document.getElementById('aeCodePostal').value.trim(),
     ville:document.getElementById('aeVille').value.trim(),
     site,slot,hasChildren:document.getElementById('aeChildren').checked,
+    enfants,
     dateEmbauche:document.getElementById('aeDateEmbauche').value||null,
     typeContrat:document.getElementById('aeTypeContrat').value,
     dateFin:document.getElementById('aeDateFin').value||null};
