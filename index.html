@@ -2692,6 +2692,17 @@ async function loadAll(force=false){
       if(Array.isArray(supa.employees) && supa.employees.length > 0) {
         S.employees = supa.employees;
         lsSet('employees', S.employees);
+        // Un resync en session active (toutes les 30s, voir resyncIfPossible) remplace S.employees
+        // par de tout nouveaux objets — sans ceci, S.user resterait pointé sur l'ancien objet,
+        // absent du nouveau tableau. Toute modification ultérieure ("Mes infos", demandes...)
+        // mute alors un objet fantôme : supaWriteEmployeesRows() retrouve l'employé par id dans
+        // S.employees et renvoie CET objet (non modifié), pas le fantôme — la sauvegarde "réussit"
+        // silencieusement en réécrivant les anciennes données. D'où le symptôme observé : ça dépend
+        // du temps passé sur l'écran avant de sauvegarder, pas du salarié (Antoine, 2026-09-21).
+        if (S.user) {
+          const freshUser = S.employees.find(e => e.id === S.user.id);
+          if (freshUser) S.user = freshUser;
+        }
       }
       // Planning — remplacement direct : chaque ligne vient désormais de sa propre
       // table (upsert + suppression par employé à l'écriture), plus besoin de fusion.
