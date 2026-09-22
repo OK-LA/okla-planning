@@ -1626,6 +1626,17 @@ async function envoyerNotifSms(to, text){
 function telephonesGestionnaire(){
   return (S.params?.notifPhones||[]).filter(Boolean);
 }
+// Numéros des collègues effectivement planifiés sur CE site à CETTE date (renfort inclus) — pour
+// prévenir l'équipe du jour d'un retard, pas tout le magasin sans distinction du planning
+// (Antoine, 2026-09-22 : "les autres du magasin savent qu'il a une réunion/un retard").
+function telephonesCollegues(site, dateStr, excludeEmpId){
+  return activeEmployees().filter(e=>{
+    if(e.id===excludeEmpId || !e.tel) return false;
+    const sh=S.planning[`${e.id}_${dateStr}`];
+    if(!sh || sh.type==='off' || estTypeAbsence(sh.type)) return false;
+    return (sh.site||e.site)===site;
+  }).map(e=>e.tel);
+}
 // Sens inverse des notifications ci-dessus : prévenir le SALARIÉ (pas le gestionnaire) quand SON
 // planning est modifié par quelqu'un d'autre — reprend les mêmes endroits qui alimentent déjà
 // S.mods (la bannière "Planning modifié" vue à la prochaine ouverture de l'appli, elle reste
@@ -3235,7 +3246,11 @@ function renderEmpMagasin(){
       const cell=type==='off'
         ?`<div class="sb empty"></div>`
         :`<div class="sb${type==='vip'?' vip':''}" style="background:${getColor(type,site2).color};border-color:${getColor(type,site2).color};">${lblEq?`<span style="font-size:8px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.3);">${lblEq}</span>`:''}</div>`;
-      tb+=`<td>${cell}</td>`;
+      const evInternesJourEq=getEvInternesDuJourPourEmp(c.id,fmt(d));
+      const evBadgeEq=evInternesJourEq.length
+        ?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJourEq.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourEq[0].type]||'Autre'}</div>`
+        :'';
+      tb+=`<td style="position:relative;">${cell}${evBadgeEq}</td>`;
     }
     tb+='</tr>';
   });
@@ -4352,6 +4367,11 @@ async function saveRetardEmp(){
   }
   const phones=telephonesGestionnaire();
   if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: retard signale - ${emp.name} - ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})} (${duree})`);
+  // Site effectif du jour, pas le site habituel de l'employé — s'il est en renfort ailleurs ce
+  // jour-là, ce sont les collègues du site où il est réellement attendu qui doivent être prévenus.
+  const siteDuJour=S.planning[`${emp.id}_${dateStr}`]?.site||emp.site;
+  const phonesCollegues=telephonesCollegues(siteDuJour,dateStr,emp.id);
+  if(phonesCollegues.length) envoyerNotifSms(phonesCollegues, `OK-LA Planning: ${emp.name} sera en retard (${duree}) le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
   toast(`✓ Retard signalé — ${duree} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 
