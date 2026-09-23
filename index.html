@@ -503,7 +503,7 @@ tbody tr:hover td{background:#FAFAF8;}
 
     <!-- MES DEMANDES DE RÉCUPÉRATION -->
     <div class="quota-card mt-10" id="empRecupCard" style="display:none;">
-      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">⏱️ Mes récupérations</div>
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">⏱️ Historique de mes récupérations</div>
       <div id="empRecupList"></div>
     </div>
 
@@ -1501,6 +1501,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <input type="number" step="0.5" id="ficheHeuresSupp" placeholder="Laisser vide = pas de compteur">
         <div style="font-size:11px;color:var(--muted);margin-top:4px;">Positif = heures supplémentaires dues au salarié, négatif = heures à rattraper. Visible côté salarié uniquement si différent de zéro.</div>
       </div>
+      <div id="ficheHistoriqueRecup" style="margin-top:10px;"></div>
     </div>
 
     <div class="modal-actions" style="justify-content:space-between;">
@@ -2308,6 +2309,7 @@ async function supaWriteParams(params) {
       notif_emails: params.notifEmails || [],
       notif_phones: params.notifPhones || [],
       pending_sms: params.pendingSms || [],
+      heures_supp_log: params.heuresSuppLog || [],
     };
     const rApp = await fetch(`${supaBase()}/rest/v1/app_settings?id=eq.true`, {
       method: 'PATCH', headers: supaHeaders({'Prefer': 'return=minimal'}),
@@ -2514,6 +2516,7 @@ async function supaReadParams(empRows) {
       notifEmails: app.notif_emails || [],
       notifPhones: app.notif_phones || [],
       pendingSms: app.pending_sms || [],
+      heuresSuppLog: app.heures_supp_log || [],
       minStaff, adresses, rotationSamedis, jokers, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
@@ -3446,8 +3449,10 @@ async function sendReq(){
     if(!date||!heures){toast('Complétez la date et le nombre d\'heures');return;}
     if(heures<=0){toast('Le nombre d\'heures doit être positif');return;}
     if(heures>solde){toast(`Solde insuffisant (${solde}h disponible(s))`);return;}
+    // dateDebut/dateFin (colonnes réelles) portent la date ; pas de champ "date" séparé, il n'a
+    // aucune colonne dans requests et ne survivrait pas à un rechargement (voir validerRecup).
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
-      type:'recup',date,dateDebut:date,dateFin:date,heuresDemandees:heures,note,status:'pending'};
+      type:'recup',dateDebut:date,dateFin:date,heuresDemandees:heures,note,status:'pending'};
   } else {
     const date=document.getElementById('rDate')?.value||fmt(new Date());
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
@@ -4664,20 +4669,33 @@ function renderEmpCongeSansSolde(){
 function renderEmpRecup(){
   const emp=S.user;if(!emp)return;
   const mine=S.requests.filter(r=>r.empId===emp.id && r.type==='recup').sort((a,b)=>b.id-a.id);
+  const dons=(S.params.heuresSuppLog||[]).filter(l=>l.empId===emp.id);
   const card=document.getElementById('empRecupCard');
-  if(!mine.length){card.style.display='none';return;}
+  if(!mine.length && !dons.length){card.style.display='none';return;}
   card.style.display='block';
-  document.getElementById('empRecupList').innerHTML = mine.map(r=>{
+  const itemsDemandes = mine.map(r=>{
     const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
     const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
-    return `<div class="conge-item">
+    return {date:r.dateDebut, html:`<div class="conge-item">
       <div style="flex:1">
-        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.date+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}</div>
         <div style="font-size:11px;color:var(--muted)">${r.heuresDemandees}h demandée(s)</div>
       </div>
       <span class="conge-status ${statusCls}">${statusLbl}</span>
-    </div>`;
-  }).join('');
+    </div>`};
+  });
+  // Ajustements manuels du compteur faits par le gestionnaire (crédit ou débit) — même journal
+  // que getHistoriqueRecup(), affiché ici pour que le salarié voie aussi les heures "données",
+  // pas seulement ses propres demandes de récupération (Antoine, 2026-09-23).
+  const itemsDons = dons.map(l=>({date:l.date, html:`<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(l.date+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-size:11px;color:var(--muted)">Ajustement du compteur par le gestionnaire</div>
+      </div>
+      <span class="conge-status" style="background:${l.delta>=0?'#ECFDF5':'#FEF2F2'};color:${l.delta>=0?'#059669':'#DC2626'};">${l.delta>=0?'+':''}${l.delta}h</span>
+    </div>`}));
+  document.getElementById('empRecupList').innerHTML = [...itemsDemandes, ...itemsDons]
+    .sort((a,b)=>b.date.localeCompare(a.date)).map(x=>x.html).join('');
 }
 
 function renderEmpChangementRepos(){
@@ -5046,6 +5064,15 @@ function openFicheEmp(empId){
   document.getElementById('ficheSoldeCPManuelDate').value = emp.soldeCPManuelDate || fmt(addDays(getPeriodeRef().debut,-1));
   document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
   document.getElementById('ficheHeuresSupp').value = emp.heuresSupp!=null ? emp.heuresSupp : '';
+  // Historique du compteur de récupération : donné (ajustement manuel) + pris (demande validée).
+  const histoRecup = getHistoriqueRecup(empId);
+  document.getElementById('ficheHistoriqueRecup').innerHTML = histoRecup.length ? `
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Historique</div>
+    ${histoRecup.map(h=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span>${fmtFR(new Date(h.date+'T12:00'),{day:'numeric',month:'short',year:'numeric'})} — ${h.type==='donne'?'Ajustement gestionnaire':'Récupération prise'}</span>
+      <strong style="color:${h.montant>=0?'#059669':'#DC2626'};">${h.montant>=0?'+':''}${h.montant}h</strong>
+    </div>`).join('')}
+  ` : '';
   // Enfant malade : quota calculé + jours déjà pris sur les 12 derniers mois glissants (lecture
   // seule, recalculé à chaque ouverture de la fiche — pas un champ à modifier ici).
   const quotaEM = calcQuotaEnfantMalade(emp);
@@ -5273,7 +5300,20 @@ async function saveFicheEmp(){
   emp.soldeCPManuelDate = nouveauSolde!=null ? (document.getElementById('ficheSoldeCPManuelDate').value || fmt(new Date())) : null;
   // Heures supplémentaires / à rattraper : signé (positif = dues au salarié, négatif = à rattraper).
   const heuresSuppInput = document.getElementById('ficheHeuresSupp').value;
-  emp.heuresSupp = heuresSuppInput==='' ? null : parseFloat(heuresSuppInput);
+  const nouveauHeuresSupp = heuresSuppInput==='' ? null : parseFloat(heuresSuppInput);
+  // Journal des ajustements manuels du compteur — alimente l'historique "donné" (voir
+  // getHistoriqueRecup) à côté des heures "prises" via une demande de récupération validée. Ne
+  // démarre qu'à partir de maintenant : les ajustements faits avant la mise en place de ce journal
+  // ne sont pas reconstitués rétroactivement, seul le solde actuel en garde la trace (Antoine,
+  // 2026-09-23, décision explicite plutôt que de laisser croire à un historique complet).
+  if(nouveauHeuresSupp !== (emp.heuresSupp ?? null)){
+    if(!S.params.heuresSuppLog) S.params.heuresSuppLog = [];
+    S.params.heuresSuppLog.push({
+      id: Date.now(), empId, date: fmt(new Date()),
+      delta: (nouveauHeuresSupp ?? 0) - (emp.heuresSupp ?? 0)
+    });
+  }
+  emp.heuresSupp = nouveauHeuresSupp;
   marquerEmployesModifies(empId);
   persist();
   // Écriture immédiate plutôt que d'attendre le debounce — même raison que enregistrerMesInfos()
@@ -5954,6 +5994,22 @@ function getJoursEnfantMaladePris(empId){
   return (S.absences||[]).filter(a=>
     a.empId===empId && a.motif==='enfant_malade' && a.dateStr>=limite && a.dateStr<=todayStr
   ).length;
+}
+
+// Historique combiné du compteur de récupération d'un salarié : heures créditées manuellement
+// (S.params.heuresSuppLog, alimenté depuis la fiche employé — voir saveFicheEmp) + heures prises
+// via une demande de récupération validée (S.requests, type 'recup', approved — jamais purgées,
+// voir le commentaire sur le nettoyage de l'historique). Trié du plus récent au plus ancien. Ne
+// remonte que depuis la mise en place du journal (026_heures_supp_log.sql, 2026-09-23) : les
+// ajustements manuels faits avant cette date n'apparaissent pas ici (Antoine, décision explicite).
+function getHistoriqueRecup(empId){
+  const dons = (S.params.heuresSuppLog||[]).filter(l=>l.empId===empId).map(l=>({
+    id:'don_'+l.id, date:l.date, type:'donne', montant:l.delta
+  }));
+  const prises = S.requests.filter(r=>r.empId===empId && r.type==='recup' && r.status==='approved').map(r=>({
+    id:'pris_'+r.id, date:r.dateDebut, type:'pris', montant:-(r.heuresDemandees||0)
+  }));
+  return [...dons, ...prises].sort((a,b)=>b.date.localeCompare(a.date));
 }
 
 // ── COLORATION D'ÉVÉNEMENTS SUR PLAGE DE DATES ──
@@ -7449,7 +7505,7 @@ function renderRecupMgr(){
         <div style="flex:1;min-width:180px;">
           <div style="font-weight:600;font-size:13px;">${r.empName}</div>
           <div style="font-size:12px;color:var(--muted);">
-            ${fmtFR(new Date(r.date+'T12:00'),{day:'numeric',month:'short'})} · ${r.heuresDemandees}h demandée(s) (solde actuel : ${solde}h)
+            ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} · ${r.heuresDemandees}h demandée(s) (solde actuel : ${solde}h)
           </div>
           ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
         </div>
@@ -7469,9 +7525,14 @@ async function validerRecup(id){
   if(req.heuresDemandees > solde){toast(`Solde insuffisant (${solde}h disponible(s), ${req.heuresDemandees}h demandées)`);return;}
   req.status = 'approved';
   emp.heuresSupp = solde - req.heuresDemandees;
-  S.planning[`${req.empId}_${req.date}`] = {type:'recup', site:emp.site||'', note:`Récupération ${req.heuresDemandees}h`};
+  // req.dateDebut, pas req.date : "date" n'a aucune colonne dans la table requests (seules
+  // date_debut/date_fin existent) et redevient undefined après un rechargement — un manager qui
+  // recharge l'appli entre la soumission et la validation écrirait sinon une case de planning
+  // "EMPID_undefined" au lieu de la vraie date (bug préexistant, trouvé en construisant
+  // l'historique récup — Antoine, 2026-09-23).
+  S.planning[`${req.empId}_${req.dateDebut}`] = {type:'recup', site:emp.site||'', note:`Récupération ${req.heuresDemandees}h`};
   marquerEmployesModifies(emp.id);
-  const dl=fmtFR(new Date(req.date+'T12:00'),{day:'numeric',month:'long'});
+  const dl=fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'});
   S.mods.push({empId:req.empId, dl, det:`Récupération de ${req.heuresDemandees}h validée`, seen:false});
   notifierModifPlanning(req.empId, dl, `Récupération de ${req.heuresDemandees}h validée`);
   persist();
