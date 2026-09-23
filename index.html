@@ -87,7 +87,14 @@ input:focus,select:focus,textarea:focus{border-color:#3B82F6;background:#fff;}
 .vbtn.active{background:#fff;color:var(--text);box-shadow:var(--sh);}
 
 .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--border);background:#fff;}
-table{width:100%;border-collapse:collapse;min-width:580px;}
+table{width:100%;border-collapse:collapse;}
+/* Grille hebdomadaire du gestionnaire seule : garde une largeur minimum pour rester éditable au
+   doigt (cases tapables), quitte à défiler horizontalement sur mobile. Les autres tableaux
+   (récap congés, salarié-colonne...) n'ont pas cette contrainte et se dimensionnent sur leur
+   contenu réel — c'était le défaut avant cette règle scopée : un même min-width:580px global
+   forçait TOUS les tableaux à défiler sur mobile même avec peu de colonnes (Antoine, 2026-09-23).
+*/
+.week-grid-table{min-width:580px;}
 thead th{padding:8px 5px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:2px solid var(--border);background:var(--bg);text-align:center;}
 thead th:first-child{text-align:left;padding-left:12px;}
 tbody td{padding:4px 5px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle;}
@@ -632,7 +639,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="effectif-alert" id="alertEffectif"></div>
         <div class="effectif-warn" id="warnEffectif"></div>
         <!-- TABLEAU -->
-        <div class="table-wrap"><table><thead id="tH"></thead><tbody id="tB"></tbody></table></div>
+        <div class="table-wrap"><table class="week-grid-table"><thead id="tH"></thead><tbody id="tB"></tbody></table></div>
         <div class="muted tc mt-10">Cliquez sur une case pour modifier · Ligne du bas = effectif présent par jour</div>
       </div>
       <div id="vMoisView" style="display:none;">
