@@ -513,6 +513,12 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empEchangesEnvoyesList"></div>
     </div>
 
+    <!-- MES DEMANDES DE CHANGEMENT DE REPOS -->
+    <div class="quota-card mt-10" id="empReposCard" style="display:none;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px;">📅 Mes changements de repos</div>
+      <div id="empReposList"></div>
+    </div>
+
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:15px;margin-top:14px;">
       <div style="font-weight:700;margin-bottom:4px;">🕓 Quand puis-je poser mes congés ?</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Simulateur — calcule la date limite de dépôt selon le type de période souhaitée</div>
@@ -533,6 +539,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <select id="rType" onchange="toggleCongeFields()">
           <option value="conge">Demande de congé payé</option>
           <option value="conge_sans_solde">Congé sans solde</option>
+          <option value="changement_repos">Changement de repos</option>
           <option value="recup" id="rTypeRecup" style="display:none;">Récupération d'heures</option>
           <option value="enfant_malade">Enfant malade (- de 16 ans)</option>
           <option value="maladie">Arrêt maladie</option>
@@ -563,6 +570,12 @@ tbody tr:hover td{background:#FAFAF8;}
         </div>
         <div class="fg"><label>Date de repos prévu</label><input type="date" id="rEchangeDateCollegue"></div>
         <div id="echangeCheck" style="margin-bottom:10px;font-size:12px;"></div>
+      </div>
+      <div id="changementReposFields" style="display:none;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Déplacez votre repos d'un jour à un autre, dans la même semaine — possible directement si l'effectif du magasin reste suffisant le jour souhaité, sinon passez par une demande d'échange avec un collègue.</div>
+        <div class="fg"><label>Mon repos actuel à libérer</label><input type="date" id="rReposDateActuelle" onchange="updChangementReposCheck()"></div>
+        <div class="fg"><label>Jour souhaité pour mon nouveau repos</label><input type="date" id="rReposDateSouhaitee" onchange="updChangementReposCheck()"></div>
+        <div id="changementReposCheck" style="margin-bottom:10px;font-size:12px;"></div>
       </div>
       <div id="echangeABFields" style="display:none;">
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue de l'Entrepôt d'échanger vos créneaux du jour : vous prenez son horaire (A ou B), il/elle prend le vôtre.</div>
@@ -682,6 +695,9 @@ tbody tr:hover td{background:#FAFAF8;}
            demande de récupération restait invisible sans faire défiler toute la page. -->
       <div style="font-weight:600;font-size:14px;margin-bottom:12px;">⏱️ Récupérations d'heures — en attente</div>
       <div id="recupListeMgr" style="margin-bottom:18px;"></div>
+
+      <div style="font-weight:600;font-size:14px;margin-bottom:12px;">📅 Changements de repos — en attente</div>
+      <div id="reposListeMgr" style="margin-bottom:18px;"></div>
 
       <div style="font-weight:600;font-size:14px;margin-bottom:12px;">📋 Congés sans solde — en attente</div>
       <div id="congeSansSoldeListeMgr" style="margin-bottom:18px;"></div>
@@ -2953,6 +2969,36 @@ function getMinStaffEffectif(site, date){
   }
   return getMinStaff(site, date);
 }
+// Vérifie qu'une demande de changement de repos (déplacer son repos d'un jour à un autre, même
+// semaine) est cohérente et que l'effectif du site reste suffisant le jour qui deviendrait le
+// nouveau repos — même logique de marge stricte que findReplacements()/effectifDuJour (il faut
+// être STRICTEMENT au-dessus du minimum avant de retirer quelqu'un). Si l'effectif ne le permet
+// pas, la demande doit passer par un échange avec un collègue à la place, pas ce chemin direct
+// (Antoine, 2026-09-23). Réutilisée à la fois pour la vérification en direct dans le formulaire et
+// pour la re-vérification au moment de la validation gestionnaire (le planning a pu changer entre
+// temps).
+function verifierChangementRepos(empId, dateActuelle, dateSouhaitee){
+  const emp = S.employees.find(e=>e.id===empId);
+  if(!emp) return {ok:false, erreur:'Employé introuvable'};
+  // Une case de planning absente vaut "repos" par défaut partout ailleurs dans l'appli
+  // (sh?.type||'off', ex: renderWeek/renderEmpMagasin) — donc absente ≠ rejetée ici, contrairement
+  // à shSouhaitee plus bas où absente signifie bien "ne travaille pas" (rejet correct dans ce sens).
+  const shActuelle = S.planning[`${empId}_${dateActuelle}`];
+  if((shActuelle?.type||'off') !== 'off') return {ok:false, erreur:'Vous n\'êtes pas en repos à cette date'};
+  const shSouhaitee = S.planning[`${empId}_${dateSouhaitee}`];
+  if(!shSouhaitee || shSouhaitee.type==='off' || estTypeAbsence(shSouhaitee.type)) return {ok:false, erreur:'Vous ne travaillez pas à la date souhaitée'};
+  const lundiActuelle = fmt(getMon(new Date(dateActuelle+'T12:00:00')));
+  const lundiSouhaitee = fmt(getMon(new Date(dateSouhaitee+'T12:00:00')));
+  if(lundiActuelle !== lundiSouhaitee) return {ok:false, erreur:'Les deux dates doivent être dans la même semaine'};
+  const site = shSouhaitee.site || emp.site;
+  const minStaff = getMinStaffEffectif(site, new Date(dateSouhaitee+'T12:00:00'));
+  const presents = activeEmployees().filter(e=>{
+    const s = S.planning[`${e.id}_${dateSouhaitee}`];
+    return s && s.type!=='off' && !estTypeAbsence(s.type) && s.site===site;
+  }).length;
+  if((presents - minStaff) <= 0) return {ok:false, erreur:'Effectif déjà au minimum ce jour-là'};
+  return {ok:true, site, typeActuel: shSouhaitee.type};
+}
 function fmtFR(d,o){return d.toLocaleDateString('fr-FR',o);}
 function ini(n){return n.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();}
 function avc(id){return AVC[parseInt(id.replace(/\D/g,''))%AVC.length];}
@@ -3086,6 +3132,7 @@ function renderEmp(resetView=true){
   renderEmpCongeSansSolde();
   renderEmpRecup();
   renderEmpEchanges();
+  renderEmpChangementRepos();
   updSimuDelai();
   if(resetView){
     switchEmpTab('perso');
@@ -3373,6 +3420,15 @@ async function sendReq(){
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'echange_ab',dateA,cibleId,cibleName:cible.name,cibleEmail:cible.email,
       date:dateA,dateDebut:dateA,dateFin:dateA,note,status:'pending_collegue'};
+  } else if(type==='changement_repos'){
+    const dateActuelle=document.getElementById('rReposDateActuelle')?.value;
+    const dateSouhaitee=document.getElementById('rReposDateSouhaitee')?.value;
+    if(!dateActuelle||!dateSouhaitee){toast('Complétez les deux dates');return;}
+    const verif=verifierChangementRepos(emp.id,dateActuelle,dateSouhaitee);
+    if(!verif.ok){toast(`${verif.erreur} — utilisez une demande d'échange avec un collègue`);return;}
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'changement_repos',dateActuelle,dateSouhaitee,typeActuel:verif.typeActuel,site:verif.site,
+      date:dateSouhaitee,dateDebut:dateActuelle,dateFin:dateSouhaitee,note,status:'pending'};
   } else if(type==='recup'){
     const date=document.getElementById('rRecupDate')?.value;
     const heures=parseFloat(document.getElementById('rRecupHeures')?.value);
@@ -3394,12 +3450,13 @@ async function sendReq(){
   renderEmpCongeSansSolde();
   renderEmpRecup();
   renderEmpEchanges();
+  renderEmpChangementRepos();
   notifierNouvelleDemande(req, emp);
   toast('✓ Demande envoyée');
 }
 // Email best-effort à chaque nouvelle demande — un échange va au collègue concerné (c'est lui
 // qui doit répondre en premier), tout le reste va au(x) gestionnaire(s) configuré(s) en Paramètres.
-const LABELS_TYPE_DEMANDE={conge:'Congé payé',conge_sans_solde:'Congé sans solde',recup:'Récupération d\'heures',enfant_malade:'Enfant malade',maladie:'Arrêt maladie',medical:'Rendez-vous médical',autre:'Autre'};
+const LABELS_TYPE_DEMANDE={conge:'Congé payé',conge_sans_solde:'Congé sans solde',changement_repos:'Changement de repos',recup:'Récupération d\'heures',enfant_malade:'Enfant malade',maladie:'Arrêt maladie',medical:'Rendez-vous médical',autre:'Autre'};
 function notifierNouvelleDemande(req, emp){
   const periode = req.dateDebut===req.dateFin
     ? fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long',year:'numeric'})
@@ -3447,7 +3504,7 @@ function renderMgr(resetView=true){
   // resetView=false = resynchronisation en arrière-plan (toutes les 30s) : on garde la vue déjà
   // choisie par l'utilisateur, refreshActiveView() suffit alors (respecte S.view).
   if(resetView) setView('mois'); else refreshActiveView();
-  renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderRecupMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
+  renderEmpList();renderAbsList();renderParams();renderParamRotation();renderParamReposFixe();renderCongesMgr();renderCongeSansSoldeMgr();renderRecupMgr();renderReposMgr();renderEchangesMgr();renderParamMotifsAbsence();renderParamReglesEnfantMalade();renderParamTypesContrat();
 }
 function switchTab(n){
   const mgrScreen = document.getElementById('sMgr');
@@ -4582,6 +4639,25 @@ function renderEmpRecup(){
       <div style="flex:1">
         <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.date+'T12:00'),{day:'numeric',month:'short'})}</div>
         <div style="font-size:11px;color:var(--muted)">${r.heuresDemandees}h demandée(s)</div>
+      </div>
+      <span class="conge-status ${statusCls}">${statusLbl}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderEmpChangementRepos(){
+  const emp=S.user;if(!emp)return;
+  const mine=S.requests.filter(r=>r.empId===emp.id && r.type==='changement_repos').sort((a,b)=>b.id-a.id);
+  const card=document.getElementById('empReposCard');
+  if(!mine.length){card.style.display='none';return;}
+  card.style.display='block';
+  document.getElementById('empReposList').innerHTML = mine.map(r=>{
+    const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':'cs-pending';
+    const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
+    return `<div class="conge-item">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateActuelle+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateSouhaitee+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-size:11px;color:var(--muted)">Nouveau repos souhaité</div>
       </div>
       <span class="conge-status ${statusCls}">${statusLbl}</span>
     </div>`;
@@ -6836,13 +6912,20 @@ function toggleCongeFields() {
   const isEchange = type === 'echange';
   const isEchangeAB = type === 'echange_ab';
   const isRecup = type === 'recup';
+  const isChangementRepos = type === 'changement_repos';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
-  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB && !isRecup) ? 'block' : 'none';
+  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB && !isRecup && !isChangementRepos) ? 'block' : 'none';
   document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
   document.getElementById('echangeABFields').style.display = isEchangeAB ? 'block' : 'none';
   document.getElementById('recupFields').style.display = isRecup ? 'block' : 'none';
+  document.getElementById('changementReposFields').style.display = isChangementRepos ? 'block' : 'none';
   if(isEchange) remplirSelectCollegues();
   if(isEchangeAB) remplirSelectCollegueEntrepot();
+  if(isChangementRepos){
+    document.getElementById('rReposDateActuelle').value='';
+    document.getElementById('rReposDateSouhaitee').value='';
+    document.getElementById('changementReposCheck').innerHTML='';
+  }
   if(isRecup && S.user){
     const solde = S.user.heuresSupp || 0;
     document.getElementById('recupSoldeInfo').textContent = `Solde disponible : ${solde}h`;
@@ -6884,6 +6967,18 @@ function updEchangeCollegueInfo(){
   if(!collegueId){ el.innerHTML=''; return; }
   const collegue = S.employees.find(e=>e.id===collegueId);
   el.innerHTML = collegue ? `<span style="color:var(--muted);">Le collègue et le gestionnaire devront tous les deux valider cet échange.</span>` : '';
+}
+
+function updChangementReposCheck(){
+  const emp = S.user; if(!emp) return;
+  const dateActuelle = document.getElementById('rReposDateActuelle').value;
+  const dateSouhaitee = document.getElementById('rReposDateSouhaitee').value;
+  const el = document.getElementById('changementReposCheck');
+  if(!dateActuelle || !dateSouhaitee){ el.innerHTML=''; return; }
+  const verif = verifierChangementRepos(emp.id, dateActuelle, dateSouhaitee);
+  el.innerHTML = verif.ok
+    ? `<span style="color:#059669;">✓ Effectif suffisant, votre demande peut être envoyée.</span>`
+    : `<span style="color:#DC2626;">⚠️ ${verif.erreur} — utilisez plutôt une demande d'échange avec un collègue.</span>`;
 }
 
 // Initialiser les listeners dates congés
@@ -7334,6 +7429,62 @@ async function refuserRecup(id){
   persist();
   renderRecupMgr();
   toast('Récupération refusée');
+}
+
+// ── Changements de repos (vue gestionnaire) ──
+function renderReposMgr(){
+  const enAttente = S.requests.filter(r=>r.type==='changement_repos' && r.status==='pending');
+  const el = document.getElementById('reposListeMgr');
+  if(!el) return;
+  if(!enAttente.length){
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px;">Aucun changement de repos en attente</div>';
+    return;
+  }
+  el.innerHTML = enAttente.map(r=>`
+    <div class="quota-card" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:180px;">
+          <div style="font-weight:600;font-size:13px;">${r.empName}</div>
+          <div style="font-size:12px;color:var(--muted);">
+            Repos du ${fmtFR(new Date(r.dateActuelle+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateSouhaitee+'T12:00'),{day:'numeric',month:'short'})}
+          </div>
+          <div style="font-size:11px;color:#059669;margin-top:2px;">✓ Effectif vérifié suffisant à la demande</div>
+          ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
+        </div>
+        <div style="display:flex;gap:5px;">
+          <button class="btn btn-sm btn-ok" onclick="validerChangementRepos(${r.id})">✓</button>
+          <button class="btn btn-sm btn-no" onclick="refuserChangementRepos(${r.id})">✗</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+async function validerChangementRepos(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  const emp = S.employees.find(e=>e.id===req.empId);
+  if(!emp){toast('Employé introuvable');return;}
+  // Re-vérifier l'effectif au moment de la validation : le planning a pu changer depuis la demande.
+  const verif = verifierChangementRepos(req.empId, req.dateActuelle, req.dateSouhaitee);
+  if(!verif.ok){toast(`⚠️ ${verif.erreur} — la situation a changé depuis la demande`);return;}
+  req.status = 'approved';
+  S.planning[`${req.empId}_${req.dateActuelle}`] = {type:verif.typeActuel, site:verif.site, note:''};
+  S.planning[`${req.empId}_${req.dateSouhaitee}`] = {type:'off', site:emp.site||'', note:''};
+  // Pas de marquerEmployesModifies() ici : seul S.planning change (toujours réécrit en entier par
+  // persist(), voir supaWriteDebounced('planning',...)), la fiche employé elle-même est
+  // inchangée — contrairement à validerRecup() où emp.heuresSupp change réellement.
+  const dl=`${fmtFR(new Date(req.dateActuelle+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(req.dateSouhaitee+'T12:00'),{day:'numeric',month:'long'})}`;
+  S.mods.push({empId:req.empId, dl, det:'Changement de repos validé', seen:false});
+  notifierModifPlanning(req.empId, dl, 'Changement de repos validé');
+  persist();
+  renderReposMgr();
+  renderWeek();
+  toast('✓ Changement de repos validé');
+}
+async function refuserChangementRepos(id){
+  const req = S.requests.find(r=>r.id==id); if(!req) return;
+  req.status = 'refused';
+  persist();
+  renderReposMgr();
+  toast('Changement de repos refusé');
 }
 
 // ── Échanges d'horaire (vue gestionnaire) ──
