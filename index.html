@@ -1423,6 +1423,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Utilisé pour calculer automatiquement le quota "enfant malade" (nombre d'enfants + majoration si moins d'1 an).</div>
       <div id="ficheEnfantsList"></div>
       <button class="btn btn-sm mt-10" style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;" onclick="ajouterEnfantFiche()">+ Ajouter un enfant</button>
+      <div id="ficheEnfantMaladeInfo" style="font-size:11px;color:var(--muted);margin-top:10px;"></div>
     </div>
 
     <!-- Contrat -->
@@ -5045,6 +5046,13 @@ function openFicheEmp(empId){
   document.getElementById('ficheSoldeCPManuelDate').value = emp.soldeCPManuelDate || fmt(addDays(getPeriodeRef().debut,-1));
   document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
   document.getElementById('ficheHeuresSupp').value = emp.heuresSupp!=null ? emp.heuresSupp : '';
+  // Enfant malade : quota calculé + jours déjà pris sur les 12 derniers mois glissants (lecture
+  // seule, recalculé à chaque ouverture de la fiche — pas un champ à modifier ici).
+  const quotaEM = calcQuotaEnfantMalade(emp);
+  const prisEM = getJoursEnfantMaladePris(empId);
+  document.getElementById('ficheEnfantMaladeInfo').textContent = quotaEM>0
+    ? `Quota enfant malade : ${quotaEM} jour(s)/an — déjà pris sur les 12 derniers mois : ${prisEM} jour(s).`
+    : '';
   // Stocker l'id courant
   document.getElementById('mFicheEmp').dataset.empId = empId;
   openModal('mFicheEmp');
@@ -5933,6 +5941,19 @@ function calcQuotaEnfantMalade(emp){
   });
   if(aMoinsUnAn && (regles.joursSiMoinsUnAn||0) > jours) jours = regles.joursSiMoinsUnAn;
   return jours;
+}
+// Jours "enfant malade" déjà pris par un salarié sur une année glissante (365 jours en arrière
+// depuis aujourd'hui, pas l'année civile ni la période CP) — à comparer au quota calculé par
+// calcQuotaEnfantMalade(). Compte les signalements d'absence de motif 'enfant_malade' (S.absences,
+// un jour par entrée) : c'est la seule trace fiable d'un jour réellement pris — la demande formelle
+// (S.requests, type 'enfant_malade') n'est qu'un signalement préalable avec justificatif à
+// transmettre au gestionnaire, jamais validée/refusée dans l'appli (Antoine, 2026-09-23).
+function getJoursEnfantMaladePris(empId){
+  const limite = fmt(addDays(new Date(), -365));
+  const todayStr = fmt(new Date());
+  return (S.absences||[]).filter(a=>
+    a.empId===empId && a.motif==='enfant_malade' && a.dateStr>=limite && a.dateStr<=todayStr
+  ).length;
 }
 
 // ── COLORATION D'ÉVÉNEMENTS SUR PLAGE DE DATES ──
@@ -6970,10 +6991,11 @@ function toggleCongeFields() {
   if(infoEl) infoEl.style.display = isEnfant ? 'block' : 'none';
   if(isEnfant && S.user){
     const quota = calcQuotaEnfantMalade(S.user);
+    const pris = getJoursEnfantMaladePris(S.user.id);
     const txtEl = document.getElementById('enfantMaladeQuotaTxt');
     if(txtEl){
       txtEl.textContent = quota>0
-        ? `Quota : ${quota} jour(s)/an pour vos ${S.user.enfants.length} enfant(s) déclaré(s).`
+        ? `Quota : ${quota} jour(s)/an pour vos ${S.user.enfants.length} enfant(s) déclaré(s). Déjà pris sur les 12 derniers mois : ${pris} jour(s).`
         : `Quota : aucun enfant déclaré dans votre fiche — contactez le gestionnaire.`;
     }
   }
