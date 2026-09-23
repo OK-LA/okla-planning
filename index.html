@@ -3426,9 +3426,16 @@ async function sendReq(){
     if(!dateActuelle||!dateSouhaitee){toast('Complétez les deux dates');return;}
     const verif=verifierChangementRepos(emp.id,dateActuelle,dateSouhaitee);
     if(!verif.ok){toast(`${verif.erreur} — utilisez une demande d'échange avec un collègue`);return;}
+    // dateDebut/dateFin sont les seuls champs date que la table requests persiste réellement pour
+    // ce type (pas de colonne dédiée "date_actuelle"/"date_souhaitee") — dateDebut=repos à libérer,
+    // dateFin=nouveau repos souhaité, quel que soit leur ordre chronologique. typeActuel/site ne
+    // sont volontairement pas stockés : re-calculés à la validation via verifierChangementRepos()
+    // sur le planning à jour, jamais lus depuis la demande elle-même (bug trouvé et corrigé en
+    // testant en conditions réelles : ces champs personnalisés étaient silencieusement perdus à
+    // l'écriture Supabase, indétectable en local car S.requests restait en mémoire jusqu'au
+    // rechargement suivant — Antoine, 2026-09-23).
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
-      type:'changement_repos',dateActuelle,dateSouhaitee,typeActuel:verif.typeActuel,site:verif.site,
-      date:dateSouhaitee,dateDebut:dateActuelle,dateFin:dateSouhaitee,note,status:'pending'};
+      type:'changement_repos',date:dateSouhaitee,dateDebut:dateActuelle,dateFin:dateSouhaitee,note,status:'pending'};
   } else if(type==='recup'){
     const date=document.getElementById('rRecupDate')?.value;
     const heures=parseFloat(document.getElementById('rRecupHeures')?.value);
@@ -4656,7 +4663,7 @@ function renderEmpChangementRepos(){
     const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':'En attente';
     return `<div class="conge-item">
       <div style="flex:1">
-        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateActuelle+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateSouhaitee+'T12:00'),{day:'numeric',month:'short'})}</div>
+        <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
         <div style="font-size:11px;color:var(--muted)">Nouveau repos souhaité</div>
       </div>
       <span class="conge-status ${statusCls}">${statusLbl}</span>
@@ -7446,7 +7453,7 @@ function renderReposMgr(){
         <div style="flex:1;min-width:180px;">
           <div style="font-weight:600;font-size:13px;">${r.empName}</div>
           <div style="font-size:12px;color:var(--muted);">
-            Repos du ${fmtFR(new Date(r.dateActuelle+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateSouhaitee+'T12:00'),{day:'numeric',month:'short'})}
+            Repos du ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}
           </div>
           <div style="font-size:11px;color:#059669;margin-top:2px;">✓ Effectif vérifié suffisant à la demande</div>
           ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${r.note}</div>`:''}
@@ -7463,15 +7470,16 @@ async function validerChangementRepos(id){
   const emp = S.employees.find(e=>e.id===req.empId);
   if(!emp){toast('Employé introuvable');return;}
   // Re-vérifier l'effectif au moment de la validation : le planning a pu changer depuis la demande.
-  const verif = verifierChangementRepos(req.empId, req.dateActuelle, req.dateSouhaitee);
+  // dateDebut=repos à libérer, dateFin=nouveau repos souhaité (voir sendReq, pas de colonne dédiée).
+  const verif = verifierChangementRepos(req.empId, req.dateDebut, req.dateFin);
   if(!verif.ok){toast(`⚠️ ${verif.erreur} — la situation a changé depuis la demande`);return;}
   req.status = 'approved';
-  S.planning[`${req.empId}_${req.dateActuelle}`] = {type:verif.typeActuel, site:verif.site, note:''};
-  S.planning[`${req.empId}_${req.dateSouhaitee}`] = {type:'off', site:emp.site||'', note:''};
+  S.planning[`${req.empId}_${req.dateDebut}`] = {type:verif.typeActuel, site:verif.site, note:''};
+  S.planning[`${req.empId}_${req.dateFin}`] = {type:'off', site:emp.site||'', note:''};
   // Pas de marquerEmployesModifies() ici : seul S.planning change (toujours réécrit en entier par
   // persist(), voir supaWriteDebounced('planning',...)), la fiche employé elle-même est
   // inchangée — contrairement à validerRecup() où emp.heuresSupp change réellement.
-  const dl=`${fmtFR(new Date(req.dateActuelle+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(req.dateSouhaitee+'T12:00'),{day:'numeric',month:'long'})}`;
+  const dl=`${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(req.dateFin+'T12:00'),{day:'numeric',month:'long'})}`;
   S.mods.push({empId:req.empId, dl, det:'Changement de repos validé', seen:false});
   notifierModifPlanning(req.empId, dl, 'Changement de repos validé');
   persist();
