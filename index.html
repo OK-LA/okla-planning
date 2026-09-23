@@ -651,6 +651,8 @@ tbody tr:hover td{background:#FAFAF8;}
         <!-- ALERTES EFFECTIF -->
         <div class="effectif-alert" id="alertEffectif"></div>
         <div class="effectif-warn" id="warnEffectif"></div>
+        <!-- ALERTE REPOS HEBDOMADAIRE -->
+        <div class="effectif-alert" id="alertRepos"></div>
         <!-- TABLEAU -->
         <div class="table-wrap"><table class="week-grid-table"><thead id="tH"></thead><tbody id="tB"></tbody></table></div>
         <div class="muted tc mt-10">Cliquez sur une case pour modifier · Ligne du bas = effectif présent par jour</div>
@@ -3828,6 +3830,30 @@ function checkEffectifAlerts(mon) {
   } else { warnEl.classList.remove('show'); }
 }
 
+// Alerte gestionnaire : un salarié dont la semaine (lundi à samedi, dimanche exclu — magasins
+// normalement fermés) ne contient aucun jour de repos ni d'absence, alors qu'il travaille au moins
+// un jour cette semaine-là — repère un oubli de planning avant qu'il ne devienne un vrai problème
+// de droit du travail (Antoine, 2026-09-23).
+function checkReposAlerts(mon){
+  const alertes = [];
+  activeEmployees().forEach(emp=>{
+    let travaille = false, repos = false;
+    for(let i=0;i<6;i++){
+      const sh = S.planning[`${emp.id}_${fmt(addDays(mon,i))}`];
+      const type = sh?.type || 'off';
+      if(type==='off' || estTypeAbsence(type)) repos = true;
+      else travaille = true;
+    }
+    if(travaille && !repos) alertes.push(`${emp.name} (${emp.site})`);
+  });
+  const el = document.getElementById('alertRepos');
+  if(!el) return;
+  if(alertes.length){
+    el.innerHTML = '⚠️ <strong>Aucun jour de repos (lundi–samedi) cette semaine :</strong><br>' + alertes.join('<br>');
+    el.classList.add('show');
+  } else { el.classList.remove('show'); }
+}
+
 function renderWeek(){
   const today=new Date();today.setHours(0,0,0,0);
   const mon=addDays(getMon(today),S.mWO*7);
@@ -3839,6 +3865,7 @@ function renderWeek(){
 
   // Vérifier alertes effectif sur toute la semaine
   checkEffectifAlerts(mon);
+  checkReposAlerts(mon);
 
   const emps = getEmpsFiltres().filter(e=>estVisibleDansPlanning(e,mon));
 
