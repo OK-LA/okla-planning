@@ -124,14 +124,14 @@ tbody tr:hover td{background:#FAFAF8;}
 .site-month-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--border);background:#fff;}
 .site-month-table{border-collapse:collapse;width:100%;}
 .site-month-table th{padding:6px 4px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:2px solid var(--border);background:var(--bg);text-align:center;white-space:nowrap;}
-.site-month-table th.emp-th{text-align:center;min-width:60px;}
+.site-month-table th.emp-th{text-align:center;min-width:42px;max-width:42px;}
 .site-month-table th.date-th{text-align:left;padding-left:10px;position:sticky;left:0;background:var(--bg);z-index:2;min-width:80px;}
-.site-month-table td{padding:3px 3px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center;vertical-align:middle;}
+.site-month-table td{padding:2px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center;vertical-align:middle;}
 .site-month-table td.date-td{text-align:left;padding:5px 10px;border-right:2px solid var(--border);position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;}
 .site-month-table tr:last-child td{border-bottom:none;}
 .site-month-table td.we{background:#FAFAF8;}
 .site-month-table th.we{background:#F3F2EF;}
-.mblock{width:34px;height:22px;border-radius:4px;margin:0 auto;cursor:pointer;transition:all .1s;}
+.mblock{width:27px;height:22px;border-radius:4px;margin:0 auto;cursor:pointer;transition:all .1s;}
 .mblock:hover{transform:scale(1.12);filter:brightness(.88);}
 .mblock.empty{background:transparent;border:1px dashed #D1D5DB;}
 .mblock.empty:hover{border-color:#9CA3AF;}
@@ -3971,15 +3971,15 @@ function renderMonthSiteTable(site, ref, today, empsFiltres, readOnly=false){
   let th=`<thead><tr><th class="date-th">Date</th><th style="width:14px;min-width:14px;padding:2px 0;font-size:8px;color:var(--muted);text-align:center;" title="Vacances">🏖</th>`;
   emps.forEach(emp=>{
     th+=`<th class="emp-th">`+
-      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
-      `<div style="font-size:10px;white-space:nowrap;">${emp.name.split(' ')[0]}</div></th>`;
+      `<div class="avatar" style="width:18px;height:18px;font-size:7px;background:${avc(emp.id)};margin:0 auto 2px;">${ini(emp.name)}</div>`+
+      `<div style="font-size:9px;line-height:1.1;white-space:normal;word-break:break-word;">${emp.name.split(' ')[0]}</div></th>`;
   });
   // Une seule colonne partagée pour tous les renforts (au lieu d'une colonne par personne) :
   // affiche le(s) prénom(s) du/des renfort(s) présent(s) ce jour-là, peu importe qui c'est.
   if(renforts.length){
     th+=`<th class="emp-th" style="background:#EFF6FF;">`+
-      `<div class="avatar" style="width:20px;height:20px;font-size:8px;background:#0EA5E9;margin:0 auto 2px;">↔</div>`+
-      `<div style="font-size:9px;white-space:nowrap;color:#0EA5E9;font-weight:700;">↔ Renfort</div></th>`;
+      `<div class="avatar" style="width:18px;height:18px;font-size:7px;background:#0EA5E9;margin:0 auto 2px;">↔</div>`+
+      `<div style="font-size:8px;line-height:1.1;white-space:normal;color:#0EA5E9;font-weight:700;">↔ Renfort</div></th>`;
   }
   // La colonne effectifs (présents/minimum requis) est réservée au gestionnaire — un salarié en
   // lecture seule sur "Mon magasin" n'a pas à voir les seuils de sous-effectif configurés.
@@ -6911,8 +6911,16 @@ function renderEmpQuota() {
     <div class="quota-bar-wrap"><div class="quota-bar" style="width:${pct}%;background:${pct>80?'#DC2626':pct>50?'#F59E0B':'#059669'};"></div></div>
     <div style="font-size:11px;color:var(--muted);margin-top:2px;">Période : ${fmtFR(periode.debut,{day:'numeric',month:'long',year:'numeric'})} → ${fmtFR(periode.fin,{day:'numeric',month:'long',year:'numeric'})}</div>`;
 
-  // Liste des demandes
-  const mesDemandes = getCongesEmp(emp.id);
+  // Liste des demandes : celles de la période en cours (comme avant), + toute demande EN ATTENTE
+  // d'une autre période (ex: congés d'été déposés avant le 30/03, donc pour la période suivante) —
+  // sans ce second lot, une demande pending restait invisible pour le salarié tant que sa période
+  // n'était pas encore la période courante (même bug que celui déjà corrigé côté gestionnaire, voir
+  // getCongesEmpToutesPeriodes — Antoine, 2026-09-23). Reste borné à la période en cours pour les
+  // demandes déjà traitées (validé/refusé/annulé), pour ne pas réafficher tout l'historique.
+  const demandesPeriode = getCongesEmp(emp.id);
+  const demandesPendantesAutrePeriode = getCongesEmpToutesPeriodes(emp.id)
+    .filter(r => r.status === 'pending' && !demandesPeriode.includes(r));
+  const mesDemandes = [...demandesPeriode, ...demandesPendantesAutrePeriode];
   let h = mesDemandes.length ? '' : '<div style="font-size:12px;color:var(--muted);">Aucune demande cette année</div>';
   mesDemandes.forEach(r => {
     const nb = countJoursOuvres(r.dateDebut, r.dateFin);
