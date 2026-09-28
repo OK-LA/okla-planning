@@ -607,6 +607,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="stat" onclick="showStatDetail('demandes')" style="cursor:pointer;" title="Voir les demandes"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
       <div class="stat" onclick="showStatDetail('absences')" style="cursor:pointer;" title="Voir les absences"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
       <div class="stat" onclick="showStatDetail('profils')" style="cursor:pointer;" title="Voir les modifications de profil"><div class="stat-val" id="sP">0</div><div class="stat-lbl">Profils</div></div>
+      <div class="stat" onclick="showStatDetail('repos')" style="cursor:pointer;" title="Salariés sans jour de repos cette semaine (lundi-samedi)"><div class="stat-val" id="sR">0</div><div class="stat-lbl">Sans repos</div></div>
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
@@ -625,6 +626,9 @@ tbody tr:hover td{background:#FAFAF8;}
       </button>
       <button id="btnEnvoyerSms" onclick="ouvrirRevueSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés concernés ne sont prévenus par SMS qu'à ce moment-là, pas à chaque modification">
         📤 Envoyer les SMS en attente (0)
+      </button>
+      <button id="btnAnnulerModif" onclick="annulerDerniereModifPlanning()" style="display:none;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Restaure la case (ou la période) de planning telle qu'elle était avant la dernière modification">
+        ↩ Annuler la dernière modification
       </button>
       <div class="view-bar">
         <button class="btn btn-ghost btn-sm" onclick="mNavPrev()">←</button>
@@ -1144,7 +1148,7 @@ tbody tr:hover td{background:#FAFAF8;}
 <div class="modal-overlay" id="mRevueSms">
   <div class="modal">
     <div class="modal-title">📤 Envoyer les SMS en attente</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Décochez les salariés dont le planning est encore en préparation — leurs modifications resteront en attente pour un prochain envoi.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Cochez les salariés à prévenir maintenant — les autres resteront en attente pour un prochain envoi.</div>
     <div id="revueSmsListe" style="max-height:50vh;overflow-y:auto;"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('mRevueSms')">Annuler</button>
@@ -1696,10 +1700,12 @@ function texteSmsModifPlanning(emp, entries){
   // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
   // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
   const lienAppli='https://ok-la.github.io/okla-planning/';
+  // Juste la liste des dates modifiées, pas le détail du nouveau créneau (site/horaire/motif) —
+  // pour un SMS court, le salarié consulte l'appli pour le détail (Antoine, 2026-09-28).
   if(entries.length===1){
-    return `Bonjour ${prenom}, modification de votre planning : ${entries[0].dl} - ${entries[0].det}. Consultez : ${lienAppli}`;
+    return `Bonjour ${prenom}, modification de votre planning : ${entries[0].dl}. Consultez : ${lienAppli}`;
   }
-  const liste=entries.slice(0,4).map(e=>`${e.dl} (${e.det})`).join(', ');
+  const liste=entries.slice(0,4).map(e=>e.dl).join(', ');
   const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
   return `Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. Consultez : ${lienAppli}`;
 }
@@ -1719,7 +1725,7 @@ function ouvrirRevueSmsEnAttente(){
     const resume=entries.map(e=>`${e.dl} (${e.det})`).join(', ');
     const sansTel=!emp?.tel;
     return `<div id="revueSmsRow_${empId}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);${sansTel?'opacity:.55;':''}">
-      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'':'checked'} ${sansTel?'disabled':''} style="margin-top:3px;width:auto;cursor:${sansTel?'not-allowed':'pointer'};">
+      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'disabled':''} style="margin-top:3px;width:auto;cursor:${sansTel?'not-allowed':'pointer'};">
       <div style="flex:1;cursor:${sansTel?'not-allowed':'pointer'};" onclick="${sansTel?'':`document.querySelector('.revue-sms-chk[data-emp=\\'${empId}\\']').click()`}">
         <div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#DC2626;font-weight:400;">(pas de téléphone — ne sera pas envoyé)</span>':''}</div>
         <div style="font-size:11px;color:var(--muted);">${resume}</div>
@@ -2971,7 +2977,10 @@ function estSamediEffectifPlein(dateStr){
 // requis ce jour-là, ex: soldes ou 1er samedi du mois).
 function getMinStaffEffectif(site, date){
   if(estSamediEffectifPlein(fmt(date))){
-    return activeEmployees().filter(e=>e.site===site).length;
+    // estVisibleDansPlanning (pas activeEmployees seul) : un salarié dont le contrat se termine
+    // avant ce mois-ci ne doit pas compter dans le minimum "effectif plein", sinon ce minimum
+    // reste artificiellement trop haut après son départ (Antoine, 2026-09-28).
+    return activeEmployees().filter(e=>e.site===site && estVisibleDansPlanning(e,date)).length;
   }
   return getMinStaff(site, date);
 }
@@ -3037,6 +3046,20 @@ function updStats(){
   document.getElementById('sD').textContent=S.requests.filter(r=>r.status==='pending'||r.status==='pending_gestionnaire').length;
   document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
   const sP=document.getElementById('sP'); if(sP) sP.textContent=(S.profilNotifs||[]).filter(n=>!n.seen).length;
+  const sR=document.getElementById('sR');
+  if(sR){
+    const today=new Date();today.setHours(0,0,0,0);
+    sR.textContent=employesSansReposSemaine(getMon(today)).length;
+  }
+}
+
+// Supprime un avertissement d'absence de la liste des notifications (résolu ou non) — un retrait
+// définitif, pas un simple "vu" : contrairement à S.profilNotifs, les absences n'ont pas de champ
+// seen/resolu-pour-l'affichage séparé de la vraie résolution métier (Antoine, 2026-09-28).
+function supprimerAvertissementAbsence(id){
+  S.absences = S.absences.filter(a=>a.id!=id);
+  persist();updStats();renderAbsList();
+  showStatDetail('absences');
 }
 
 function marquerProfilNotifVu(id){
@@ -3840,9 +3863,13 @@ function checkEffectifAlerts(mon) {
 // normalement fermés) ne contient aucun jour de repos ni d'absence, alors qu'il travaille au moins
 // un jour cette semaine-là — repère un oubli de planning avant qu'il ne devienne un vrai problème
 // de droit du travail (Antoine, 2026-09-23).
-function checkReposAlerts(mon){
-  const alertes = [];
-  activeEmployees().forEach(emp=>{
+// Salariés actifs qui travaillent au moins un jour lundi-samedi (dimanche exclu, magasins
+// normalement fermés) de la semaine commençant à `mon`, sans jamais avoir de jour off ni
+// d'absence cette semaine-là — utilisé à la fois par la bannière de la grille hebdomadaire
+// (checkReposAlerts, semaine affichée) et par la carte "Sans repos" du tableau de bord (semaine en
+// cours, visible sans avoir à naviguer jusqu'à la bonne semaine — Antoine, 2026-09-28).
+function employesSansReposSemaine(mon){
+  return activeEmployees().filter(emp=>{
     let travaille = false, repos = false;
     for(let i=0;i<6;i++){
       const sh = S.planning[`${emp.id}_${fmt(addDays(mon,i))}`];
@@ -3850,8 +3877,11 @@ function checkReposAlerts(mon){
       if(type==='off' || estTypeAbsence(type)) repos = true;
       else travaille = true;
     }
-    if(travaille && !repos) alertes.push(`${emp.name} (${emp.site})`);
+    return travaille && !repos;
   });
+}
+function checkReposAlerts(mon){
+  const alertes = employesSansReposSemaine(mon).map(emp=>`${emp.name} (${emp.site})`);
   const el = document.getElementById('alertRepos');
   if(!el) return;
   if(alertes.length){
@@ -4305,6 +4335,57 @@ function updNotif(){
   document.getElementById('notifTxt').textContent=`Bonjour ${emp.name.split(' ')[0]}, votre planning du ${dl} a été modifié : ${det}.`;
 }
 
+// État de la dernière modification de planning (case unique ou période), pour "Annuler la
+// dernière modification" — capture les anciennes valeurs AVANT écrasement. Purement en mémoire
+// (pas persisté, pas synchronisé entre appareils, perdu au rechargement) : un vrai historique
+// multi-opérations serait un chantier bien plus lourd, hors de portée pour ce dont on a besoin ici
+// (rattraper une erreur de clic juste après coup) — décision explicite, portée volontairement
+// limitée au dernier saveShift/saveShiftPeriode (Antoine, 2026-09-28).
+let _derniereModifPlanning = null;
+function _capturerAvantEcriturePlanning(cles){
+  _derniereModifPlanning = {
+    cellules: cles.map(cle => ({cle, ancienne: S.planning[cle] ? {...S.planning[cle]} : null})),
+    modEntry: null, pendingSmsEntry: null,
+    // Longueur AVANT notifierModifPlanning — sert à distinguer "aucune entrée ajoutée" (salarié
+    // sans téléphone : notifierModifPlanning ressort tôt sans rien empiler) du cas normal, sinon on
+    // prendrait par erreur le dernier SMS en attente d'UNE AUTRE opération pour celui-ci, et
+    // l'annulation supprimerait la mauvaise notification (Antoine, 2026-09-28).
+    pendingSmsLenAvant: (S.params.pendingSms||[]).length,
+  };
+  const btn = document.getElementById('btnAnnulerModif');
+  if(btn) btn.style.display = 'inline-block';
+}
+// À appeler juste après S.mods.push(...)/notifierModifPlanning(...) pour que l'annulation retire
+// aussi la notification déjà mise en file — sinon le salarié serait quand même prévenu (bannière +
+// SMS en attente) d'un changement qui n'a plus lieu après l'annulation.
+function _enregistrerEffetNotifPlanning(modEntry){
+  if(!_derniereModifPlanning) return;
+  _derniereModifPlanning.modEntry = modEntry;
+  const pend = S.params.pendingSms||[];
+  _derniereModifPlanning.pendingSmsEntry = pend.length > _derniereModifPlanning.pendingSmsLenAvant
+    ? pend[pend.length-1] : null;
+}
+async function annulerDerniereModifPlanning(){
+  if(!_derniereModifPlanning){toast('Rien à annuler');return;}
+  _derniereModifPlanning.cellules.forEach(({cle, ancienne})=>{
+    if(ancienne) S.planning[cle] = ancienne;
+    else delete S.planning[cle];
+  });
+  if(_derniereModifPlanning.modEntry){
+    const idx = S.mods.indexOf(_derniereModifPlanning.modEntry);
+    if(idx!==-1) S.mods.splice(idx,1);
+  }
+  if(_derniereModifPlanning.pendingSmsEntry){
+    const pend = S.params.pendingSms||[];
+    const idx = pend.indexOf(_derniereModifPlanning.pendingSmsEntry);
+    if(idx!==-1){ pend.splice(idx,1); renderPendingSmsBtn(); }
+  }
+  _derniereModifPlanning = null;
+  document.getElementById('btnAnnulerModif').style.display = 'none';
+  persist();updStats();renderWeek();if(S.view==='mois')renderMonth();
+  toast('✓ Dernière modification annulée');
+}
+
 async function saveShift(){
   if(S.shiftMode==='periode') return saveShiftPeriode();
 
@@ -4316,14 +4397,17 @@ async function saveShift(){
     ? (document.getElementById('remplacementCibleSel')?.value || emp.site)
     : emp.site;
   const shift={type:S.editType,site:siteEffectif,note};
+  _capturerAvantEcriturePlanning([`${empId}_${dateStr}`]);
   S.planning[`${empId}_${dateStr}`]=shift;
   const t=getAllTypes().find(x=>x.key===S.editType);
   const dl=fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'});
   let det=t?(t.info||t.label):'';
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) det=`${emp.site} — ${t.info}`;
   if(S.editType==='remplacement') det=`Remplacement — ${siteEffectif}`;
-  S.mods.push({empId,dl,det,seen:false});
+  const modEntry={empId,dl,det,seen:false};
+  S.mods.push(modEntry);
   notifierModifPlanning(empId,dl,det);
+  _enregistrerEffetNotifPlanning(modEntry);
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
@@ -4353,6 +4437,7 @@ async function saveShiftPeriode(){
   }
   if(!jours.length){toast('Aucun jour à appliquer sur cette période');return;}
 
+  _capturerAvantEcriturePlanning(jours.map(dStr=>`${empId}_${dStr}`));
   jours.forEach(dStr=>{
     // Comme pour la validation d'une demande de congé (validerConge) : le jour de repos fixe
     // de l'employé reste "repos" pendant une période de congé, il n'est jamais décompté en CP.
@@ -4369,8 +4454,10 @@ async function saveShiftPeriode(){
   if(['magasin','entrepotA','entrepotB'].includes(S.editType)) detPeriode=`${emp.site} — ${t.info}`;
   if(S.editType==='remplacement') detPeriode=`Remplacement — ${siteEffectif}`;
   const dlPeriode = debut===fin ? fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'}) : `${fmtFR(new Date(debut+'T12:00'),{day:'numeric',month:'long'})} → ${fmtFR(new Date(fin+'T12:00'),{day:'numeric',month:'long'})}`;
-  S.mods.push({empId,dl:dlPeriode,det:detPeriode,seen:false});
+  const modEntryPeriode={empId,dl:dlPeriode,det:detPeriode,seen:false};
+  S.mods.push(modEntryPeriode);
   notifierModifPlanning(empId,dlPeriode,detPeriode);
+  _enregistrerEffetNotifPlanning(modEntryPeriode);
   persist();updStats();closeModal('mShift');renderWeek();if(S.view==='mois')renderMonth();
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
@@ -4427,6 +4514,10 @@ async function saveAbsence(){
   const absId=Date.now();
   const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
   S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
+  // Prévenir les collègues effectivement planifiés ce jour-là sur le même site — même logique que
+  // pour un retard signalé (Antoine, 2026-09-28).
+  const phonesCollegues=telephonesCollegues(abs.empSite,abs.dateStr,abs.empId);
+  if(phonesCollegues.length) envoyerNotifSms(phonesCollegues, `OK-LA Planning: ${emp.name} absent(e) le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
   openRempModal(absId);
 }
 
@@ -4620,6 +4711,10 @@ async function saveAbsenceEmp(){
   }
   const phones=telephonesGestionnaire();
   if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: absence signalee - ${emp.name} - ${motifFinal} - ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
+  // Prévenir les collègues effectivement planifiés ce jour-là sur le même site — même logique que
+  // pour un retard signalé (Antoine, 2026-09-28).
+  const phonesCollegues=telephonesCollegues(abs.empSite,abs.dateStr,abs.empId);
+  if(phonesCollegues.length) envoyerNotifSms(phonesCollegues, `OK-LA Planning: ${emp.name} absent(e) le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
   toast(`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
 }
 function renderEmpAbsList(){
@@ -8301,13 +8396,16 @@ function showStatDetail(type){
 
   } else if(type==='absences'){
     title = `🚩 Absences signalées`;
-    const absences = (S.absences||[]).filter(a=>a.status==='pending'||!a.status);
+    // Filtre corrigé : .status n'existe pas sur les absences (seul .resolved existe), l'ancien
+    // filtre affichait donc TOUTES les absences, résolues ou non, indéfiniment. Idem pour la date :
+    // le champ s'appelle dateStr, pas date (toujours "?" avant correction) (Antoine, 2026-09-28).
+    const absences = (S.absences||[]).filter(a=>!a.resolved).sort((a,b)=>(b.dateStr||'').localeCompare(a.dateStr||''));
     if(!absences.length){
       html = '<div style="text-align:center;color:var(--muted);padding:20px;">✅ Aucune absence en attente</div>';
     } else {
       html = absences.map(a=>{
         const emp = S.employees.find(e=>e.id===a.empId);
-        const d = a.date ? fmtFR(new Date(a.date+'T12:00'),{weekday:'short',day:'numeric',month:'long'}) : '?';
+        const d = a.dateStr ? fmtFR(new Date(a.dateStr+'T12:00'),{weekday:'short',day:'numeric',month:'long'}) : '?';
         return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
           <div class="avatar" style="background:${emp?avc(emp.id):'#9CA3AF'};flex-shrink:0;font-size:10px;">${emp?ini(emp.name):'?'}</div>
           <div style="flex:1;">
@@ -8316,10 +8414,28 @@ function showStatDetail(type){
             <div style="font-size:11px;color:var(--muted);">${a.motif||'Motif non précisé'}</div>
           </div>
           <button class="btn btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');" style="font-size:11px;white-space:nowrap;">Gérer →</button>
+          <button class="btn btn-sm btn-no" onclick="supprimerAvertissementAbsence(${a.id})" title="Supprimer cet avertissement">🗑</button>
         </div>`;
       }).join('');
     }
     html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');">Gérer les remplacements →</button></div>`;
+
+  } else if(type==='repos'){
+    title = `📅 Salariés sans repos cette semaine`;
+    const today=new Date();today.setHours(0,0,0,0);
+    const sansRepos = employesSansReposSemaine(getMon(today));
+    if(!sansRepos.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">✅ Tout le monde a un jour de repos cette semaine</div>';
+    } else {
+      html = sansRepos.map(emp=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div class="avatar" style="background:${avc(emp.id)};flex-shrink:0;font-size:10px;">${ini(emp.name)}</div>
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:13px;">${emp.name}</div>
+          <div style="font-size:11px;color:var(--muted);">${sPill(emp.site)}</div>
+        </div>
+      </div>`).join('');
+    }
+    html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('planning');">Voir le planning →</button></div>`;
 
   } else if(type==='profils'){
     title = `📝 Modifications de profil`;
