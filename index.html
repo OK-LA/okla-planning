@@ -711,9 +711,12 @@ tbody tr:hover td{background:#FAFAF8;}
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
           <div style="font-size:12px;font-weight:600;color:var(--muted);">RÉCAPITULATIF GLOBAL — TOUS EMPLOYÉS</div>
-          <div style="display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;">
-            <button class="vbtn active" id="triRestantsBtn" onclick="setTriConges('restants')">Tri : Restants</button>
-            <button class="vbtn" id="triNomBtn" onclick="setTriConges('nom')">Tri : Nom</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-sm" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;" onclick="showStatDetail('recapConges')">📋 Voir les périodes posées</button>
+            <div style="display:flex;gap:3px;background:var(--border);padding:3px;border-radius:8px;">
+              <button class="vbtn active" id="triRestantsBtn" onclick="setTriConges('restants')">Tri : Restants</button>
+              <button class="vbtn" id="triNomBtn" onclick="setTriConges('nom')">Tri : Nom</button>
+            </div>
           </div>
         </div>
         <div class="table-wrap"><table>
@@ -8436,6 +8439,32 @@ function showStatDetail(type){
       </div>`).join('');
     }
     html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('planning');">Voir le planning →</button></div>`;
+
+  } else if(type==='recapConges'){
+    title = `📋 Congés posés — période en cours`;
+    // Période en cours (getCongesEmp, pas ...ToutesPeriodes) : mêmes bornes que le tableau
+    // récapitulatif juste au-dessus, pour rester cohérent avec lui plutôt que de remonter tout
+    // l'historique (Antoine, 2026-09-30).
+    const statusLbl = {approved:'Validé',pending:'En attente',refused:'Refusé',cancelled:'Annulé'};
+    const statusCls = {approved:'cs-ok',pending:'cs-pending',refused:'cs-refused',cancelled:'cs-refused'};
+    const rows = activeEmployees()
+      .map(emp=>({emp, conges: getCongesEmp(emp.id).sort((a,b)=>b.dateDebut.localeCompare(a.dateDebut))}))
+      .filter(r=>r.conges.length)
+      .sort((a,b)=>a.emp.name.localeCompare(b.emp.name));
+    if(!rows.length){
+      html = '<div style="text-align:center;color:var(--muted);padding:20px;">Aucun congé posé cette période</div>';
+    } else {
+      html = rows.map(({emp,conges})=>`<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <div class="avatar" style="width:22px;height:22px;font-size:9px;background:${avc(emp.id)};flex-shrink:0;">${ini(emp.name)}</div>
+          <span style="font-weight:600;font-size:13px;">${emp.name}</span>
+        </div>
+        ${conges.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:3px 0 3px 30px;">
+          <span>${fmtFR(new Date(c.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(c.dateFin+'T12:00'),{day:'numeric',month:'short',year:'numeric'})}${c.type==='conge_sans_solde'?' — sans solde':''} (${c.joursOuvres??'?'}j)</span>
+          <span class="conge-status ${statusCls[c.status]||'cs-pending'}" style="white-space:nowrap;">${statusLbl[c.status]||c.status}</span>
+        </div>`).join('')}
+      </div>`).join('');
+    }
 
   } else if(type==='profils'){
     title = `📝 Modifications de profil`;
