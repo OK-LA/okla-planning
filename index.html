@@ -1299,7 +1299,7 @@ tbody tr:hover td{background:#FAFAF8;}
 <div class="modal-overlay" id="mRemp">
   <div class="modal">
     <div class="modal-title" id="mRempTitle"></div>
-    <div class="remp-section"><div class="remp-title">Remplaçants suggérés</div><div id="rempSugge"></div></div>
+    <div class="remp-section"><div class="remp-title">Remplaçants suggérés</div><div id="rempSugge" style="max-height:45vh;overflow-y:auto;"></div></div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Contactez manuellement, puis validez ci-dessous.</div>
     <div class="fg"><label>Remplaçant retenu</label><select id="rempChoisi"></select></div>
     <div class="modal-actions">
@@ -1560,7 +1560,10 @@ function getAllTypes(){
 // Un type personnalisé peut être marqué "absence" (n'apparaît pas dans l'effectif présent),
 // comme congé/maladie/formation qui le sont nativement.
 function estTypeAbsence(type){
-  if(type==='conge'||type==='maladie'||type==='formation') return true;
+  // recup et congeSansSolde ajoutés (Antoine, 2026-10-02) : ces journées ne sont pas travaillées,
+  // mais comptaient comme "présent" dans les effectifs et les suggestions de remplaçants — un
+  // salarié en récup était proposé comme "dispo avec marge" et gonflait la marge de son site.
+  if(type==='conge'||type==='maladie'||type==='formation'||type==='recup'||type==='congeSansSolde') return true;
   const ct=(S.params?.customTypes||[]).find(t=>t.key===type);
   return ct?!!ct.absence:false;
 }
@@ -4900,7 +4903,15 @@ function findReplacements(absentId,dateStr,targetSite){
     return {presents,minStaff,marge:presents-minStaff};
   }
 
-  const candidats=activeEmployees().filter(emp=>emp.id!==absentId).map(emp=>{
+  const candidats=activeEmployees().filter(emp=>{
+    if(emp.id===absentId) return false;
+    const sh=S.planning[`${emp.id}_${dateStr}`];
+    // Pas candidat : en congé/maladie/formation/récup ce jour-là (indisponible, pas "en repos"),
+    // déjà affecté en renfort ailleurs, ou déjà présent sur le site à couvrir (Antoine, 2026-10-02).
+    if(sh && (estTypeAbsence(sh.type) || sh.type==='remplacement')) return false;
+    if(sh && sh.type!=='off' && (sh.site||emp.site)===targetSite) return false;
+    return true;
+  }).map(emp=>{
     const sh=S.planning[`${emp.id}_${dateStr}`];
     const enRepos=!sh||sh.type==='off';
     let canLeave=true, staffOnDay=0, minStaff=0, source='repos';
@@ -4930,7 +4941,15 @@ function openRempModal(absId){
   document.getElementById('mRempTitle').textContent=`Remplaçant — ${abs.empName} (${dl})`;
   const cands=findReplacements(abs.empId,abs.dateStr,abs.empSite);
   let sh=cands.length?'':'<div style="text-align:center;padding:14px;color:var(--muted);font-size:13px;">Aucun remplaçant trouvé — vérifiez le planning de la journée.</div>';
-  cands.slice(0,6).forEach((c,i)=>{
+  // Tous les candidats, pas seulement les 6 premiers : les personnes en repos passent d'abord et
+  // saturaient la liste, cachant les salariés présents pourtant disponibles (Antoine, 2026-10-02).
+  // Deux groupes titrés, zone défilante (#rempSugge).
+  let groupeAffiche=null;
+  cands.forEach((c,i)=>{
+    if(groupeAffiche!==c.enRepos){
+      groupeAffiche=c.enRepos;
+      sh+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:${i?'10px':'0'} 0 4px;">${c.enRepos?'En repos ce jour-là':'Présents disponibles (leur magasin peut se passer d\'eux)'}</div>`;
+    }
     const badge=c.enRepos
       ?'<span style="color:#059669;font-size:11px;font-weight:600;">✓ En repos</span>'
       :`<span style="color:#2563EB;font-size:11px;font-weight:600;">↔ Dispo (${c.emp.site}, marge ${c.staffOnDay-c.minStaff})</span>`;
