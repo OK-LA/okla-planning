@@ -1422,6 +1422,9 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
         <input type="checkbox" id="ficheChildren" style="width:auto;"> Parent d'enfant(s) de moins de 16 ans
       </label></div>
+      <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="ficheExcluRemp" style="width:auto;"> Ne jamais proposer comme remplaçant
+      </label></div>
     </div>
 
     <!-- Enfants (pour le calcul automatique du quota "enfant malade") -->
@@ -1889,6 +1892,7 @@ function empToRow(e, orderIndex) {
     solde_cp_manuel: e.soldeCPManuel ?? null,
     solde_cp_manuel_date: e.soldeCPManuelDate || null,
     heures_supp: e.heuresSupp ?? null,
+    exclu_remplacement: !!e.excluRemplacement,
     code_salarie: e.codeSalarie || null,
     repos_fixe_weekday: (S.params && S.params.reposFixe && S.params.reposFixe[e.id] != null) ? S.params.reposFixe[e.id] : null,
     active: e.active !== false,
@@ -1981,6 +1985,7 @@ async function supaReadEmployees() {
       soldeCPManuel: row.solde_cp_manuel,
       soldeCPManuelDate: row.solde_cp_manuel_date,
       heuresSupp: row.heures_supp,
+      excluRemplacement: !!row.exclu_remplacement,
       codeSalarie: row.code_salarie,
       is_manager: !!row.is_manager,
       active: row.active !== false,
@@ -4903,35 +4908,26 @@ function findReplacements(absentId,dateStr,targetSite){
     return {presents,minStaff,marge:presents-minStaff};
   }
 
+  // Uniquement des salariés PRÉSENTS ce jour-là dans un autre magasin et dont ce magasin peut se
+  // passer (Antoine, 2026-10-02) : jamais les personnes en repos, ni celles en congé/maladie/
+  // formation/récup, déjà en renfort ailleurs, déjà présentes sur le site à couvrir, ni les
+  // salariés marqués "ne jamais proposer comme remplaçant" (ex: personnel du Bureau).
   const candidats=activeEmployees().filter(emp=>{
-    if(emp.id===absentId) return false;
+    if(emp.id===absentId || emp.excluRemplacement) return false;
     const sh=S.planning[`${emp.id}_${dateStr}`];
-    // Pas candidat : en congé/maladie/formation/récup ce jour-là (indisponible, pas "en repos"),
-    // déjà affecté en renfort ailleurs, ou déjà présent sur le site à couvrir (Antoine, 2026-10-02).
-    if(sh && (estTypeAbsence(sh.type) || sh.type==='remplacement')) return false;
-    if(sh && sh.type!=='off' && (sh.site||emp.site)===targetSite) return false;
+    if(!sh || sh.type==='off') return false;
+    if(estTypeAbsence(sh.type) || sh.type==='remplacement') return false;
+    if((sh.site||emp.site)===targetSite) return false;
     return true;
   }).map(emp=>{
-    const sh=S.planning[`${emp.id}_${dateStr}`];
-    const enRepos=!sh||sh.type==='off';
-    let canLeave=true, staffOnDay=0, minStaff=0, source='repos';
-    if(!enRepos){
-      // Employé qui travaille ailleurs ce jour : on regarde si son magasin d'origine peut se passer de lui
-      const eff=effectifDuJour(emp.site);
-      staffOnDay=eff.presents; minStaff=eff.minStaff;
-      canLeave=eff.marge>0; // il faut de la marge STRICTE pour ne pas mettre son magasin sous le minimum
-      source='disponible avec marge';
-    }
-    return{emp,dist:estimDist(emp.addr,targetSite),canLeave,staffOnDay,minStaff,enRepos,source};
+    // On regarde si son magasin d'origine peut se passer de lui
+    const eff=effectifDuJour(emp.site);
+    return{emp,dist:estimDist(emp.addr,targetSite),canLeave:eff.marge>0,staffOnDay:eff.presents,minStaff:eff.minStaff};
   })
-  // On exclut les candidats qui travaillent ailleurs SANS marge (impossible de les libérer)
-  .filter(c=>c.enRepos||c.canLeave);
+  // Il faut de la marge STRICTE pour ne pas mettre son magasin sous le minimum
+  .filter(c=>c.canLeave);
 
-  return candidats.sort((a,b)=>{
-    // Priorité : en repos d'abord, puis distance la plus courte
-    if(a.enRepos!==b.enRepos) return a.enRepos?-1:1;
-    return a.dist-b.dist;
-  });
+  return candidats.sort((a,b)=>a.dist-b.dist);
 }
 
 function openRempModal(absId){
@@ -4941,18 +4937,9 @@ function openRempModal(absId){
   document.getElementById('mRempTitle').textContent=`Remplaçant — ${abs.empName} (${dl})`;
   const cands=findReplacements(abs.empId,abs.dateStr,abs.empSite);
   let sh=cands.length?'':'<div style="text-align:center;padding:14px;color:var(--muted);font-size:13px;">Aucun remplaçant trouvé — vérifiez le planning de la journée.</div>';
-  // Tous les candidats, pas seulement les 6 premiers : les personnes en repos passent d'abord et
-  // saturaient la liste, cachant les salariés présents pourtant disponibles (Antoine, 2026-10-02).
-  // Deux groupes titrés, zone défilante (#rempSugge).
-  let groupeAffiche=null;
+  // Tous les candidats (zone défilante #rempSugge), pas seulement les 6 premiers.
   cands.forEach((c,i)=>{
-    if(groupeAffiche!==c.enRepos){
-      groupeAffiche=c.enRepos;
-      sh+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:${i?'10px':'0'} 0 4px;">${c.enRepos?'En repos ce jour-là':'Présents disponibles (leur magasin peut se passer d\'eux)'}</div>`;
-    }
-    const badge=c.enRepos
-      ?'<span style="color:#059669;font-size:11px;font-weight:600;">✓ En repos</span>'
-      :`<span style="color:#2563EB;font-size:11px;font-weight:600;">↔ Dispo (${c.emp.site}, marge ${c.staffOnDay-c.minStaff})</span>`;
+    const badge=`<span style="color:#2563EB;font-size:11px;font-weight:600;">↔ Dispo (${c.emp.site}, marge ${c.staffOnDay-c.minStaff})</span>`;
     sh+=`<div class="sugge-item">
       <div class="sugge-rank${i===0?' top':''}">${i+1}</div>
       <div class="sugge-info">
@@ -4963,7 +4950,7 @@ function openRempModal(absId){
     </div>`;
   });
   document.getElementById('rempSugge').innerHTML=sh;
-  const opts=cands.length?cands:activeEmployees().filter(e=>e.id!==abs.empId).map(e=>({emp:e}));
+  const opts=cands.length?cands:activeEmployees().filter(e=>e.id!==abs.empId && !e.excluRemplacement).map(e=>({emp:e}));
   document.getElementById('rempChoisi').innerHTML=`<option value="">— Sélectionner —</option>`+opts.map(c=>`<option value="${c.emp.id}">${c.emp.name} (${c.emp.site})</option>`).join('');
   openModal('mRemp');
 }
@@ -5181,6 +5168,7 @@ function openFicheEmp(empId){
   document.getElementById('ficheSoldeCPManuelDate').value = emp.soldeCPManuelDate || fmt(addDays(getPeriodeRef().debut,-1));
   document.getElementById('ficheCpResume').innerHTML = calcCpResumeHTML(emp);
   document.getElementById('ficheHeuresSupp').value = emp.heuresSupp!=null ? emp.heuresSupp : '';
+  document.getElementById('ficheExcluRemp').checked = !!emp.excluRemplacement;
   // Historique du compteur de récupération : donné (ajustement manuel) + pris (demande validée).
   const histoRecup = getHistoriqueRecup(empId);
   document.getElementById('ficheHistoriqueRecup').innerHTML = histoRecup.length ? `
@@ -5431,6 +5419,7 @@ async function saveFicheEmp(){
     });
   }
   emp.heuresSupp = nouveauHeuresSupp;
+  emp.excluRemplacement = document.getElementById('ficheExcluRemp').checked;
   marquerEmployesModifies(empId);
   persist();
   // Écriture immédiate plutôt que d'attendre le debounce — même raison que enregistrerMesInfos()
