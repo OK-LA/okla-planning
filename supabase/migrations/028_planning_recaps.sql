@@ -16,6 +16,10 @@ create table if not exists planning_recaps (
 create index if not exists planning_recaps_emp_vu on planning_recaps (emp_id, vu);
 
 alter table planning_recaps disable row level security;
+-- Filet de sécurité : si Supabase réactive RLS sur les nouvelles tables (réglage du projet), la
+-- politique ci-dessous garde l'accès ouvert comme sur les autres tables (cf. plan sécurité, phase 4).
+drop policy if exists "acces_total" on planning_recaps;
+create policy "acces_total" on planning_recaps for all to anon, authenticated using (true) with check (true);
 grant all on planning_recaps to anon, authenticated;
 
 NOTIFY pgrst, 'reload schema';
