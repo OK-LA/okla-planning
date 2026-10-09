@@ -607,7 +607,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="stat" onclick="showStatDetail('demandes')" style="cursor:pointer;" title="Voir les demandes"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
       <div class="stat" onclick="showStatDetail('absences')" style="cursor:pointer;" title="Voir les absences"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
       <div class="stat" onclick="showStatDetail('profils')" style="cursor:pointer;" title="Voir les modifications de profil"><div class="stat-val" id="sP">0</div><div class="stat-lbl">Profils</div></div>
-      <div class="stat" onclick="showStatDetail('repos')" style="cursor:pointer;" title="Salariés sans jour de repos cette semaine (lundi-samedi)"><div class="stat-val" id="sR">0</div><div class="stat-lbl">Sans repos</div></div>
+      <div class="stat" onclick="showStatDetail('repos')" style="cursor:pointer;" title="Salariés sans jour de repos sur la semaine en cours et les 8 suivantes (lundi-samedi)"><div class="stat-val" id="sR">0</div><div class="stat-lbl">Sans repos</div></div>
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('planning')">Planning</button>
@@ -1175,7 +1175,8 @@ tbody tr:hover td{background:#FAFAF8;}
 <div class="modal-overlay" id="mAbsEmp">
   <div class="modal">
     <div class="modal-title">🚩 Signaler une absence</div>
-    <div class="fg"><label>Date concernée</label><input type="date" id="absEmpDate"></div>
+    <div class="fg"><label>Du</label><input type="date" id="absEmpDate"></div>
+    <div class="fg"><label>Au (laissez vide pour un seul jour)</label><input type="date" id="absEmpDateFin"></div>
     <div class="fg"><label>Motif</label>
       <select id="absEmpMotif" onchange="toggleAbsMotifLibre()">
         <option value="maladie">Maladie</option>
@@ -1283,7 +1284,8 @@ tbody tr:hover td{background:#FAFAF8;}
   <div class="modal">
     <div class="modal-title">Signaler une absence</div>
     <div class="fg"><label>Employé absent</label><select id="absEmpSel"></select></div>
-    <div class="fg"><label>Date</label><input type="date" id="absDate"></div>
+    <div class="fg"><label>Du</label><input type="date" id="absDate"></div>
+    <div class="fg"><label>Au (laissez vide pour un seul jour)</label><input type="date" id="absDateFin"></div>
     <div class="fg"><label>Motif</label>
       <select id="absMot"></select>
     </div>
@@ -1306,6 +1308,19 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="btn btn-ghost" onclick="closeModal('mRemp')">Fermer</button>
       <button class="btn btn-ghost" onclick="validerSansRemp()">Sans remplaçant</button>
       <button class="btn btn-save" onclick="validerRemp()">✓ Valider</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL JOKER : décision du gestionnaire à la validation d'un CP hors délai -->
+<div class="modal-overlay" id="mJoker">
+  <div class="modal">
+    <div class="modal-title">🃏 Demande hors délai</div>
+    <div id="mJokerTxt" style="font-size:13px;line-height:1.5;margin-bottom:14px;"></div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
+      <button class="btn btn-ghost" onclick="_congeEnAttenteJoker=null;closeModal('mJoker')">Annuler</button>
+      <button class="btn btn-ghost" onclick="validerCongeChoixJoker(false)">Valider sans joker</button>
+      <button class="btn btn-save" onclick="validerCongeChoixJoker(true)">Valider avec un joker</button>
     </div>
   </div>
 </div>
@@ -3058,10 +3073,7 @@ function updStats(){
   document.getElementById('sA').textContent=S.absences.filter(a=>!a.resolved).length;
   const sP=document.getElementById('sP'); if(sP) sP.textContent=(S.profilNotifs||[]).filter(n=>!n.seen).length;
   const sR=document.getElementById('sR');
-  if(sR){
-    const today=new Date();today.setHours(0,0,0,0);
-    sR.textContent=employesSansReposSemaine(getMon(today)).length;
-  }
+  if(sR) sR.textContent=alertesSansRepos().reduce((n,a)=>n+a.emps.length,0);
 }
 
 // Supprime un avertissement d'absence de la liste des notifications (résolu ou non) — un retrait
@@ -3415,12 +3427,10 @@ async function sendReq(){
     // Vérifications règles
     const check=verifierRegleConges(emp.id,dateDebut,dateFin);
     if(check.errors.length){toast(check.errors[0].replace(/❌ /,''));return;}
-    // Consommer un joker si warning
-    if(check.warnings.length){
-      if(!S.params.jokers) S.params.jokers={};
-      incrementJoker(emp.id);
-      persist();
-    }
+    // Le joker n'est plus consommé ici : c'est le gestionnaire qui décide à la validation (voir
+    // validerConge), en jugeant le délai à la date de CETTE demande (req.id = Date.now()). Avant,
+    // il était consommé dès l'envoi, puis une seconde fois à la validation, et perdu même si la
+    // demande était refusée (Antoine, 2026-10-09).
     const nb=countJoursOuvres(dateDebut,dateFin);
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'conge',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
@@ -3890,6 +3900,29 @@ function employesSansReposSemaine(mon){
     }
     return travaille && !repos;
   });
+}
+// Semaines à surveiller pour l'alerte "sans repos" du tableau de bord : la semaine en cours + les
+// 8 suivantes (≈ l'horizon du planning déjà généré), pas seulement la semaine en cours — le
+// gestionnaire prépare le planning à l'avance, c'est là qu'un oubli de repos se produit
+// (Antoine, 2026-10-09). Une semaine sans aucune case de planning n'est jamais signalée (aucun
+// jour travaillé).
+function nbSemainesSansRepos(){ return 9; }
+function alertesSansRepos(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const mon0=getMon(today);
+  const res=[];
+  for(let w=0;w<nbSemainesSansRepos();w++){
+    const mon=addDays(mon0,w*7);
+    const emps=employesSansReposSemaine(mon);
+    if(emps.length) res.push({offset:w,mon,emps});
+  }
+  return res;
+}
+function voirSemainePlanning(offset){
+  closeModal('mStatDetail');
+  switchTab('planning');
+  S.mWO=offset;
+  setView('sem');
 }
 function checkReposAlerts(mon){
   const alertes = employesSansReposSemaine(mon).map(emp=>`${emp.name} (${emp.site})`);
@@ -4480,6 +4513,7 @@ async function saveShiftPeriode(){
 function openAbsModal(){
   document.getElementById('absEmpSel').innerHTML=activeEmployees().map(e=>`<option value="${e.id}">${e.name} (${e.site})</option>`).join('');
   document.getElementById('absDate').value=fmt(new Date());
+  document.getElementById('absDateFin').value='';
   document.getElementById('absNote').value='';
   populerSelectMotifs('absMot');
   openModal('mAbs');
@@ -4496,7 +4530,7 @@ function appliquerMotifAbsence(motifId, empId, dateStr){
   if(classification==='cp'){
     const emp=S.employees.find(e=>e.id===empId);
     S.requests.push({
-      id:Date.now(), type:'conge', status:'approved', empId,
+      id:idUnique(), type:'conge', status:'approved', empId,
       empName:emp?.name||'', empEmail:emp?.email||'',
       dateDebut:dateStr, dateFin:dateStr, date:dateStr,
       note:'Absence déclarée — décompte CP automatique',
@@ -4510,31 +4544,87 @@ function appliquerMotifAbsence(motifId, empId, dateStr){
   }
   return 'off';
 }
+// ── Absence sur une période (Antoine, 2026-10-09) ──
+// Une absence reste UN enregistrement PAR JOUR (S.absences, un jour par entrée) : c'est ce qui permet
+// de trouver un remplaçant différent chaque jour, de compter les jours "enfant malade", etc. Pour une
+// période on crée donc une entrée par jour travaillé ; les dimanches, jours de repos et jours déjà en
+// absence sont ignorés. Un jour unique est créé tel quel, comme avant.
+let _dernierIdUnique=0;
+// Date.now() seul se répète dans une boucle rapide (même milliseconde) → identifiants dupliqués.
+function idUnique(){ _dernierIdUnique=Math.max(Date.now(), _dernierIdUnique+1); return _dernierIdUnique; }
+function joursAbsencePeriode(emp, debut, fin){
+  if(debut===fin) return [debut];
+  const jours=[];
+  let cur=new Date(debut+'T12:00'); const last=new Date(fin+'T12:00');
+  while(cur<=last){
+    const dStr=fmt(cur);
+    const sh=S.planning[`${emp.id}_${dStr}`];
+    const nonTravaille = isJourRepos(emp,cur) || (sh && (sh.type==='off' || estTypeAbsence(sh.type)));
+    if(!nonTravaille) jours.push(dStr);
+    cur=addDays(cur,1);
+  }
+  return jours;
+}
+function verifierPeriodeAbsence(debut, fin){
+  if(!debut){toast('Sélectionnez une date');return false;}
+  if(fin<debut){toast('La date de fin doit être après le début');return false;}
+  if((new Date(fin)-new Date(debut))/86400000>60){toast('Période trop longue (60 jours maximum)');return false;}
+  return true;
+}
+function creerAbsences(emp, jours, motifPlanning, motifStocke, note, source){
+  return jours.map(dStr=>{
+    const type=appliquerMotifAbsence(motifPlanning,emp.id,dStr);
+    S.planning[`${emp.id}_${dStr}`]={type,site:emp.site,note:`Absent: ${note||motifStocke}`};
+    const abs={id:idUnique(),empId:emp.id,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr:dStr,motif:motifStocke,note,resolved:false,rempId:null,source};
+    S.absences.push(abs);
+    return abs;
+  });
+}
+function periodeSms(debut,fin){
+  const f=d=>fmtFR(new Date(d+'T12:00'),{day:'numeric',month:'long'});
+  return debut===fin ? `le ${f(debut)}` : `du ${f(debut)} au ${f(fin)}`;
+}
+// Collègues effectivement planifiés sur le même site au moins un des jours de l'absence (même logique
+// que pour un retard signalé), un seul SMS par personne pour toute la période.
+function smsCollegues(emp, jours, texte){
+  const tels=new Set();
+  jours.forEach(d=>telephonesCollegues(emp.site,d,emp.id).forEach(t=>tels.add(t)));
+  if(tels.size) envoyerNotifSms([...tels], texte);
+}
+// Après avoir traité un jour d'une absence sur plusieurs jours, enchaîne sur le jour suivant encore
+// sans remplaçant du même salarié (dans les 60 jours) — pour choisir un remplaçant par jour sans
+// retourner chercher chaque absence dans la liste.
+function ouvrirJourSuivantAbsence(abs){
+  const limite=fmt(addDays(new Date(abs.dateStr+'T12:00'),60));
+  const suivant=S.absences
+    .filter(a=>a.empId===abs.empId && !a.resolved && a.id!==abs.id && a.dateStr>abs.dateStr && a.dateStr<=limite && a.motif!=='retard')
+    .sort((a,b)=>a.dateStr.localeCompare(b.dateStr))[0];
+  if(suivant) setTimeout(()=>openRempModal(suivant.id),200);
+}
 async function saveAbsence(){
   const empId=document.getElementById('absEmpSel').value;
-  const dateStr=document.getElementById('absDate').value;
+  const debut=document.getElementById('absDate').value;
+  const fin=document.getElementById('absDateFin').value||debut;
   const motif=document.getElementById('absMot').value;
   const note=document.getElementById('absNote').value;
-  if(!dateStr){toast('Sélectionnez une date');return;}
+  if(!verifierPeriodeAbsence(debut,fin)) return;
   const emp=S.employees.find(e=>e.id===empId);
-  const type=appliquerMotifAbsence(motif,empId,dateStr);
-  S.planning[`${empId}_${dateStr}`]={type,site:emp.site,note:`Absent: ${note||motif}`};
-  const dlAbs=fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'});
+  const jours=joursAbsencePeriode(emp,debut,fin);
+  if(!jours.length){toast('Aucun jour travaillé sur cette période');return;}
+  const crees=creerAbsences(emp,jours,motif,motif,note,'gestionnaire');
+  const dlAbs=formaterPeriode(debut,fin);
   S.mods.push({empId,dl:dlAbs,det:'Absence',seen:false});
   notifierModifPlanning(empId,dlAbs,'Absence enregistrée');
-  const absId=Date.now();
-  const abs={id:absId,empId,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',dateStr,motif,note,resolved:false,rempId:null,source:'gestionnaire'};
-  S.absences.push(abs);persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
-  // Prévenir les collègues effectivement planifiés ce jour-là sur le même site — même logique que
-  // pour un retard signalé (Antoine, 2026-09-28).
-  const phonesCollegues=telephonesCollegues(abs.empSite,abs.dateStr,abs.empId);
-  if(phonesCollegues.length) envoyerNotifSms(phonesCollegues, `OK-LA Planning: ${emp.name} absent(e) le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
-  openRempModal(absId);
+  persist();updStats();closeModal('mAbs');renderWeek();renderAbsList();
+  smsCollegues(emp,jours,`OK-LA Planning: ${emp.name} absent(e) ${periodeSms(debut,fin)}`);
+  if(crees.length>1) toast(`${crees.length} jours d'absence — choisissez un remplaçant pour chaque jour`,4500);
+  openRempModal(crees[0].id);
 }
 
 // ── Signalement absence par le salarié ──
 function openAbsEmpModal(){
   document.getElementById('absEmpDate').value=fmt(new Date());
+  document.getElementById('absEmpDateFin').value='';
   document.getElementById('absEmpNote').value='';
   const motifLibreEl=document.getElementById('absMotifLibre');
   if(motifLibreEl) motifLibreEl.value='';
@@ -4695,38 +4785,35 @@ function toggleAbsMotifLibre(){
 
 async function saveAbsenceEmp(){
   const emp=S.user;
-  const dateStr=document.getElementById('absEmpDate').value;
+  const debut=document.getElementById('absEmpDate').value;
+  const fin=document.getElementById('absEmpDateFin').value||debut;
   const motif=document.getElementById('absEmpMotif').value;
   const motifLibre=document.getElementById('absMotifLibre')?.value?.trim()||'';
   const note=document.getElementById('absEmpNote').value;
-  if(!dateStr){toast('Sélectionnez une date');return;}
+  if(!verifierPeriodeAbsence(debut,fin)) return;
   if(motif==='autre'&&!motifLibre){toast('Précisez le motif');return;}
   const motifFinal = motif==='autre' ? motifLibre : motif;
-  // Mettre à jour le planning du salarié pour ce jour
-  const typePlanning=appliquerMotifAbsence(motif,emp.id,dateStr);
-  S.planning[`${emp.id}_${dateStr}`]={type:typePlanning,site:emp.site,note:`Absent: ${note||motifFinal}`};
-  const absId=Date.now();
-  const motifLabels={maladie:'Maladie',enfant_malade:'Enfant malade',absent:'Absence imprévue',autre:'Autre'};
-  const abs={id:absId,empId:emp.id,empName:emp.name,empSite:emp.site,empTel:emp.tel||'',
-    dateStr,motif:motifFinal,note,resolved:false,rempId:null,source:'salarie'};
-  S.absences.push(abs);persist();updStats();
+  const jours=joursAbsencePeriode(emp,debut,fin);
+  if(!jours.length){toast('Aucun jour travaillé sur cette période');return;}
+  // Une entrée d'absence par jour travaillé (le gestionnaire trouve un remplaçant jour par jour).
+  creerAbsences(emp,jours,motif,motifFinal,note,'salarie');
+  persist();updStats();
   closeModal('mAbsEmp');
   renderEmpWeek();renderEmpAbsList();
+  const periode=formaterPeriode(debut,fin);
   const emails=emailsGestionnaire();
   if(emails.length){
     envoyerNotifEmail(emails, `Absence signalée — ${emp.name}`,
       `<p><strong>${emp.name}</strong> (${emp.site}) a signalé une absence :</p>
-      <p><strong>${motifFinal}</strong> — ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long',year:'numeric'})}</p>
+      <p><strong>${motifFinal}</strong> — ${periode}${jours.length>1?` (${jours.length} jours travaillés)`:''}</p>
       ${note?`<p>Note : ${note}</p>`:''}
-      <p>À traiter depuis l'application OK-LA Planning.</p>`);
+      <p>À traiter depuis l'application OK-LA Planning${jours.length>1?' (un remplaçant à choisir pour chaque jour)':''}.</p>`);
   }
   const phones=telephonesGestionnaire();
-  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: absence signalee - ${emp.name} - ${motifFinal} - ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
-  // Prévenir les collègues effectivement planifiés ce jour-là sur le même site — même logique que
-  // pour un retard signalé (Antoine, 2026-09-28).
-  const phonesCollegues=telephonesCollegues(abs.empSite,abs.dateStr,abs.empId);
-  if(phonesCollegues.length) envoyerNotifSms(phonesCollegues, `OK-LA Planning: ${emp.name} absent(e) le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
-  toast(`✓ Absence signalée — ${motifFinal} le ${fmtFR(new Date(dateStr+'T12:00'),{day:'numeric',month:'long'})}`);
+  if(phones.length) envoyerNotifSms(phones, `OK-LA Planning: absence signalee - ${emp.name} - ${motifFinal} - ${periodeSms(debut,fin)}`);
+  // Prévenir les collègues effectivement planifiés sur le même site (un seul SMS par personne).
+  smsCollegues(emp,jours,`OK-LA Planning: ${emp.name} absent(e) ${periodeSms(debut,fin)}`);
+  toast(`✓ Absence signalée — ${motifFinal}, ${periode}`);
 }
 function renderEmpAbsList(){
   const emp=S.user;if(!emp)return;
@@ -4972,6 +5059,7 @@ async function validerRemp(){
   notifierModifPlanning(rempId,dlRemp,detRemp);
   persist();updStats();closeModal('mRemp');renderWeek();if(S.view==='mois')renderMonth();renderAbsList();
   toast(`✓ ${remp.name} affecté(e)`);
+  ouvrirJourSuivantAbsence(abs);
 }
 // Marque l'absence comme traitée sans affecter personne — aucune case de planning créée, aucune
 // notification envoyée (contrairement à validerRemp), à la différence de "Fermer" qui laisse
@@ -4981,6 +5069,7 @@ function validerSansRemp(){
   abs.resolved=true;abs.rempId=null;abs.rempName=null;
   persist();updStats();closeModal('mRemp');renderAbsList();
   toast('✓ Absence marquée sans remplaçant');
+  ouvrirJourSuivantAbsence(abs);
 }
 
 function renderAbsList(){
@@ -6906,12 +6995,25 @@ function countJoursOuvresReels(debut, fin) {
 }
 
 // ── DÉLAI DE PRÉVENANCE selon les règles OK-LA ──
-function getDelaiRequis(dateDebut, dateFin) {
+// dateRef = date de la DEMANDE du salarié (et non du jour où le gestionnaire la valide) — le délai
+// de prévenance se juge au moment où le salarié a déposé sa demande (Antoine, 2026-10-09). Par
+// défaut (nouvelle demande en cours de saisie) : aujourd'hui.
+function dateReferenceDemande(dateRef) {
+  const d = dateRef ? new Date(dateRef) : new Date();
+  d.setHours(0,0,0,0);
+  return d;
+}
+// Date de dépôt d'une demande de congé : req.id est Date.now() au moment de la soumission.
+function dateDemandeConge(req) {
+  const t = Number(req && req.id);
+  return t > 1e12 ? new Date(t) : null;
+}
+function getDelaiRequis(dateDebut, dateFin, dateRef) {
   const debut = new Date(dateDebut);
   const fin = new Date(dateFin);
   const moisDebut = debut.getMonth() + 1; // 1-12
   const nbJours = countJoursOuvresReels(dateDebut, dateFin);
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = dateReferenceDemande(dateRef);
 
   // Une demande d'UN SEUL jour reste soumise au préavis court normal (14j), même si elle tombe
   // dans une période à dépôt limité (juin-sept / décembre) — la règle de dépôt avant le 30/03 ou
@@ -6985,7 +7087,7 @@ function updSimuDelai() {
 
   if (depasse) {
     html += `<div style="margin-top:6px;font-size:12px;color:#92400E;">
-      Une demande hors délai consommera un joker (${jokers}/2 utilisés${jokers>=2?' — jokers épuisés, demande impossible':''}).
+      Une demande hors délai peut consommer un joker, sur décision du gestionnaire (${jokers}/2 utilisés${jokers>=2?' — jokers épuisés, demande impossible':''}).
     </div>`;
   }
   html += `</div>`;
@@ -7001,30 +7103,30 @@ function isVacancesScolaires(dateDebut, dateFin) {
   );
 }
 
-function verifierRegleConges(empId, dateDebut, dateFin) {
+function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
   const emp = S.employees.find(e => e.id === empId);
   const errors = [];
   const warnings = [];
   const infos = [];
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = dateReferenceDemande(dateRef);
   const debut = new Date(dateDebut);
   const diffJours = Math.floor((debut - today) / 86400000);
   const jouresDemandes = countJoursOuvresReels(dateDebut, dateFin);
   const jokersUtilises = getJokersUtilises(empId);
 
   // 1. Vérif délai de prévenance selon règles OK-LA
-  const delaiInfo = getDelaiRequis(dateDebut, dateFin);
+  const delaiInfo = getDelaiRequis(dateDebut, dateFin, dateRef);
   if (delaiInfo.depasseLimite) {
     if (jokersUtilises >= 2) {
       errors.push(`❌ ${delaiInfo.regle}. Vos 2 jokers sont épuisés — demande impossible.`);
     } else {
-      warnings.push(`⚠️ ${delaiInfo.regle}. Un joker sera utilisé (${jokersUtilises}/2).`);
+      warnings.push(`⚠️ ${delaiInfo.regle}. Un joker pourra être utilisé si le gestionnaire valide (${jokersUtilises}/2).`);
     }
   } else if (delaiInfo.jours > 0 && diffJours < delaiInfo.jours) {
     if (jokersUtilises >= 2) {
       errors.push(`❌ ${delaiInfo.regle} (il reste ${diffJours}j). Vos 2 jokers sont épuisés.`);
     } else {
-      warnings.push(`⚠️ ${delaiInfo.regle} (il reste ${diffJours}j). Un joker sera utilisé (${jokersUtilises}/2).`);
+      warnings.push(`⚠️ ${delaiInfo.regle} (il reste ${diffJours}j). Un joker pourra être utilisé si le gestionnaire valide (${jokersUtilises}/2).`);
     }
   }
 
@@ -7348,12 +7450,14 @@ function renderCongesMgr() {
       <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
         ${[0,1].map(i=>`<div class="joker-dot ${i<jokers?'joker-used':'joker-avail'}"></div>`).join('')}
         <span style="font-size:11px;color:var(--muted)">${jokers}/2 jokers</span>
+        <button class="btn btn-sm" title="Retirer un joker utilisé" onclick="ajusterJokers('${emp.id}',-1)" style="padding:0 7px;font-size:12px;${jokers<=0?'opacity:.35;pointer-events:none;':''}">−</button>
+        <button class="btn btn-sm" title="Compter un joker de plus" onclick="ajusterJokers('${emp.id}',1)" style="padding:0 7px;font-size:12px;${jokers>=2?'opacity:.35;pointer-events:none;':''}">+</button>
         ${attente>0?`<span style="margin-left:auto;font-size:11px;background:#FFF7ED;color:#C2410C;padding:2px 8px;border-radius:10px;font-weight:600;">${attente}j en attente</span>`:''}
       </div>
       ${demandes.length ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
         ${demandes.map(r=>{
           const nb=countJoursOuvresReels(r.dateDebut,r.dateFin);
-          const check=verifierRegleConges(r.empId,r.dateDebut,r.dateFin);
+          const check=verifierRegleConges(r.empId,r.dateDebut,r.dateFin,dateDemandeConge(r));
           return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
             <div style="flex:1;font-size:12px;">
               📅 ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}j
@@ -7464,7 +7568,10 @@ function enregistrerModifConge(){
   // c'était une nouvelle demande — sinon modifier un CP validé contournerait silencieusement ces
   // règles là où une vraie nouvelle demande les aurait respectées.
   const check = verifierRegleConges(req.empId, nouveauDebut, nouveauFin);
-  if(check.warnings.length && !check.errors.length) incrementJoker(req.empId);
+  if(check.warnings.length && !check.errors.length){
+    // Le gestionnaire a la main : plus de joker consommé automatiquement, il confirme ou non.
+    if(confirm(`${check.warnings[0].replace(/^⚠️ /,'')}\n\nUtiliser un joker pour cette modification ?`)) incrementJoker(req.empId);
+  }
   // Libère l'ancienne période (restaure son état d'origine), puis capture un nouvel instantané
   // pour la nouvelle période — après la restauration, pour que les jours communs aux deux
   // périodes (période juste raccourcie/allongée) capturent bien leur vrai état d'origine et non
@@ -7494,15 +7601,47 @@ function enregistrerModifConge(){
   toast('✓ CP modifié');
 }
 
+// Validation d'un CP : si la demande était hors délai À LA DATE OÙ LE SALARIÉ L'A DÉPOSÉE (pas à la
+// date de validation), le gestionnaire choisit explicitement d'utiliser un joker ou non — il a la
+// main sur les jokers (Antoine, 2026-10-09).
+let _congeEnAttenteJoker = null;
 async function validerConge(id) {
   const req = S.requests.find(r => r.id == id);
   if (!req) return;
-  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin);
-  // Appliquer joker si warning
+  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin, dateDemandeConge(req));
   if (check.warnings.length && !check.errors.length) {
-    if (!S.params.jokers) S.params.jokers = {};
-    incrementJoker(req.empId);
+    const emp = S.employees.find(e => e.id === req.empId);
+    const dd = dateDemandeConge(req);
+    _congeEnAttenteJoker = id;
+    document.getElementById('mJokerTxt').innerHTML =
+      `<strong>${emp ? emp.name : ''}</strong> a déposé cette demande${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}, hors délai :<br>
+       <span style="color:#92400E;">${check.warnings[0].replace(/^⚠️ /,'')}</span><br><br>
+       Utiliser un joker pour cette demande ? (${getJokersUtilises(req.empId)}/2 utilisés)`;
+    openModal('mJoker');
+    return;
   }
+  appliquerValidationConge(req);
+}
+function validerCongeChoixJoker(utiliserJoker) {
+  const id = _congeEnAttenteJoker;
+  _congeEnAttenteJoker = null;
+  closeModal('mJoker');
+  const req = S.requests.find(r => r.id == id);
+  if (!req) return;
+  if (utiliserJoker) incrementJoker(req.empId);
+  appliquerValidationConge(req);
+}
+// Ajustement manuel du compteur de jokers d'un salarié par le gestionnaire (correction, geste
+// commercial...) — borné à 0..2 comme les règles.
+function ajusterJokers(empId, delta) {
+  const nouveau = Math.max(0, Math.min(2, getJokersUtilises(empId) + delta));
+  const periodeKey = `${getPeriodeRef().debut.getFullYear()}`;
+  if (!S.params.jokers) S.params.jokers = {};
+  S.params.jokers[empId] = {annee: periodeKey, count: nouveau};
+  persist();
+  renderCongesMgr();
+}
+function appliquerValidationConge(req) {
   req.status = 'approved';
   req.planningSnapshot = snapshotPlanningAvant(req.empId, req.dateDebut, req.dateFin);
   // Marquer dans le planning
@@ -8432,21 +8571,22 @@ function showStatDetail(type){
     html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('remplace');">Gérer les remplacements →</button></div>`;
 
   } else if(type==='repos'){
-    title = `📅 Salariés sans repos cette semaine`;
-    const today=new Date();today.setHours(0,0,0,0);
-    const sansRepos = employesSansReposSemaine(getMon(today));
-    if(!sansRepos.length){
-      html = '<div style="text-align:center;color:var(--muted);padding:20px;">✅ Tout le monde a un jour de repos cette semaine</div>';
+    title = `📅 Salariés sans repos (lundi–samedi)`;
+    const alertes = alertesSansRepos();
+    if(!alertes.length){
+      html = `<div style="text-align:center;color:var(--muted);padding:20px;">✅ Tout le monde a un jour de repos sur les ${nbSemainesSansRepos()} prochaines semaines</div>`;
     } else {
-      html = sansRepos.map(emp=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
-        <div class="avatar" style="background:${avc(emp.id)};flex-shrink:0;font-size:10px;">${ini(emp.name)}</div>
-        <div style="flex:1;">
-          <div style="font-weight:600;font-size:13px;">${emp.name}</div>
-          <div style="font-size:11px;color:var(--muted);">${sPill(emp.site)}</div>
+      html = alertes.map(a=>`<div style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">${a.offset===0?'Cette semaine':'Semaine du '+fmtFR(a.mon,{day:'numeric',month:'long'})}</div>
+          <button class="btn btn-sm" onclick="voirSemainePlanning(${a.offset})" style="font-size:11px;">Voir →</button>
         </div>
+        ${a.emps.map(emp=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <div class="avatar" style="background:${avc(emp.id)};flex-shrink:0;font-size:10px;">${ini(emp.name)}</div>
+          <div style="flex:1;font-weight:600;font-size:13px;">${emp.name} <span style="font-weight:400;">${sPill(emp.site)}</span></div>
+        </div>`).join('')}
       </div>`).join('');
     }
-    html += `<div style="margin-top:12px;"><button class="btn btn-primary btn-sm" onclick="closeModal('mStatDetail');switchTab('planning');">Voir le planning →</button></div>`;
 
   } else if(type==='recapConges'){
     title = `📋 Congés posés — période en cours`;
