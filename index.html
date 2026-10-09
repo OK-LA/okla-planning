@@ -624,8 +624,8 @@ tbody tr:hover td{background:#FAFAF8;}
       <button class="btn btn-sm" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;margin-bottom:12px;" onclick="openEventModal()">
         🎨 Colorer une période (vacances, soldes, férié...)
       </button>
-      <button id="btnEnvoyerSms" onclick="ouvrirRevueSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés concernés ne sont prévenus par SMS qu'à ce moment-là, pas à chaque modification">
-        📤 Envoyer les SMS en attente (0)
+      <button id="btnEnvoyerSms" onclick="ouvrirRevueSmsEnAttente()" style="display:none;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Les salariés ne sont prévenus (SMS + récapitulatif dans leur compte) qu'à ce moment-là, pas à chaque modification">
+        📤 Envoyer les modifications (0)
       </button>
       <button id="btnAnnulerModif" onclick="annulerDerniereModifPlanning()" style="display:none;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;margin-bottom:12px;margin-left:8px;" class="btn btn-sm" title="Restaure la case (ou la période) de planning telle qu'elle était avant la dernière modification">
         ↩ Annuler la dernière modification
@@ -1150,12 +1150,27 @@ tbody tr:hover td{background:#FAFAF8;}
 <!-- MODAL REVUE AVANT ENVOI DES SMS EN ATTENTE -->
 <div class="modal-overlay" id="mRevueSms">
   <div class="modal">
-    <div class="modal-title">📤 Envoyer les SMS en attente</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Cochez les salariés à prévenir maintenant — les autres resteront en attente pour un prochain envoi.</div>
-    <div id="revueSmsListe" style="max-height:50vh;overflow-y:auto;"></div>
-    <div class="modal-actions">
+    <div class="modal-title">📤 Envoyer les modifications de planning</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Tant que vous n'envoyez pas, les modifications restent en attente : <strong>rien n'est envoyé ni visible</strong> par le salarié. Cochez celles (ou ceux) à communiquer maintenant — les autres restent en attente.</div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;">
+      <div style="font-weight:600;margin-bottom:5px;">Message SMS envoyé</div>
+      <label style="display:flex;gap:7px;align-items:flex-start;margin-bottom:4px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;">
+        <input type="radio" name="revueModeSms" value="generique" checked style="width:auto;margin-top:2px;"> <span><strong>Générique</strong> — « des modifications ont été faites sur votre planning » ; le salarié voit le détail en ouvrant son compte.</span>
+      </label>
+      <label style="display:flex;gap:7px;align-items:flex-start;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;">
+        <input type="radio" name="revueModeSms" value="dates" style="width:auto;margin-top:2px;"> <span>Avec la liste des dates modifiées</span>
+      </label>
+      <div style="color:var(--muted);margin-top:6px;">Dans tous les cas, le récapitulatif complet est visible dans le compte du salarié (même sans téléphone).</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:6px;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="revueToutCocher(true)">Tout cocher</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="revueToutCocher(false)">Tout décocher</button>
+    </div>
+    <div id="revueSmsListe" style="max-height:42vh;overflow-y:auto;"></div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
       <button class="btn btn-ghost" onclick="closeModal('mRevueSms')">Annuler</button>
-      <button class="btn btn-save" onclick="confirmerEnvoiSmsSelection()">→ Envoyer aux sélectionnés</button>
+      <button class="btn btn-ghost" onclick="retirerSelectionSmsEnAttente()" title="Supprime les modifications cochées de la file, sans prévenir le salarié">Retirer sans prévenir</button>
+      <button class="btn btn-save" onclick="confirmerEnvoiSmsSelection()">→ Envoyer</button>
     </div>
   </div>
 </div>
@@ -1664,19 +1679,23 @@ function emailsGestionnaire(){
 // Même principe que l'email ci-dessus : best-effort, jamais bloquant, pas de `await` aux points
 // d'appel. Les deux canaux (email/SMS) sont indépendants — chacun s'active seulement si au
 // moins une adresse/numéro est configuré en Paramètres.
+// Renvoie true si l'API a accepté l'envoi (la plupart des appelants ne l'attendent pas, seul l'envoi
+// des modifications de planning s'en sert pour signaler un échec).
 async function envoyerNotifSms(to, text){
-  if(!_supaUrl || !_supaKey) return;
+  if(!_supaUrl || !_supaKey) return false;
   // Numéros libres saisis un peu partout (fiche employé, Paramètres...) avec espaces/points/tirets
   // ("06 12 34 56 78") — l'API Capitole attend une suite de chiffres (garde le "+" éventuel pour
   // un format international), donc on normalise ici plutôt que de risquer un échec d'envoi silencieux.
   const recipients = (Array.isArray(to)?to:[to]).filter(Boolean).map(n=>n.replace(/[^\d+]/g,'')).filter(Boolean);
-  if(!recipients.length) return;
+  if(!recipients.length) return false;
   try {
-    await fetch(`${supaBase()}/functions/v1/send-sms`, {
+    const r = await fetch(`${supaBase()}/functions/v1/send-sms`, {
       method:'POST', headers: supaHeaders(),
       body: JSON.stringify({to:recipients, text})
     });
-  } catch(e){ console.warn('envoyerNotifSms error', e); }
+    if(!r.ok) console.warn('envoyerNotifSms refusé', r.status);
+    return r.ok;
+  } catch(e){ console.warn('envoyerNotifSms error', e); return false; }
 }
 function telephonesGestionnaire(){
   return (S.params?.notifPhones||[]).filter(Boolean);
@@ -1700,9 +1719,10 @@ function telephonesCollegues(site, dateStr, excludeEmpId){
 // — donc on accumule dans une file d'attente synchronisée (S.params.pendingSms, partagée entre
 // Antoine/Gwen quel que soit l'appareil) et un bouton dédié (envoyerNotifsSmsEnAttente) envoie
 // tout d'un coup, groupé par salarié, quand le gestionnaire juge que c'est prêt.
+// La file contient désormais aussi les salariés SANS téléphone : ils n'auront pas de SMS mais le
+// récapitulatif de leurs modifications reste visible dans leur compte (Antoine, 2026-10-09).
 function notifierModifPlanning(empId, dl, det){
-  const emp=S.employees.find(e=>e.id===empId);
-  if(!emp?.tel) return;
+  if(!S.employees.some(e=>e.id===empId)) return;
   if(!Array.isArray(S.params.pendingSms)) S.params.pendingSms=[];
   S.params.pendingSms.push({empId, dl, det, ts:Date.now()});
   renderPendingSmsBtn();
@@ -1712,11 +1732,14 @@ function renderPendingSmsBtn(){
   if(!btn) return;
   const n=(S.params.pendingSms||[]).length;
   btn.style.display = n>0 ? 'inline-block' : 'none';
-  btn.textContent = `📤 Envoyer les SMS en attente (${n})`;
+  btn.textContent = `📤 Envoyer les modifications (${n})`;
 }
+// Identifiant d'une entrée de la file (elles n'ont pas d'id propre) — sert à cocher modification
+// par modification dans la revue avant envoi.
+function cleEntreeSms(p){ return `${p.empId}|${p.ts}|${p.dl}|${p.det}`; }
 // Construit le texte du SMS "planning modifié" pour un salarié à partir de ses entrées en
 // attente (une ou plusieurs) — factorisé pour être utilisé à l'envoi réel, cf. confirmerEnvoiSmsSelection.
-function texteSmsModifPlanning(emp, entries){
+function texteSmsModifPlanning(emp, entries, mode){
   // Les noms sont stockés en majuscules (ex: "EMILIE PATRIS") — capitalisation correcte pour
   // un SMS qui se veut dans un français soigné.
   const prenomBrut=emp.name.split(' ')[0];
@@ -1724,6 +1747,11 @@ function texteSmsModifPlanning(emp, entries){
   // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
   // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
   const lienAppli='https://ok-la.github.io/okla-planning/';
+  // Message générique (choix par défaut à l'envoi) : trop de dates à lire dans un SMS quand il y a
+  // beaucoup de modifications — le détail est dans le récapitulatif du compte du salarié.
+  if(mode!=='dates'){
+    return `Bonjour ${prenom}, des modifications ont été faites sur votre planning. Consultez votre compte pour le détail : ${lienAppli}`;
+  }
   // Juste la liste des dates modifiées, pas le détail du nouveau créneau (site/horaire/motif) —
   // pour un SMS court, le salarié consulte l'appli pour le détail (Antoine, 2026-09-28).
   if(entries.length===1){
@@ -1737,27 +1765,57 @@ function texteSmsModifPlanning(emp, entries){
 // TOUS les salariés en attente, sans que le gestionnaire sache qui était concerné — risque de
 // prévenir quelqu'un dont le planning est encore en cours de préparation. Affiche maintenant la
 // liste (regroupée par salarié) avec une case à décocher pour exclure ceux pas encore prêts.
+// Refonte (Antoine, 2026-10-09) : le gestionnaire prépare des tests avant la version définitive, il
+// choisit donc quelles modifications communiquer — par salarié OU modification par modification —
+// et rien n'est décoché/envoyé automatiquement. Les entrées non cochées restent en attente.
 function ouvrirRevueSmsEnAttente(){
   const pending=S.params.pendingSms||[];
-  if(!pending.length){toast('Aucun SMS en attente');return;}
+  if(!pending.length){toast('Aucune modification en attente');return;}
   const parEmploye={};
   pending.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
   const el=document.getElementById('revueSmsListe');
   el.innerHTML=Object.keys(parEmploye).map(empId=>{
     const emp=S.employees.find(e=>e.id===empId);
     const entries=parEmploye[empId];
-    const resume=entries.map(e=>`${e.dl} (${e.det})`).join(', ');
     const sansTel=!emp?.tel;
-    return `<div id="revueSmsRow_${empId}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);${sansTel?'opacity:.55;':''}">
-      <input type="checkbox" class="revue-sms-chk" data-emp="${empId}" ${sansTel?'disabled':''} style="margin-top:3px;width:auto;cursor:${sansTel?'not-allowed':'pointer'};">
-      <div style="flex:1;cursor:${sansTel?'not-allowed':'pointer'};" onclick="${sansTel?'':`document.querySelector('.revue-sms-chk[data-emp=\\'${empId}\\']').click()`}">
-        <div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#DC2626;font-weight:400;">(pas de téléphone — ne sera pas envoyé)</span>':''}</div>
-        <div style="font-size:11px;color:var(--muted);">${resume}</div>
+    const apercu=entries.slice(0,3).map(e=>e.dl).join(', ')+(entries.length>3?`… (+${entries.length-3})`:'');
+    return `<div id="revueSmsRow_${empId}" style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <input type="checkbox" class="revue-emp-chk" data-emp="${empId}" onchange="revueCocherEmploye('${empId}',this.checked)" style="margin-top:3px;width:auto;cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:13px;">${emp?emp.name:empId}${sansTel?' <span style="color:#92400E;font-weight:400;font-size:11px;">(pas de téléphone — récapitulatif dans son compte seulement)</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted);">${entries.length} modification(s) : ${apercu}
+            · <a href="#" onclick="document.getElementById('revueDetail_${empId}').style.display=document.getElementById('revueDetail_${empId}').style.display==='none'?'block':'none';return false;" style="color:#2563EB;">voir le détail</a></div>
+        </div>
+        <button type="button" class="btn-del" onclick="supprimerPersonneSmsEnAttente('${empId}')" title="Retirer toutes ses modifications de la file, définitivement">✕</button>
       </div>
-      <button type="button" class="btn-del" onclick="supprimerPersonneSmsEnAttente('${empId}')" title="Retirer définitivement de la file d'attente">✕</button>
+      <div id="revueDetail_${empId}" style="display:none;padding:6px 0 0 26px;">
+        ${entries.map(p=>`<label style="display:flex;gap:7px;align-items:flex-start;font-size:12px;margin-bottom:3px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;">
+          <input type="checkbox" class="revue-entree-chk" data-emp="${empId}" data-cle="${encodeURIComponent(cleEntreeSms(p))}" onchange="revueMajEmploye('${empId}')" style="width:auto;margin-top:2px;">
+          <span><strong>${p.dl}</strong> — ${p.det}</span>
+        </label>`).join('')}
+      </div>
     </div>`;
   }).join('');
+  document.querySelector('input[name="revueModeSms"][value="generique"]').checked=true;
   openModal('mRevueSms');
+}
+function revueCocherEmploye(empId, coche){
+  document.querySelectorAll(`.revue-entree-chk[data-emp="${empId}"]`).forEach(c=>{c.checked=coche;});
+  const empChk=document.querySelector(`.revue-emp-chk[data-emp="${empId}"]`);
+  if(empChk){ empChk.checked=coche; empChk.indeterminate=false; }
+}
+// Reflète l'état des cases "modification" sur la case du salarié (cochée / partielle / décochée).
+function revueMajEmploye(empId){
+  const cases=[...document.querySelectorAll(`.revue-entree-chk[data-emp="${empId}"]`)];
+  const nb=cases.filter(c=>c.checked).length;
+  const empChk=document.querySelector(`.revue-emp-chk[data-emp="${empId}"]`);
+  if(!empChk) return;
+  empChk.checked = nb===cases.length;
+  empChk.indeterminate = nb>0 && nb<cases.length;
+}
+function revueToutCocher(coche){
+  document.querySelectorAll('.revue-emp-chk').forEach(c=>revueCocherEmploye(c.dataset.emp,coche));
 }
 // Retire un salarié de la file d'attente (pas juste "pas maintenant" comme décocher — définitif,
 // utile pour une modification qu'on ne veut finalement jamais notifier). Antoine, 2026-09-16.
@@ -1781,54 +1839,98 @@ async function supprimerPersonneSmsEnAttente(empId){
   if(!document.querySelectorAll('#revueSmsListe > div').length) closeModal('mRevueSms');
   toast(`✓ ${emp?emp.name:empId} retiré(e) de la file d'attente`);
 }
-async function confirmerEnvoiSmsSelection(){
-  const empsCoches=new Set([...document.querySelectorAll('.revue-sms-chk:checked')].map(el=>el.dataset.emp));
-  closeModal('mRevueSms');
-  if(!empsCoches.size){toast('Aucun salarié sélectionné');return;}
-  if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
-  // Lecture + vidage atomiques côté serveur (RPC claim_pending_sms) plutôt que de faire confiance
-  // à S.params.pendingSms en mémoire — la file est partagée entre Antoine et Gwen sur des
-  // appareils différents, un simple "lire en JS puis écrire []" créerait une fenêtre où les deux
-  // pourraient envoyer les mêmes SMS en double.
-  let pending;
+// Lecture + vidage atomiques côté serveur (RPC claim_pending_sms) plutôt que de faire confiance à
+// S.params.pendingSms en mémoire — la file est partagée entre Antoine et Gwen sur des appareils
+// différents, un simple "lire en JS puis écrire []" créerait une fenêtre où les deux pourraient
+// envoyer les mêmes modifications en double. Renvoie null en cas d'échec (rien n'a été vidé).
+async function reclamerFileSms(){
   try {
     const r = await fetch(`${supaBase()}/rest/v1/rpc/claim_pending_sms`, { method:'POST', headers: supaHeaders() });
-    if(!r.ok){ toast('Erreur lors de la récupération de la file d\'attente'); return; }
-    pending = await r.json() || [];
-  } catch(e){ console.warn('claim_pending_sms error', e); toast('Erreur réseau'); return; }
+    if(!r.ok){ toast('Erreur lors de la récupération de la file d\'attente'); return null; }
+    return (await r.json()) || [];
+  } catch(e){ console.warn('claim_pending_sms error', e); toast('Erreur réseau'); return null; }
+}
+// Remise en attente atomique côté serveur (RPC append_pending_sms) — un simple persist() enverrait
+// la valeur COMPLÈTE et déjà périmée de S.params, écrasant au passage tout ce qu'un autre
+// gestionnaire, sur un autre appareil, aurait pu ajouter à la file entre-temps.
+async function remettreEnFileSms(entries){
+  S.params.pendingSms=entries;
+  renderPendingSmsBtn();
+  if(!entries.length) return true;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/rpc/append_pending_sms`, {
+      method:'POST', headers: supaHeaders(), body: JSON.stringify({entries})
+    });
+    if(!r.ok){ console.warn('append_pending_sms error', r.status, await r.text()); return false; }
+    return true;
+  } catch(e){ console.warn('append_pending_sms error', e); return false; }
+}
+function entreesCocheesRevue(){
+  return new Set([...document.querySelectorAll('.revue-entree-chk:checked')].map(el=>decodeURIComponent(el.dataset.cle)));
+}
+async function confirmerEnvoiSmsSelection(){
+  const cles=entreesCocheesRevue();
+  const mode=document.querySelector('input[name="revueModeSms"]:checked')?.value||'generique';
+  closeModal('mRevueSms');
+  if(!cles.size){toast('Aucune modification sélectionnée');return;}
+  if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
+  const pending=await reclamerFileSms();
+  if(pending===null) return;
   S.params.pendingSms=[]; renderPendingSmsBtn();
-  if(!pending.length){toast('Aucun SMS en attente');return;}
+  // Non cochées (ou apparues dans la file après l'ouverture de la revue) : remises en attente.
+  const aEnvoyer=pending.filter(p=>cles.has(cleEntreeSms(p)));
+  const aReporter=pending.filter(p=>!cles.has(cleEntreeSms(p)));
+  if(!aEnvoyer.length){ await remettreEnFileSms(aReporter); toast('Aucune modification à envoyer'); return; }
+
+  // 1) Publication du récapitulatif visible dans le compte du salarié. Si elle échoue on n'envoie
+  // RIEN (pas de SMS renvoyant vers un compte vide) et on remet tout en attente, sans perte.
+  const lignes=aEnvoyer.map(p=>({id:idUnique(), emp_id:p.empId, dl:p.dl, det:p.det}));
+  let recapOk=false;
+  try {
+    const r=await fetch(`${supaBase()}/rest/v1/planning_recaps`, {
+      method:'POST', headers: supaHeaders({'Prefer':'return=minimal'}), body: JSON.stringify(lignes)
+    });
+    recapOk=r.ok;
+    if(!r.ok) console.warn('planning_recaps insert error', r.status, await r.text());
+  } catch(e){ console.warn('planning_recaps insert error', e); }
+  if(!recapOk){
+    await remettreEnFileSms(pending);
+    toast('⚠️ Envoi impossible (récapitulatif non enregistré) — rien n\'a été envoyé, tout est resté en attente',5000);
+    return;
+  }
+  // Ménage best-effort : récapitulatifs déjà lus depuis plus de 60 jours.
+  fetch(`${supaBase()}/rest/v1/planning_recaps?vu=eq.true&created_at=lt.${encodeURIComponent(new Date(Date.now()-60*86400000).toISOString())}`,
+    {method:'DELETE', headers: supaHeaders()}).catch(()=>{});
+
+  // 2) SMS (un par salarié ayant un téléphone) — on attend le résultat pour signaler un échec.
   const parEmploye={};
-  pending.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
-  let nbEnvoyes=0, nbSansTel=0, nbDiffere=0;
-  const aReporter=[];
-  Object.keys(parEmploye).forEach(empId=>{
-    const entries=parEmploye[empId];
-    // Décoché (ou apparu dans la file après l'ouverture de la revue) : on ne l'envoie pas
-    // maintenant, mais on ne perd pas non plus ces entrées — remises en attente pour plus tard.
-    if(!empsCoches.has(empId)){ aReporter.push(...entries); nbDiffere+=entries.length; return; }
+  aEnvoyer.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
+  let nbSms=0, nbSansTel=0, nbEchecs=0;
+  await Promise.all(Object.keys(parEmploye).map(async empId=>{
     const emp=S.employees.find(e=>e.id===empId);
     if(!emp?.tel){ nbSansTel++; return; }
-    envoyerNotifSms(emp.tel, texteSmsModifPlanning(emp, entries));
-    nbEnvoyes++;
-  });
-  if(aReporter.length){
-    // Remise en attente atomique côté serveur (RPC append_pending_sms) — un simple persist()
-    // enverrait la valeur COMPLÈTE et déjà périmée de S.params, écrasant au passage tout ce
-    // qu'un autre gestionnaire, sur un autre appareil, aurait pu ajouter à la file entre-temps
-    // (persist()/supaWriteParams ne fait pas de fusion, juste un PATCH intégral de la ligne).
-    try {
-      const rAppend = await fetch(`${supaBase()}/rest/v1/rpc/append_pending_sms`, {
-        method:'POST', headers: supaHeaders(), body: JSON.stringify({entries: aReporter})
-      });
-      if(!rAppend.ok) console.warn('append_pending_sms error', rAppend.status, await rAppend.text());
-    } catch(e){ console.warn('append_pending_sms error', e); }
-    // Reflet local immédiat pour le bouton/badge — sera de toute façon recalé par la prochaine
-    // resynchro si un autre gestionnaire a ajouté autre chose entre-temps.
-    S.params.pendingSms=aReporter;
-    renderPendingSmsBtn();
-  }
-  toast(`✓ SMS envoyé(s) à ${nbEnvoyes} salarié(s)${nbDiffere?`, ${nbDiffere} entrée(s) laissée(s) en attente`:''}${nbSansTel?` (${nbSansTel} sans téléphone, ignoré(s))`:''}`);
+    const ok=await envoyerNotifSms(emp.tel, texteSmsModifPlanning(emp, parEmploye[empId], mode));
+    if(ok) nbSms++; else nbEchecs++;
+  }));
+  // 3) Le reste reste en attente.
+  await remettreEnFileSms(aReporter);
+  const nbSal=Object.keys(parEmploye).length;
+  toast(`✓ ${aEnvoyer.length} modification(s) communiquée(s) à ${nbSal} salarié(s) — ${nbSms} SMS${nbSansTel?`, ${nbSansTel} sans téléphone (compte seulement)`:''}${nbEchecs?`, ⚠️ ${nbEchecs} SMS en échec`:''}${aReporter.length?` · ${aReporter.length} laissée(s) en attente`:''}`, 6000);
+}
+// Retire définitivement de la file les modifications cochées, SANS prévenir le salarié (test abandonné,
+// modification finalement annulée...) — évite qu'elles s'accumulent à jamais dans la file.
+async function retirerSelectionSmsEnAttente(){
+  const cles=entreesCocheesRevue();
+  if(!cles.size){toast('Aucune modification sélectionnée');return;}
+  if(!confirm(`Retirer définitivement ${cles.size} modification(s) de la file, sans prévenir les salariés concernés ?`)) return;
+  closeModal('mRevueSms');
+  if(!_supaUrl || !_supaKey){toast('Supabase non configuré');return;}
+  const pending=await reclamerFileSms();
+  if(pending===null) return;
+  S.params.pendingSms=[]; renderPendingSmsBtn();
+  const reste=pending.filter(p=>!cles.has(cleEntreeSms(p)));
+  const ok=await remettreEnFileSms(reste);
+  toast(ok ? `✓ ${pending.length-reste.length} modification(s) retirée(s) de la file` : '⚠️ Erreur lors de la remise en attente — réessayez');
 }
 
 // Lecture d'une section depuis Supabase
@@ -3148,6 +3250,38 @@ function showScr(id){
 }
 
 // ══ VUE EMPLOYÉ ══
+let _recapsAffiches=[];
+async function chargerRecapsPlanning(){
+  const emp=S.user;
+  const el=document.getElementById('empAlert');
+  if(!emp||!el||!_supaUrl||!_supaKey||_recapsMarquageEnCours) return;
+  try {
+    const r=await fetch(`${supaBase()}/rest/v1/planning_recaps?emp_id=eq.${encodeURIComponent(emp.id)}&vu=eq.false&select=id,dl,det&order=id.asc`, {headers:supaHeaders()});
+    if(!r.ok) return;
+    const rows=await r.json();
+    if(S.user!==emp) return; // déconnecté / changé de compte pendant la requête
+    _recapsAffiches=rows.map(x=>x.id);
+    el.innerHTML=rows.length ? `<div class="alert-mod">
+      <div style="font-weight:700;margin-bottom:6px;">⚠️ Votre planning a été modifié</div>
+      <div style="font-size:12px;max-height:220px;overflow-y:auto;">${rows.map(x=>`<div style="padding:2px 0;">• <strong>${x.dl}</strong> — ${x.det}</div>`).join('')}</div>
+      <button class="btn btn-sm" style="margin-top:8px;" onclick="marquerRecapsVus()">✓ J'ai pris connaissance</button>
+    </div>` : '';
+  } catch(e){ console.warn('chargerRecapsPlanning error', e); }
+}
+let _recapsMarquageEnCours=false;
+async function marquerRecapsVus(){
+  const ids=_recapsAffiches;
+  if(!ids.length) return;
+  document.getElementById('empAlert').innerHTML='';
+  _recapsAffiches=[];
+  _recapsMarquageEnCours=true; // évite qu'une resynchro réaffiche le message avant que la base soit à jour
+  try {
+    await fetch(`${supaBase()}/rest/v1/planning_recaps?id=in.(${ids.join(',')})`, {
+      method:'PATCH', headers: supaHeaders({'Prefer':'return=minimal'}), body: JSON.stringify({vu:true})
+    });
+  } catch(e){ console.warn('marquerRecapsVus error', e); }
+  _recapsMarquageEnCours=false;
+}
 function renderEmp(resetView=true){
   const emp=S.user;
   document.getElementById('empHero').innerHTML=`
@@ -3157,10 +3291,11 @@ function renderEmp(resetView=true){
       <div style="font-size:12px;color:var(--muted);margin-top:2px">${sPill(emp.site)} &nbsp;Code : <strong>${emp.code}</strong></div>
     </div>
     <button class="btn btn-ghost btn-sm" onclick="ouvrirMesInfos()" title="Modifier mes coordonnées">✏️ Mes infos</button>`;
-  const myMods=S.mods.filter(m=>m.empId===emp.id&&!m.seen);
-  document.getElementById('empAlert').innerHTML=myMods.length
-    ?`<div class="alert-mod">⚠️ <strong>Planning modifié :</strong> ${myMods.map(m=>`${m.dl} : ${m.det}`).join(' · ')}</div>`:'';
-  myMods.forEach(m=>m.seen=true);
+  // Récapitulatif des modifications que le gestionnaire a choisi de communiquer (table
+  // planning_recaps). L'ancienne bannière lisait S.mods, qui n'existe que dans le localStorage de
+  // l'appareil du gestionnaire : un salarié sur son téléphone ne la voyait jamais, et elle aurait
+  // montré des modifications "test" non envoyées (Antoine, 2026-10-09).
+  chargerRecapsPlanning();
   // Compteur d'heures : visible uniquement si le gestionnaire a saisi une valeur non nulle
   // (positif = heures supplémentaires dues, négatif = heures à rattraper).
   const hs = emp.heuresSupp;
