@@ -1330,7 +1330,7 @@ tbody tr:hover td{background:#FAFAF8;}
 <!-- MODAL JOKER : décision du gestionnaire à la validation d'un CP hors délai -->
 <div class="modal-overlay" id="mJoker">
   <div class="modal">
-    <div class="modal-title">🃏 Demande hors délai</div>
+    <div class="modal-title">🃏 Demande hors règles</div>
     <div id="mJokerTxt" style="font-size:13px;line-height:1.5;margin-bottom:14px;"></div>
     <div class="modal-actions" style="flex-wrap:wrap;">
       <button class="btn btn-ghost" onclick="_congeEnAttenteJoker=null;closeModal('mJoker')">Annuler</button>
@@ -7765,7 +7765,7 @@ async function validerConge(id) {
     const dd = dateDemandeConge(req);
     _congeEnAttenteJoker = id;
     document.getElementById('mJokerTxt').innerHTML =
-      `<strong>${emp ? emp.name : ''}</strong> a déposé cette demande${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}, hors délai :<br>
+      `<strong>${emp ? emp.name : ''}</strong> a déposé cette demande${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}, qui déroge aux règles :<br>
        <span style="color:#92400E;">${check.warnings.map(w=>w.replace(/^⚠️ /,'')).join('<br>')}</span><br><br>
        Utiliser un joker pour cette demande ? (${getJokersUtilises(req.empId)}/2 utilisés)`;
     openModal('mJoker');
