@@ -563,7 +563,7 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
       </div>
       <div id="echangeFields" style="display:none;">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue d'échanger vos jours de travail : vous prenez sa place le jour choisi, il/elle prend la vôtre.</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Vous proposez à un collègue d'échanger vos jours de travail : vous prenez sa place le jour choisi, il/elle prend la vôtre. Le collègue peut être d'un autre magasin : vous travaillerez alors sur son site ce jour-là (le collègue, puis le gestionnaire, doivent valider).</div>
         <div class="fg"><label>Jour de repos souhaité</label><input type="date" id="rEchangeDate"></div>
         <div class="fg"><label>Collègue</label>
           <select id="rEchangeCollegue" onchange="updEchangeCollegueInfo()"><option value="">Choisir un collègue...</option></select>
@@ -1744,22 +1744,20 @@ function texteSmsModifPlanning(emp, entries, mode){
   // un SMS qui se veut dans un français soigné.
   const prenomBrut=emp.name.split(' ')[0];
   const prenom=prenomBrut.charAt(0)+prenomBrut.slice(1).toLowerCase();
-  // Lien vers l'appli en fin de message (Antoine, 2026-09-15) — pour que le salarié puisse
-  // ouvrir directement son planning depuis le SMS plutôt que de devoir la retrouver lui-même.
-  const lienAppli='https://ok-la.github.io/okla-planning/';
+  // Plus de lien vers l'appli dans le SMS (Antoine, 2026-10-12) : les salariés la connaissent déjà.
   // Message générique (choix par défaut à l'envoi) : trop de dates à lire dans un SMS quand il y a
   // beaucoup de modifications — le détail est dans le récapitulatif du compte du salarié.
   if(mode!=='dates'){
-    return `Bonjour ${prenom}, des modifications ont été faites sur votre planning. Consultez votre compte pour le détail : ${lienAppli}`;
+    return `Bonjour ${prenom}, des modifications ont été faites sur votre planning. Consultez votre compte pour le détail.`;
   }
   // Juste la liste des dates modifiées, pas le détail du nouveau créneau (site/horaire/motif) —
   // pour un SMS court, le salarié consulte l'appli pour le détail (Antoine, 2026-09-28).
   if(entries.length===1){
-    return `Bonjour ${prenom}, modification de votre planning : ${entries[0].dl}. Consultez : ${lienAppli}`;
+    return `Bonjour ${prenom}, modification de votre planning : ${entries[0].dl}.`;
   }
   const liste=entries.slice(0,4).map(e=>e.dl).join(', ');
   const reste=entries.length>4?`, et ${entries.length-4} autre(s)`:'';
-  return `Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}. Consultez : ${lienAppli}`;
+  return `Bonjour ${prenom}, votre planning a été modifié : ${liste}${reste}.`;
 }
 // Étape de revue avant envoi (Antoine, 2026-09-15) : le bouton envoyait auparavant directement à
 // TOUS les salariés en attente, sans que le gestionnaire sache qui était concerné — risque de
@@ -5060,7 +5058,7 @@ function renderEmpEchanges(){
     document.getElementById('empEchangesRecusList').innerHTML = recus.map(r=>`
       <div class="conge-item" style="flex-direction:column;align-items:stretch;gap:8px;">
         <div>
-          <div style="font-weight:600;font-size:12px">${r.empName} propose un échange</div>
+          <div style="font-weight:600;font-size:12px">${r.empName}${(()=>{const p=S.employees.find(e=>e.id===r.empId);return p&&p.site!==emp.site?` (${p.site})`:'';})()} propose un échange</div>
           <div style="font-size:11px;color:var(--muted)">${dlEchange(r)}${r.note?' · '+r.note:''}</div>
         </div>
         <div style="display:flex;gap:6px;">
@@ -5081,7 +5079,7 @@ function renderEmpEchanges(){
       const [lbl,cls]=labels[r.status]||['—','cs-pending'];
       return `<div class="conge-item">
         <div style="flex:1">
-          <div style="font-weight:600;font-size:12px">Avec ${r.cibleName}</div>
+          <div style="font-weight:600;font-size:12px">Avec ${r.cibleName}${(()=>{const c=S.employees.find(e=>e.id===r.cibleId);return c&&c.site!==emp.site?` (${c.site})`:'';})()}</div>
           <div style="font-size:11px;color:var(--muted)">${dlEchange(r)}</div>
         </div>
         <span class="conge-status ${cls}">${lbl}</span>
@@ -7289,7 +7287,20 @@ function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
         });
         if (absents.length >= 1) {
           const noms = absents.map(e => e.name.split(' ')[0]).join(', ');
-          errors.push(`❌ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. 1 seul salarié par magasin autorisé.`);
+          // Une JOURNÉE isolée peut être demandée même si un collègue du magasin est déjà en
+          // congé : exception soumise à l'accord du gestionnaire, qui peut compter comme un joker
+          // (utilisé seulement si le gestionnaire le décide à la validation, comme pour un délai
+          // non respecté). Au-delà d'un jour, la règle "1 seul par magasin" reste bloquante
+          // (Antoine, 2026-10-12).
+          if (jouresDemandes === 1) {
+            if (jokersUtilises >= 2) {
+              errors.push(`❌ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. Vos 2 jokers sont épuisés — demande impossible.`);
+            } else {
+              warnings.push(`⚠️ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. Une journée peut être demandée à titre exceptionnel, avec l'accord du gestionnaire ; un joker pourra être utilisé (${jokersUtilises}/2).`);
+            }
+          } else {
+            errors.push(`❌ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. 1 seul salarié par magasin autorisé.`);
+          }
           break;
         }
       }
@@ -7400,13 +7411,18 @@ function toggleCongeFields() {
   }
 }
 
-// Remplit le select des collègues (même site, hors moi-même) pour la demande d'échange
+// Remplit le select des collègues pour la demande d'échange : mon magasin d'abord, puis les salariés
+// des autres magasins (échange entre magasins possible, Antoine, 2026-10-12).
 function remplirSelectCollegues(){
   const emp = S.user; if(!emp) return;
   const sel = document.getElementById('rEchangeCollegue');
-  const collegues = S.employees.filter(e=>e.site===emp.site && e.id!==emp.id && estVisibleDansPlanning(e,new Date()));
+  const visibles = activeEmployees().filter(e=>e.id!==emp.id && estVisibleDansPlanning(e,new Date()));
+  const options = c=>`<option value="${c.id}">${c.name}${c.site!==emp.site?` (${c.site})`:''}</option>`;
+  const memeSite = visibles.filter(e=>e.site===emp.site);
+  const autres = visibles.filter(e=>e.site!==emp.site).sort((a,b)=>a.site.localeCompare(b.site)||a.name.localeCompare(b.name));
   sel.innerHTML = '<option value="">Choisir un collègue...</option>' +
-    collegues.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+    (memeSite.length ? `<optgroup label="Mon magasin (${emp.site})">${memeSite.map(options).join('')}</optgroup>` : '') +
+    (autres.length ? `<optgroup label="Autres magasins">${autres.map(options).join('')}</optgroup>` : '');
 }
 // Remplit le select des collègues de l'Entrepôt (échange de créneau A/B — réservé à ce site)
 function remplirSelectCollegueEntrepot(){
@@ -7705,7 +7721,7 @@ function enregistrerModifConge(){
   const check = verifierRegleConges(req.empId, nouveauDebut, nouveauFin);
   if(check.warnings.length && !check.errors.length){
     // Le gestionnaire a la main : plus de joker consommé automatiquement, il confirme ou non.
-    if(confirm(`${check.warnings[0].replace(/^⚠️ /,'')}\n\nUtiliser un joker pour cette modification ?`)) incrementJoker(req.empId);
+    if(confirm(`${check.warnings.map(w=>w.replace(/^⚠️ /,'')).join('\n')}\n\nUtiliser un joker pour cette modification ?`)) incrementJoker(req.empId);
   }
   // Libère l'ancienne période (restaure son état d'origine), puis capture un nouvel instantané
   // pour la nouvelle période — après la restauration, pour que les jours communs aux deux
@@ -7750,7 +7766,7 @@ async function validerConge(id) {
     _congeEnAttenteJoker = id;
     document.getElementById('mJokerTxt').innerHTML =
       `<strong>${emp ? emp.name : ''}</strong> a déposé cette demande${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}, hors délai :<br>
-       <span style="color:#92400E;">${check.warnings[0].replace(/^⚠️ /,'')}</span><br><br>
+       <span style="color:#92400E;">${check.warnings.map(w=>w.replace(/^⚠️ /,'')).join('<br>')}</span><br><br>
        Utiliser un joker pour cette demande ? (${getJokersUtilises(req.empId)}/2 utilisés)`;
     openModal('mJoker');
     return;
@@ -7996,7 +8012,14 @@ function renderEchangesMgr(){
   el.innerHTML = enAttente.map(r=>{
     const detail = r.type==='echange_ab'
       ? `Échange des créneaux A/B du ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} entre ${r.empName.split(' ')[0]} et ${r.cibleName.split(' ')[0]}`
-      : `${r.empName.split(' ')[0]} cède le ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} et prend le ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'long'})} de ${r.cibleName.split(' ')[0]}`;
+      : (()=>{
+          // Échange entre deux magasins : on précise les sites pour que le gestionnaire voie le renfort.
+          const eA=S.employees.find(e=>e.id===r.empId), eB=S.employees.find(e=>e.id===r.cibleId);
+          const entreMagasins=eA&&eB&&eA.site!==eB.site;
+          const nomA=r.empName.split(' ')[0]+(entreMagasins?` (${eA.site})`:'');
+          const nomB=r.cibleName.split(' ')[0]+(entreMagasins?` (${eB.site})`:'');
+          return `${nomA} cède le ${fmtFR(new Date(r.dateA+'T12:00'),{day:'numeric',month:'long'})} et prend le ${fmtFR(new Date(r.dateB+'T12:00'),{day:'numeric',month:'long'})} de ${nomB}${entreMagasins?' — échange entre magasins (renfort)':''}`;
+        })();
     const validerFn = r.type==='echange_ab' ? 'validerEchangeAB' : 'validerEchange';
     return `
     <div class="quota-card" style="margin-bottom:10px;">
@@ -8015,6 +8038,16 @@ function renderEchangesMgr(){
     </div>`;
   }).join('');
 }
+// Cellule à écrire pour `emp` quand il reprend la journée `sh` d'un collègue. Repos/absence : copiés
+// tels quels. Journée travaillée sur un autre site que le sien : renfort ('remplacement' + site de
+// travail). Même site : type d'origine (un 'remplacement' repris par quelqu'un de ce site redevient
+// sa journée habituelle).
+function celluleReprise(emp, sh, note){
+  if(!sh || sh.type==='off' || estTypeAbsence(sh.type)) return {type:sh?sh.type:'off', site:sh?.site||emp.site, note};
+  const siteTravail = sh.site || emp.site;
+  if(siteTravail!==emp.site) return {type:'remplacement', site:siteTravail, note};
+  return {type: sh.type==='remplacement' ? (emp.slot||'magasin') : sh.type, site:siteTravail, note};
+}
 async function validerEchange(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
   const empA = S.employees.find(e=>e.id===req.empId);
@@ -8022,10 +8055,12 @@ async function validerEchange(id){
   if(!empA||!empB){toast('Employé introuvable');return;}
   const shA = S.planning[`${req.empId}_${req.dateA}`] || {type:'off',site:empA.site,note:''};
   const shB = S.planning[`${req.cibleId}_${req.dateB}`] || {type:'off',site:empB.site,note:''};
-  // A prend la place de B le dateB (avec le type de B), et devient repos le dateA (B prend sa place)
-  const cellEmpDateB = {type:shB.type, site:shB.site, note:'Échange avec '+req.cibleName};
+  // A prend la place de B le dateB (avec le type de B), et devient repos le dateA (B prend sa place).
+  // Entre deux magasins différents, celui qui reprend la journée travaille sur le site de l'autre :
+  // c'est un renfort (type 'remplacement' + site cible), comme pour un remplaçant d'un autre magasin.
+  const cellEmpDateB = celluleReprise(empA, shB, 'Échange avec '+req.cibleName);
   const cellEmpDateA = {type:'off', site:empA.site, note:''};
-  const cellCibleDateA = {type:shA.type, site:shA.site, note:'Échange avec '+req.empName};
+  const cellCibleDateA = celluleReprise(empB, shA, 'Échange avec '+req.empName);
   const cellCibleDateB = {type:'off', site:empB.site, note:''};
   S.planning[`${req.empId}_${req.dateB}`] = cellEmpDateB;
   S.planning[`${req.empId}_${req.dateA}`] = cellEmpDateA;
