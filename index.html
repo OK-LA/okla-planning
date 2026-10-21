@@ -538,6 +538,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="fg"><label>Type</label>
         <select id="rType" onchange="toggleCongeFields()">
           <option value="conge">Demande de congé payé</option>
+          <option value="conge_demi">Demi-journée de congé payé (3h30)</option>
           <option value="conge_sans_solde">Congé sans solde</option>
           <option value="changement_repos">Changement de repos</option>
           <option value="recup" id="rTypeRecup" style="display:none;">Récupération d'heures</option>
@@ -558,6 +559,14 @@ tbody tr:hover td{background:#FAFAF8;}
         <div class="fg"><label>Date de début</label><input type="date" id="rDateDebut"></div>
         <div class="fg"><label>Date de fin</label><input type="date" id="rDateFin"></div>
         <div id="congeCheck" style="margin-bottom:10px;"></div>
+      </div>
+      <div id="demiCongeFields" style="display:none;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Une demi-journée de congé payé (3h30) compte pour 0,5 jour de CP et utilise un joker « demi-journée » (4 par an, distincts des jokers hors délai).</div>
+        <div class="fg"><label>Date</label><input type="date" id="rDemiDate" onchange="updDemiCongeCheck()"></div>
+        <div class="fg"><label>Moment</label>
+          <select id="rDemiMoment"><option value="Matin">Matin</option><option value="Après-midi">Après-midi</option></select>
+        </div>
+        <div id="demiCongeCheck" style="margin-bottom:10px;"></div>
       </div>
       <div id="autreFields" style="display:none;">
         <div class="fg"><label>Date</label><input type="date" id="rDate"></div>
@@ -1330,12 +1339,11 @@ tbody tr:hover td{background:#FAFAF8;}
 <!-- MODAL JOKER : décision du gestionnaire à la validation d'un CP hors délai -->
 <div class="modal-overlay" id="mJoker">
   <div class="modal">
-    <div class="modal-title">🃏 Demande hors règles</div>
+    <div class="modal-title">🃏 Jokers — validation du congé</div>
     <div id="mJokerTxt" style="font-size:13px;line-height:1.5;margin-bottom:14px;"></div>
     <div class="modal-actions" style="flex-wrap:wrap;">
       <button class="btn btn-ghost" onclick="_congeEnAttenteJoker=null;closeModal('mJoker')">Annuler</button>
-      <button class="btn btn-ghost" onclick="validerCongeChoixJoker(false)">Valider sans joker</button>
-      <button class="btn btn-save" onclick="validerCongeChoixJoker(true)">Valider avec un joker</button>
+      <button class="btn btn-save" onclick="validerCongeChoixJoker()">✓ Valider</button>
     </div>
   </div>
 </div>
@@ -1575,6 +1583,7 @@ const TYPES=[
   {key:'remplacement', label:'Remplacement', short:'',    info:'Renfort dans un autre magasin', color:'#0EA5E9',bg:'#EFF6FF',border:'#BFDBFE'},
   {key:'vip',       label:'★ VIP',        short:'VIP',    info:'Dimanche exceptionnel', color:'#EF4444',bg:'#FEF2F2',border:'#FECACA'},
   {key:'conge',     label:'Congé',         short:'CP',    info:'Congé payé',           color:'#9CA3AF',bg:'#F3F4F6',border:'#E5E7EB'},
+  {key:'demiConge', label:'½ journée CP', short:'½CP', info:'Demi-journée de congé payé (3h30)', color:'#818CF8',bg:'#EEF2FF',border:'#C7D2FE'},
   {key:'congeSansSolde', label:'Congé sans solde', short:'CSS', info:'Non rémunéré, hors quota CP', color:'#78716C',bg:'#FAFAF9',border:'#E7E5E4'},
   {key:'recup',     label:'Récupération',  short:'Récup',  info:'Récupération d\'heures', color:'#0D9488',bg:'#F0FDFA',border:'#99F6E4'},
   {key:'maladie',   label:'Maladie',       short:'Malad.', info:'Arrêt maladie',        color:'#DC2626',bg:'#FEF2F2',border:'#FECACA'},
@@ -2472,8 +2481,11 @@ async function supaWriteParams(params) {
     // employee_leave_jokers — upsert seulement (aucune suppression basée sur l'instantané local,
     // voir le commentaire équivalent dans supaWritePlanning — ce bloc avait été oublié lors de
     // cette correction, repéré en touchant ce code pour remettre à 0 les jokers d'Emilie).
+    // Jokers "demi-journée" (4 par période) : même table, clé de période suffixée "-demi" pour les
+    // distinguer des jokers hors délai (2 par période) sans nouvelle colonne (Antoine, 2026-10-21).
     const jokerEntries = Object.entries(params.jokers || {});
-    if (jokerEntries.length) {
+    const jokerDemiEntries = Object.entries(params.jokersDemi || {});
+    if (jokerEntries.length || jokerDemiEntries.length) {
       const jokerRows = jokerEntries.flatMap(([empId, val]) => {
         if (val && typeof val === 'object' && val.annee !== undefined && val.count !== undefined) {
           return [{ employee_id: empId, periode_key: String(val.annee), count: val.count }];
@@ -2482,7 +2494,9 @@ async function supaWriteParams(params) {
           employee_id: empId, periode_key: String(periode),
           count: (v && typeof v === 'object') ? (v.count ?? 0) : v,
         }));
-      });
+      }).concat(jokerDemiEntries
+        .filter(([, val]) => val && val.annee !== undefined && val.count !== undefined)
+        .map(([empId, val]) => ({ employee_id: empId, periode_key: String(val.annee) + '-demi', count: val.count })));
       if (jokerRows.length) {
         const rJ = await fetch(`${supaBase()}/rest/v1/employee_leave_jokers?on_conflict=employee_id,periode_key`, {
           method: 'POST', headers: supaHeaders({'Prefer': 'resolution=merge-duplicates,return=minimal'}),
@@ -2626,8 +2640,19 @@ async function supaReadParams(empRows) {
       rotationSamedis[row.site] = row.rotation_samedis_weeks;
     });
 
-    const jokers = {};
-    jokerRows.forEach(row => { jokers[row.employee_id] = { annee: row.periode_key, count: row.count }; });
+    // Les lignes "<année>-demi" sont les jokers demi-journée (4/période), à part des jokers hors délai.
+    // Pour chaque salarié on garde en priorité la ligne de la période en cours, pour qu'une ancienne
+    // période ne masque jamais le compteur actuel.
+    const jokers = {}, jokersDemi = {};
+    const periodeCourante = String(getPeriodeRef().debut.getFullYear());
+    jokerRows.forEach(row => {
+      const demi = String(row.periode_key).endsWith('-demi');
+      const cible = demi ? jokersDemi : jokers;
+      const annee = demi ? String(row.periode_key).slice(0, -5) : String(row.periode_key);
+      const deja = cible[row.employee_id];
+      if (deja && deja.annee === periodeCourante && annee !== periodeCourante) return;
+      cible[row.employee_id] = { annee, count: row.count };
+    });
 
     const reposFixe = {};
     (empRows || []).forEach(e => { if (e._reposFixeWeekday != null) reposFixe[e.id] = e._reposFixeWeekday; });
@@ -2649,7 +2674,7 @@ async function supaReadParams(empRows) {
       notifPhones: app.notif_phones || [],
       pendingSms: app.pending_sms || [],
       heuresSuppLog: app.heures_supp_log || [],
-      minStaff, adresses, rotationSamedis, jokers, reposFixe,
+      minStaff, adresses, rotationSamedis, jokers, jokersDemi, reposFixe,
       evInternes: ieRows.map(ie => ({ id: ie.id, type: ie.type, date: ie.event_date, label: ie.label, participants: ie.participants || [], heureDebut: ie.heure_debut || '', heureFin: ie.heure_fin || '' })),
       murPosts: murPostsResult,
     };
@@ -3567,6 +3592,18 @@ async function sendReq(){
     const nb=countJoursOuvres(dateDebut,dateFin);
     req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
       type:'conge',dateDebut,dateFin,date:dateDebut,note,status:'pending',joursOuvres:nb};
+  } else if(type==='conge_demi'){
+    const date=document.getElementById('rDemiDate')?.value;
+    const moment=document.getElementById('rDemiMoment')?.value||'Matin';
+    if(!date){toast('Sélectionnez la date');return;}
+    const nonTravaille=erreurJourNonTravaille(emp,date);
+    if(nonTravaille){toast(nonTravaille);return;}
+    const check=verifierRegleConges(emp.id,date,date,null,{demi:true});
+    if(check.errors.length){toast(check.errors[0].replace(/❌ /,''));return;}
+    // type 'conge' + jours_ouvres 0.5 = demi-journée (aucun nouveau champ à persister) ; le moment
+    // est mis en tête de la note. Le joker demi-journée est décompté à la validation.
+    req={id:Date.now(),empId:emp.id,empName:emp.name,empEmail:emp.email,
+      type:'conge',dateDebut:date,dateFin:date,date,note:`[${moment}]${note?' '+note:''}`,status:'pending',joursOuvres:0.5};
   } else if(type==='conge_sans_solde'){
     const dateDebut=document.getElementById('rDateDebut')?.value;
     const dateFin=document.getElementById('rDateFin')?.value;
@@ -3675,7 +3712,7 @@ function notifierNouvelleDemande(req, emp){
     if(cible.tel) envoyerNotifSms(cible.tel, `OK-LA Planning: ${emp.name} vous propose un echange de creneau le ${dl} (repondez dans l'appli)`);
     return;
   }
-  const label=LABELS_TYPE_DEMANDE[req.type]||req.type;
+  const label=estDemiJourneeConge(req) ? `Congé payé — demi-journée (${momentDemiJournee(req)||'3h30'})` : (LABELS_TYPE_DEMANDE[req.type]||req.type);
   const emails=emailsGestionnaire();
   if(emails.length) envoyerNotifEmail(emails, `Nouvelle demande — ${label} — ${emp.name}`,
     `<p><strong>${emp.name}</strong> (${emp.site}) a envoyé une nouvelle demande :</p>
@@ -5470,7 +5507,7 @@ function calcCpResumeHTML(emp){
     const acquisDepuis = calcAccrualCP(emp.id, new Date(emp.soldeCPManuelDate+'T12:00:00'), today);
     const prisDepuis = getCongesEmp(emp.id)
       .filter(r=>r.status==='approved' && r.dateDebut >= emp.soldeCPManuelDate)
-      .reduce((sum,r)=>sum+countJoursOuvresReels(r.dateDebut,r.dateFin),0);
+      .reduce((sum,r)=>sum+joursDecomptesConge(r),0);
     const solde = emp.soldeCPManuel + acquisDepuis - prisDepuis;
     return `Solde constaté le <strong>${emp.soldeCPManuelDate}</strong> : <strong>${emp.soldeCPManuel} jour(s)</strong><br>
      Acquis depuis (2,08 j/mois, réduit si maladie) : <strong>+${acquisDepuis} jour(s)</strong><br>
@@ -7051,14 +7088,14 @@ function getJoursPris(empId) {
   const soldeInitial = getSoldeInitial(empId);
   const pris = getCongesEmp(empId)
     .filter(r => r.status === 'approved' && r.type === 'conge')
-    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+    .reduce((sum, r) => sum + joursDecomptesConge(r), 0);
   return soldeInitial + pris;
 }
 
 function getJoursEnAttente(empId) {
   return getCongesEmp(empId)
     .filter(r => r.status === 'pending' && r.type === 'conge')
-    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+    .reduce((sum, r) => sum + joursDecomptesConge(r), 0);
 }
 
 // Anticiper le solde disponible à la date demandée
@@ -7067,10 +7104,10 @@ function getJoursDisponiblesALaDate(empId, dateDebut) {
   const soldeInitial = getSoldeInitial(empId);
   const prisAvant = getCongesEmp(empId)
     .filter(r => r.status === 'approved' && r.type === 'conge' && r.dateFin < dateDebut)
-    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+    .reduce((sum, r) => sum + joursDecomptesConge(r), 0);
   const attenteAvant = getCongesEmp(empId)
     .filter(r => r.status === 'pending' && r.type === 'conge' && r.dateFin < dateDebut)
-    .reduce((sum, r) => sum + countJoursOuvresReels(r.dateDebut, r.dateFin), 0);
+    .reduce((sum, r) => sum + joursDecomptesConge(r), 0);
   return quota - soldeInitial - prisAvant - attenteAvant;
 }
 
@@ -7094,6 +7131,40 @@ function incrementJoker(empId) {
   if(!S.params.jokers) S.params.jokers = {};
   const current = getJokersUtilises(empId);
   S.params.jokers[empId] = {annee: periodeKey, count: current + 1};
+}
+
+// ── Demi-journée de congé payé (3h30) — Antoine, 2026-10-21 ──
+// Une demande 'conge' dont jours_ouvres vaut 0.5 (colonne déjà persistée : aucun nouveau champ, aucune
+// migration). Elle décompte 0,5 jour de solde et un joker "demi-journée" : 4 par période (1 juin →
+// 31 mai), distincts des 2 jokers hors délai. Mêmes règles de prévenance qu'une journée isolée.
+function nbJokersDemi(){ return 4; }
+function estDemiJourneeConge(r){ return !!r && Number(r.joursOuvres) === 0.5; }
+function joursDecomptesConge(r){ return estDemiJourneeConge(r) ? 0.5 : countJoursOuvresReels(r.dateDebut, r.dateFin); }
+// Le moment (matin / après-midi) est stocké en tête de la note de la demande (champ déjà persisté).
+function momentDemiJournee(r){ const m=/^\[(Matin|Après-midi)\]/.exec(r.note||''); return m?m[1]:''; }
+function noteSansMoment(r){ return (r.note||'').replace(/^\[(Matin|Après-midi)\]\s*/,''); }
+function libelleDureeConge(r){
+  if(estDemiJourneeConge(r)) return `½ journée (3h30)${momentDemiJournee(r)?' · '+momentDemiJournee(r):''}`;
+  return `${countJoursOuvresReels(r.dateDebut,r.dateFin)}j`;
+}
+function getDemiJokersUtilises(empId) {
+  const periodeKey = `${getPeriodeRef().debut.getFullYear()}`;
+  const v = (S.params.jokersDemi || {})[empId];
+  return (v && v.annee === periodeKey) ? (v.count || 0) : 0;
+}
+function incrementDemiJoker(empId) { ajusterDemiJokers(empId, 1, true); }
+function ajusterDemiJokers(empId, delta, silencieux) {
+  const periodeKey = `${getPeriodeRef().debut.getFullYear()}`;
+  if(!S.params.jokersDemi) S.params.jokersDemi = {};
+  const nouveau = Math.max(0, Math.min(nbJokersDemi(), getDemiJokersUtilises(empId) + delta));
+  S.params.jokersDemi[empId] = {annee: periodeKey, count: nouveau};
+  if(!silencieux){ persist(); renderCongesMgr(); }
+}
+// Demi-journées déjà décomptées + demandes en attente de la période (pas encore décomptées) : sert à
+// refuser une demande quand les 4 jokers sont déjà engagés.
+function getDemiJokersEngages(empId) {
+  const enAttente = getCongesEmp(empId).filter(r => r.status === 'pending' && r.type === 'conge' && estDemiJourneeConge(r)).length;
+  return getDemiJokersUtilises(empId) + enAttente;
 }
 
 // Date du dernier congé approuvé et déjà passé (toutes périodes confondues, pas seulement l'année en cours)
@@ -7236,7 +7307,7 @@ function isVacancesScolaires(dateDebut, dateFin) {
   );
 }
 
-function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
+function verifierRegleConges(empId, dateDebut, dateFin, dateRef, opts) {
   const emp = S.employees.find(e => e.id === empId);
   const errors = [];
   const warnings = [];
@@ -7244,8 +7315,20 @@ function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
   const today = dateReferenceDemande(dateRef);
   const debut = new Date(dateDebut);
   const diffJours = Math.floor((debut - today) / 86400000);
-  const jouresDemandes = countJoursOuvresReels(dateDebut, dateFin);
+  // opts.demi : demi-journée (0,5 jour, joker demi-journée). opts.pourValidation : appelé pour la
+  // validation par le gestionnaire (le joker demi-journée n'est alors plus bloquant, il décide).
+  const demi = !!(opts && opts.demi);
+  const jouresDemandes = demi ? 0.5 : countJoursOuvresReels(dateDebut, dateFin);
   const jokersUtilises = getJokersUtilises(empId);
+
+  if (demi) {
+    const engages = getDemiJokersEngages(empId);
+    if (!(opts && opts.pourValidation) && engages >= nbJokersDemi()) {
+      errors.push(`❌ Vos ${nbJokersDemi()} jokers demi-journée sont déjà utilisés ou demandés — demande impossible.`);
+    } else {
+      infos.push(`ℹ️ Une demi-journée compte pour 0,5 jour de CP et utilise un joker demi-journée (${getDemiJokersUtilises(empId)}/${nbJokersDemi()} utilisés).`);
+    }
+  }
 
   // 1. Vérif délai de prévenance selon règles OK-LA
   const delaiInfo = getDelaiRequis(dateDebut, dateFin, dateRef);
@@ -7279,8 +7362,9 @@ function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
         const absents = activeEmployees().filter(e => {
           if (e.id === empId || e.site !== emp.site) return false;
           const sh = S.planning[`${e.id}_${dateStr}`];
+          // Une demi-journée de CP (le salarié travaille l'autre moitié) ne compte pas comme "en congé".
           const req = S.requests.find(r =>
-            r.empId === e.id && r.status === 'approved' && r.type === 'conge' &&
+            r.empId === e.id && r.status === 'approved' && r.type === 'conge' && !estDemiJourneeConge(r) &&
             r.dateDebut <= dateStr && r.dateFin >= dateStr
           );
           return (sh && sh.type === 'conge') || req;
@@ -7292,7 +7376,7 @@ function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
           // (utilisé seulement si le gestionnaire le décide à la validation, comme pour un délai
           // non respecté). Au-delà d'un jour, la règle "1 seul par magasin" reste bloquante
           // (Antoine, 2026-10-12).
-          if (jouresDemandes === 1) {
+          if (jouresDemandes <= 1) {
             if (jokersUtilises >= 2) {
               errors.push(`❌ ${fmtFR(cur,{day:'numeric',month:'long'})} : ${noms} est déjà en congé à ${emp.site}. Vos 2 jokers sont épuisés — demande impossible.`);
             } else {
@@ -7330,6 +7414,30 @@ function verifierRegleConges(empId, dateDebut, dateFin, dateRef) {
   }
 
   return { errors, warnings, infos, jouresDemandes };
+}
+
+// Vérification live d'une demande de demi-journée (jour travaillé, délai, solde, jokers demi-journée)
+function erreurJourNonTravaille(emp, dateStr){
+  const sh = S.planning[`${emp.id}_${dateStr}`];
+  if ((sh && (sh.type === 'off' || estTypeAbsence(sh.type))) || isJourRepos(emp, new Date(dateStr+'T12:00'))) {
+    return 'Vous ne travaillez pas ce jour-là — une demi-journée de congé se pose sur un jour travaillé.';
+  }
+  return null;
+}
+function updDemiCongeCheck() {
+  const emp = S.user; if (!emp) return;
+  const el = document.getElementById('demiCongeCheck');
+  const date = document.getElementById('rDemiDate').value;
+  if (!date) { el.innerHTML = ''; return; }
+  const nonTravaille = erreurJourNonTravaille(emp, date);
+  if (nonTravaille) { el.innerHTML = `<div class="alert-block" style="padding:8px 10px;font-size:12px;">❌ ${nonTravaille}</div>`; return; }
+  const result = verifierRegleConges(emp.id, date, date, null, {demi:true});
+  let html = '';
+  result.errors.forEach(e => html += `<div class="alert-block" style="padding:8px 10px;font-size:12px;">${e}</div>`);
+  result.warnings.forEach(w => html += `<div class="alert-warn2" style="padding:8px 10px;font-size:12px;">${w}</div>`);
+  (result.infos||[]).forEach(i => html += `<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:8px 10px;font-size:12px;color:#1D4ED8;margin-bottom:4px;">${i}</div>`);
+  if (!result.errors.length && !result.warnings.length) html += `<div style="color:#059669;font-size:12px;font-weight:600;">✓ Demande valide — ½ journée (3h30)</div>`;
+  el.innerHTML = html;
 }
 
 // Vérification live quand l'employé saisit les dates
@@ -7378,8 +7486,11 @@ function toggleCongeFields() {
   const isEchangeAB = type === 'echange_ab';
   const isRecup = type === 'recup';
   const isChangementRepos = type === 'changement_repos';
+  const isDemi = type === 'conge_demi';
   document.getElementById('congeFields').style.display = isConge ? 'block' : 'none';
-  document.getElementById('autreFields').style.display = (!isConge && !isEchange && !isEchangeAB && !isRecup && !isChangementRepos) ? 'block' : 'none';
+  document.getElementById('demiCongeFields').style.display = isDemi ? 'block' : 'none';
+  if(isDemi){ document.getElementById('rDemiDate').value=''; document.getElementById('demiCongeCheck').innerHTML=''; }
+  document.getElementById('autreFields').style.display = (!isConge && !isDemi && !isEchange && !isEchangeAB && !isRecup && !isChangementRepos) ? 'block' : 'none';
   document.getElementById('echangeFields').style.display = isEchange ? 'block' : 'none';
   document.getElementById('echangeABFields').style.display = isEchangeAB ? 'block' : 'none';
   document.getElementById('recupFields').style.display = isRecup ? 'block' : 'none';
@@ -7468,6 +7579,7 @@ function renderEmpQuota() {
   const attente = getJoursEnAttente(emp.id);
   const restants = getQuotaAnnuel() - pris - attente;
   const jokers = getJokersUtilises(emp.id);
+  const jokersDemi = getDemiJokersUtilises(emp.id);
   const pct = Math.round((pris / getQuotaAnnuel()) * 100);
   const periode = getPeriodeRef();
 
@@ -7479,7 +7591,11 @@ function renderEmpQuota() {
   document.getElementById('empJokers').innerHTML =
     `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
       ${[0,1].map(i => `<div class="joker-dot ${i < jokers ? 'joker-used' : 'joker-avail'}"></div>`).join('')}
-      <span style="font-size:12px;color:var(--muted);">${jokers}/2 jokers utilisés</span>
+      <span style="font-size:12px;color:var(--muted);">${jokers}/2 jokers hors délai utilisés</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+      ${Array.from({length:nbJokersDemi()},(_,i) => `<div class="joker-dot ${i < jokersDemi ? 'joker-used' : 'joker-avail'}"></div>`).join('')}
+      <span style="font-size:12px;color:var(--muted);">${jokersDemi}/${nbJokersDemi()} jokers demi-journée utilisés</span>
     </div>
     <div class="quota-bar-wrap"><div class="quota-bar" style="width:${pct}%;background:${pct>80?'#DC2626':pct>50?'#F59E0B':'#059669'};"></div></div>
     <div style="font-size:11px;color:var(--muted);margin-top:2px;">Période : ${fmtFR(periode.debut,{day:'numeric',month:'long',year:'numeric'})} → ${fmtFR(periode.fin,{day:'numeric',month:'long',year:'numeric'})}</div>`;
@@ -7496,13 +7612,13 @@ function renderEmpQuota() {
   const mesDemandes = [...demandesPeriode, ...demandesPendantesAutrePeriode];
   let h = mesDemandes.length ? '' : '<div style="font-size:12px;color:var(--muted);">Aucune demande cette année</div>';
   mesDemandes.forEach(r => {
-    const nb = countJoursOuvres(r.dateDebut, r.dateFin);
+    const nb = estDemiJourneeConge(r) ? '½ journée (3h30)'+(momentDemiJournee(r)?' · '+momentDemiJournee(r):'') : `${countJoursOuvres(r.dateDebut, r.dateFin)} jour(s) ouvré(s)`;
     const statusCls = r.status==='approved'?'cs-ok':r.status==='refused'?'cs-refused':r.status==='cancelled'?'cs-refused':'cs-pending';
     const statusLbl = r.status==='approved'?'Validé':r.status==='refused'?'Refusé':r.status==='cancelled'?'Annulé par le gestionnaire':'En attente';
     h += `<div class="conge-item">
       <div style="flex:1">
         <div style="font-weight:600;font-size:12px">${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})} → ${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})}</div>
-        <div style="font-size:11px;color:var(--muted)">${nb} jour(s) ouvré(s)</div>
+        <div style="font-size:11px;color:var(--muted)">${nb}</div>
       </div>
       <span class="conge-status ${statusCls}">${statusLbl}</span>
     </div>`;
@@ -7578,6 +7694,7 @@ function renderCongesMgr() {
     const attente = getJoursEnAttente(emp.id);
     const restants = getQuotaAnnuel() - pris - attente;
     const jokers = getJokersUtilises(emp.id);
+    const jokersDemi = getDemiJokersUtilises(emp.id);
     const pct = Math.round((pris / getQuotaAnnuel()) * 100);
     const demandes = getCongesEmpToutesPeriodes(emp.id).filter(r => r.status === 'pending');
     // CP déjà validés, à venir ou en cours — permet de corriger une erreur de saisie sans passer
@@ -7605,13 +7722,19 @@ function renderCongesMgr() {
         <button class="btn btn-sm" title="Compter un joker de plus" onclick="ajusterJokers('${emp.id}',1)" style="padding:0 7px;font-size:12px;${jokers>=2?'opacity:.35;pointer-events:none;':''}">+</button>
         ${attente>0?`<span style="margin-left:auto;font-size:11px;background:#FFF7ED;color:#C2410C;padding:2px 8px;border-radius:10px;font-weight:600;">${attente}j en attente</span>`:''}
       </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+        ${[0,1,2,3].map(i=>`<div class="joker-dot ${i<jokersDemi?'joker-used':'joker-avail'}"></div>`).join('')}
+        <span style="font-size:11px;color:var(--muted)">${jokersDemi}/${nbJokersDemi()} jokers ½ journée</span>
+        <button class="btn btn-sm" title="Retirer un joker ½ journée utilisé" onclick="ajusterDemiJokers('${emp.id}',-1)" style="padding:0 7px;font-size:12px;${jokersDemi<=0?'opacity:.35;pointer-events:none;':''}">−</button>
+        <button class="btn btn-sm" title="Compter un joker ½ journée de plus" onclick="ajusterDemiJokers('${emp.id}',1)" style="padding:0 7px;font-size:12px;${jokersDemi>=nbJokersDemi()?'opacity:.35;pointer-events:none;':''}">+</button>
+      </div>
       ${demandes.length ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
         ${demandes.map(r=>{
-          const nb=countJoursOuvresReels(r.dateDebut,r.dateFin);
-          const check=verifierRegleConges(r.empId,r.dateDebut,r.dateFin,dateDemandeConge(r));
+          const nb=libelleDureeConge(r);
+          const check=verifierRegleConges(r.empId,r.dateDebut,r.dateFin,dateDemandeConge(r),{demi:estDemiJourneeConge(r),pourValidation:true});
           return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
             <div style="flex:1;font-size:12px;">
-              📅 ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}j
+              📅 ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}
               ${check.errors.length?`<div style="color:#DC2626;font-size:11px">${check.errors[0]}</div>`:''}
               ${check.warnings.length&&!check.errors.length?`<div style="color:#F59E0B;font-size:11px">${check.warnings[0]}</div>`:''}
             </div>
@@ -7625,9 +7748,9 @@ function renderCongesMgr() {
       ${congesValides.length ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
         <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">CP validés à venir</div>
         ${congesValides.map(r=>{
-          const nb=countJoursOuvresReels(r.dateDebut,r.dateFin);
+          const nb=libelleDureeConge(r);
           return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-            <div style="flex:1;font-size:12px;">✓ ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}j</div>
+            <div style="flex:1;font-size:12px;">✓ ${fmtFR(new Date(r.dateDebut+'T12:00'),{day:'numeric',month:'short'})}→${fmtFR(new Date(r.dateFin+'T12:00'),{day:'numeric',month:'short'})} · ${nb}</div>
             <div style="display:flex;gap:5px;">
               <button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;" onclick="ouvrirModifierConge(${r.id})">Modifier</button>
               <button class="btn btn-sm btn-no" onclick="annulerCongeValide(${r.id})">Supprimer</button>
@@ -7668,7 +7791,7 @@ function retirerCongePlanning(req){
   while(cur<=fin){
     const dStr = fmt(cur);
     const key = `${req.empId}_${dStr}`;
-    if(S.planning[key]?.type==='conge') S.planning[key] = snap[dStr] ? {...snap[dStr]} : {type:'off', site:emp?.site||'', note:''};
+    if(S.planning[key]?.type==='conge' || S.planning[key]?.type==='demiConge') S.planning[key] = snap[dStr] ? {...snap[dStr]} : {type:'off', site:emp?.site||'', note:''};
     cur = addDays(cur,1);
   }
 }
@@ -7714,6 +7837,7 @@ function enregistrerModifConge(){
   const nouveauDebut = document.getElementById('modifCongeDebut').value;
   const nouveauFin = document.getElementById('modifCongeFin').value;
   if(!nouveauDebut||!nouveauFin||nouveauFin<nouveauDebut){toast('Période invalide');return;}
+  if(estDemiJourneeConge(req)){toast('Une demi-journée ne se modifie pas : annulez-la puis refaites la demande');return;}
   // Même vérification que pour une validation normale (validerConge) : si la nouvelle période
   // déclenche un avertissement (préavis, quota...) un joker est consommé, exactement comme si
   // c'était une nouvelle demande — sinon modifier un CP validé contournerait silencieusement ces
@@ -7759,27 +7883,37 @@ let _congeEnAttenteJoker = null;
 async function validerConge(id) {
   const req = S.requests.find(r => r.id == id);
   if (!req) return;
-  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin, dateDemandeConge(req));
-  if (check.warnings.length && !check.errors.length) {
+  const demi = estDemiJourneeConge(req);
+  const check = verifierRegleConges(req.empId, req.dateDebut, req.dateFin, dateDemandeConge(req), {demi, pourValidation:true});
+  const jokerHorsDelai = check.warnings.length && !check.errors.length;
+  // Deux jokers distincts, tous deux sous le contrôle du gestionnaire (cases cochées par défaut,
+  // décochables) : le joker hors délai (2/période) si la demande déroge aux règles, et le joker
+  // demi-journée (4/période) pour toute demi-journée (Antoine, 2026-10-21).
+  if (jokerHorsDelai || demi) {
     const emp = S.employees.find(e => e.id === req.empId);
     const dd = dateDemandeConge(req);
     _congeEnAttenteJoker = id;
     document.getElementById('mJokerTxt').innerHTML =
-      `<strong>${emp ? emp.name : ''}</strong> a déposé cette demande${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}, qui déroge aux règles :<br>
-       <span style="color:#92400E;">${check.warnings.map(w=>w.replace(/^⚠️ /,'')).join('<br>')}</span><br><br>
-       Utiliser un joker pour cette demande ? (${getJokersUtilises(req.empId)}/2 utilisés)`;
+      `<strong>${emp ? emp.name : ''}</strong> — ${demi ? `demi-journée de CP du ${fmtFR(new Date(req.dateDebut+'T12:00'),{day:'numeric',month:'long'})}` : 'demande de CP'}, déposée${dd ? ' le '+fmtFR(dd,{day:'numeric',month:'long'}) : ''}.
+       ${jokerHorsDelai ? `<div style="color:#92400E;margin:8px 0;">${check.warnings.map(w=>w.replace(/^⚠️ /,'')).join('<br>')}</div>` : ''}
+       ${jokerHorsDelai ? `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:13px;"><input type="checkbox" id="mJokerHD" checked style="width:auto;"> Utiliser un joker hors délai (${getJokersUtilises(req.empId)}/2 utilisés)</label>` : ''}
+       ${demi ? `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:13px;"><input type="checkbox" id="mJokerDemi" checked style="width:auto;"> Décompter un joker demi-journée (${getDemiJokersUtilises(req.empId)}/${nbJokersDemi()} utilisés)</label>` : ''}`;
     openModal('mJoker');
     return;
   }
   appliquerValidationConge(req);
 }
-function validerCongeChoixJoker(utiliserJoker) {
+// Valide la demande en attente en décomptant les jokers cochés dans la fenêtre.
+function validerCongeChoixJoker() {
   const id = _congeEnAttenteJoker;
   _congeEnAttenteJoker = null;
+  const hd = document.getElementById('mJokerHD')?.checked;
+  const demi = document.getElementById('mJokerDemi')?.checked;
   closeModal('mJoker');
   const req = S.requests.find(r => r.id == id);
   if (!req) return;
-  if (utiliserJoker) incrementJoker(req.empId);
+  if (hd) incrementJoker(req.empId);
+  if (demi) incrementDemiJoker(req.empId);
   appliquerValidationConge(req);
 }
 // Ajustement manuel du compteur de jokers d'un salarié par le gestionnaire (correction, geste
@@ -7797,6 +7931,11 @@ function appliquerValidationConge(req) {
   req.planningSnapshot = snapshotPlanningAvant(req.empId, req.dateDebut, req.dateFin);
   // Marquer dans le planning
   const emp = S.employees.find(e => e.id === req.empId);
+  const demi = estDemiJourneeConge(req);
+  if (demi) {
+    // Demi-journée : le salarié travaille l'autre moitié, il reste compté présent (type dédié).
+    S.planning[`${req.empId}_${req.dateDebut}`] = {type:'demiConge', site:emp?.site||'', note:`½ journée de CP${momentDemiJournee(req)?' ('+momentDemiJournee(req)+')':''}`};
+  } else {
   let cur = new Date(req.dateDebut);
   while (cur <= new Date(req.dateFin)) {
     if (JOURS_OUVRES.includes(cur.getDay())) {
@@ -7810,9 +7949,11 @@ function appliquerValidationConge(req) {
     }
     cur = addDays(cur, 1);
   }
+  }
   const dl=formaterPeriode(req.dateDebut,req.dateFin);
-  S.mods.push({empId:req.empId, dl, det:'Congé payé validé', seen:false});
-  notifierModifPlanning(req.empId, dl, 'Congé payé validé');
+  const detCp = demi ? `Demi-journée de congé payé validée${momentDemiJournee(req)?' ('+momentDemiJournee(req)+')':''}` : 'Congé payé validé';
+  S.mods.push({empId:req.empId, dl, det:detCp, seen:false});
+  notifierModifPlanning(req.empId, dl, detCp);
   persist();
   renderCongesMgr();
   renderWeek();
