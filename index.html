@@ -557,7 +557,6 @@ tbody tr:hover td{background:#FAFAF8;}
           <option value="maladie">Arrêt maladie</option>
           <option value="echange">Échange avec un collègue</option>
           <option value="echange_ab" id="rTypeEchangeAB" style="display:none;">Échanger mon créneau A/B (Entrepôt)</option>
-          <option value="medical">Rendez-vous médical</option>
           <option value="autre">Autre</option>
         </select>
       </div>
@@ -626,7 +625,7 @@ tbody tr:hover td{background:#FAFAF8;}
       <div class="stat" onclick="showStatDetail('modifs')" style="cursor:pointer;" title="Voir les modifications"><div class="stat-val" id="sM">0</div><div class="stat-lbl">Modifs</div></div>
       <div class="stat" onclick="showStatDetail('demandes')" style="cursor:pointer;" title="Voir les demandes"><div class="stat-val" id="sD">0</div><div class="stat-lbl">Demandes</div></div>
       <div class="stat" onclick="showStatDetail('absences')" style="cursor:pointer;" title="Voir les absences"><div class="stat-val" id="sA">0</div><div class="stat-lbl">Absences</div></div>
-      <div class="stat" onclick="showStatDetail('profils')" style="cursor:pointer;" title="Voir les modifications de profil"><div class="stat-val" id="sP">0</div><div class="stat-lbl">Profils</div></div>
+      <div class="stat" onclick="showStatDetail('profils')" style="cursor:pointer;" title="Voir les modifications de profil et les repos protégés"><div class="stat-val" id="sP">0</div><div class="stat-lbl">Profils</div></div>
       <div class="stat" onclick="showStatDetail('repos')" style="cursor:pointer;" title="Salariés sans jour de repos sur la semaine en cours et les 8 suivantes (lundi-samedi)"><div class="stat-val" id="sR">0</div><div class="stat-lbl">Sans repos</div></div>
     </div>
     <div class="tabs">
@@ -2942,6 +2941,14 @@ async function loadAll(force=false){
       }
       // Demandes — idem, remplacement direct (plus de mergeParId nécessaire).
       if(Array.isArray(supa.requests)) {
+        // Le type « Rendez-vous médical » a été supprimé (Antoine, 2026-10-21) : plus aucun écran pour
+        // le gérer. On purge les anciennes demandes de ce type (y compris côté serveur) pour qu'elles
+        // ne réapparaissent jamais via un appareil resté sur l'ancienne version.
+        if(supa.requests.some(r=>r.type==='medical')) {
+          supa.requests = supa.requests.filter(r=>r.type!=='medical');
+          fetch(`${supaBase()}/rest/v1/requests?type=eq.medical`, {method:'DELETE', headers: supaHeaders({'Prefer':'return=minimal'})})
+            .catch(e=>console.warn('purge demandes medical échouée', e));
+        }
         S.requests = supa.requests;
         lsSet('requests', S.requests);
       }
@@ -4533,6 +4540,13 @@ function bloquerSiReposProtege(cases){
   if(m) toast(m, 5000);
   return !!m;
 }
+// Notification dans l'appli du gestionnaire (compteur « Profils »), sans SMS ni e-mail.
+function notifierGestionnaireApp(emp, message){
+  if(!S.profilNotifs) S.profilNotifs=[];
+  S.profilNotifs.push({id: idUnique(), empId: emp.id, empName: emp.name, seen:false, message});
+  persist();
+  supaWriteProfilNotifs(S.profilNotifs); // écriture immédiate : le salarié peut fermer l'appli juste après
+}
 async function protegerRepos(){
   const emp = S.user; if(!emp) return;
   const dateStr = document.getElementById('rLockDate').value;
@@ -4553,6 +4567,7 @@ async function protegerRepos(){
     return;
   }
   S.reposVerrouilles[`${emp.id}_${dateStr}`] = true;
+  notifierGestionnaireApp(emp, `🔒 ${emp.name} a protégé son repos du ${fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'})}`);
   document.getElementById('rLockDate').value = '';
   renderEmpRepos(); renderEmpWeek();
   if(S.empView==='mois') renderEmpMonth();
@@ -4571,6 +4586,7 @@ async function retirerProtectionRepos(dateStr){
     return;
   }
   delete S.reposVerrouilles[`${emp.id}_${dateStr}`];
+  notifierGestionnaireApp(emp, `🔓 ${emp.name} a retiré la protection de son repos du ${fmtFR(new Date(dateStr+'T12:00'),{weekday:'long',day:'numeric',month:'long'})}`);
   renderEmpRepos(); renderEmpWeek();
   if(S.empView==='mois') renderEmpMonth();
   toast('Protection retirée');
@@ -7822,7 +7838,7 @@ function renderCongesMgr() {
   renderCongesRecap();
 
   let h = '';
-  S.employees.forEach(emp => {
+  activeEmployees().forEach(emp => {
     const pris = getJoursPris(emp.id);
     const attente = getJoursEnAttente(emp.id);
     const restants = getQuotaAnnuel() - pris - attente;
@@ -9064,7 +9080,7 @@ function showStatDetail(type){
     }
 
   } else if(type==='profils'){
-    title = `📝 Modifications de profil`;
+    title = `📝 Profils et repos protégés`;
     const notifs = [...(S.profilNotifs||[])].sort((a,b)=>b.id-a.id);
     if(!notifs.length){
       html = '<div style="text-align:center;color:var(--muted);padding:20px;">Aucune modification de profil</div>';
