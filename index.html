@@ -489,6 +489,17 @@ tbody tr:hover td{background:#FAFAF8;}
       <div id="empCongesList"></div>
     </div>
 
+    <!-- MES REPOS PROTÉGÉS -->
+    <div class="quota-card mt-10" id="empReposCard">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px;">🔒 Mes repos protégés</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Un rendez-vous important un jour de repos ? Protégez ce repos : le gestionnaire ne pourra plus le modifier. Vous pouvez retirer la protection à tout moment. 3 repos protégés au maximum en même temps.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="rLockDate" style="flex:1;min-width:150px;">
+        <button class="btn btn-primary btn-sm" onclick="protegerRepos()">Protéger ce repos</button>
+      </div>
+      <div id="empReposList" style="margin-top:10px;"></div>
+    </div>
+
     <!-- HISTORIQUE MES SIGNALEMENTS D'ABSENCE -->
     <div class="quota-card mt-10" id="empAbsCard" style="display:none;">
       <div style="font-weight:700;font-size:14px;margin-bottom:10px;">🚩 Mes signalements d'absence</div>
@@ -2312,6 +2323,20 @@ async function supaReadProfilNotifs() {
   } catch(e) { console.warn('supaReadProfilNotifs error', e); return null; }
 }
 
+// Repos protégés (table repos_verrouilles, migration 029). null si la table est indisponible (migration
+// pas encore passée) : on garde alors l'état local au lieu de tout effacer.
+async function supaReadReposVerrouilles() {
+  if(!_supaUrl || !_supaKey) return null;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/repos_verrouilles?select=employee_id,entry_date`, { headers: supaHeaders() });
+    if(!r.ok) return null;
+    const rows = await r.json();
+    const map = {};
+    rows.forEach(row => { map[`${row.employee_id}_${row.entry_date}`] = true; });
+    return map;
+  } catch(e) { console.warn('supaReadReposVerrouilles error', e); return null; }
+}
+
 // Écriture des types d'événements dans `event_types`.
 async function supaWriteEventTypes(eventTypes) {
   if(!_supaUrl || !_supaKey) return false;
@@ -2693,9 +2718,10 @@ async function supaReadAll() {
     const result = {};
     rows.forEach(row => { result[row.section] = row.data; });
     // Ces sections : source de vérité = tables relationnelles (repli sur okla_store si indisponible)
-    const [empRows, planningRows, requestRows, absenceRows, eventTypeRows, eventRows, profilNotifRows] = await Promise.all([
-      supaReadEmployees(), supaReadPlanning(), supaReadRequests(), supaReadAbsences(), supaReadEventTypes(), supaReadEvents(), supaReadProfilNotifs(),
+    const [empRows, planningRows, requestRows, absenceRows, eventTypeRows, eventRows, profilNotifRows, reposVerrouillesMap] = await Promise.all([
+      supaReadEmployees(), supaReadPlanning(), supaReadRequests(), supaReadAbsences(), supaReadEventTypes(), supaReadEvents(), supaReadProfilNotifs(), supaReadReposVerrouilles(),
     ]);
+    if (reposVerrouillesMap) result.repos_verrouilles = reposVerrouillesMap;
     if (empRows) result.employees = empRows;
     if (planningRows) result.planning = planningRows;
     if (requestRows) result.requests = requestRows;
@@ -2763,6 +2789,7 @@ const S={
   absences:lsGet('absences',[]),
   mods:lsGet('mods',[]),
   profilNotifs:lsGet('profilNotifs',[]),
+  reposVerrouilles:{}, // repos protégés par les salariés : {"empId_YYYY-MM-DD": true} (table repos_verrouilles)
   eWO:0,mWO:0,mMO:0,eMO:0,eAO:0,eqWO:0,eqMO:0,empTab:'perso',empView:'sem',empMagView:'sem',
   view:'sem',moisMode:'site',triConges:'restants',moisOuverts:[],
   filtresSites:[], // sites actifs (vide = magasin par défaut)
@@ -2948,6 +2975,8 @@ async function loadAll(force=false){
         Object.assign(SC, supa.sc);
         lsSet('sc', SC);
       }
+      // Repos protégés par les salariés — remplacement direct (source de vérité = la table).
+      if(supa.repos_verrouilles) S.reposVerrouilles = supa.repos_verrouilles;
       // Notifications gestionnaire (modifications de coordonnées salarié) — remplacement direct.
       if(Array.isArray(supa.profil_notifs)) {
         S.profilNotifs = supa.profil_notifs;
@@ -3151,6 +3180,7 @@ function verifierChangementRepos(empId, dateActuelle, dateSouhaitee){
   // à shSouhaitee plus bas où absente signifie bien "ne travaille pas" (rejet correct dans ce sens).
   const shActuelle = S.planning[`${empId}_${dateActuelle}`];
   if((shActuelle?.type||'off') !== 'off') return {ok:false, erreur:'Vous n\'êtes pas en repos à cette date'};
+  if(reposVerrouille(empId, dateActuelle)) return {ok:false, erreur:'Ce repos est protégé — retirez d\'abord la protection (« Mes repos protégés »)'};
   const shSouhaitee = S.planning[`${empId}_${dateSouhaitee}`];
   if(!shSouhaitee || shSouhaitee.type==='off' || estTypeAbsence(shSouhaitee.type)) return {ok:false, erreur:'Vous ne travaillez pas à la date souhaitée'};
   const lundiActuelle = fmt(getMon(new Date(dateActuelle+'T12:00:00')));
@@ -3338,6 +3368,7 @@ function renderEmp(resetView=true){
   initCongeListeners();
   renderEmpWeek();
   renderEmpQuota();
+  renderEmpRepos();
   renderEmpAbsList();
   renderEmpCongeSansSolde();
   renderEmpRecup();
@@ -3375,7 +3406,7 @@ function renderEmpWeek(){
     const evInternesJourW=getEvInternesDuJourPourEmp(emp.id,fmt(d));
     const evBadgeW=evInternesJourW.length?`<div style="font-size:11px;font-weight:700;margin-left:6px;background:#1A1917;color:#fff;padding:2px 7px;border-radius:20px;white-space:nowrap;cursor:pointer;" title="${evInternesJourW.map(e=>evInterneTooltipTxt(e)).join(' · ')}" onclick="voirEvInternesJour('${emp.id}','${fmt(d)}')">${evInternesJourW.map(e=>(EV_INTERNE_LABELS[e.type]||'Autre')+(e.heureDebut?' '+e.heureDebut:'')).join(' + ')}</div>`:'';
     h+=`<div class="day-row${isT?' today-row':''}">
-      <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${evBadgeW}
+      <div class="dlbl">${JOURS_C[i]}</div><div class="dnum">${d.getDate()}</div>${bar}${reposVerrouille(emp.id,fmt(d))?'<span title="Repos protégé" style="margin-left:6px;font-size:13px;">🔒</span>':''}${evBadgeW}
     </div>`;
   }
   document.getElementById('empDays').innerHTML=h;
@@ -3434,7 +3465,7 @@ function renderEmpMonth(){
     const evInternesJourEM=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
     const evBadgeEM=evInternesJourEM.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="${evInternesJourEM.map(e=>evInterneTooltipTxt(e)).join(' · ')}" onclick="event.stopPropagation();voirEvInternesJour('${emp.id}','${fmt(cur)}')">${EV_INTERNE_LABELS[evInternesJourEM[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;">
-      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblEM}${evBadgeEM}</div>`;
+      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblEM}${evBadgeEM}${thisM?badgeReposVerrouille(emp.id,fmt(cur)):''}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('empCalBody').innerHTML=h;
@@ -3878,12 +3909,13 @@ async function appliquerSelectionType(type, targetSite){
   if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
   if(selCells.size===0){toast('Aucune cellule sélectionnée');return;}
   const keys = [...selCells];
-  let dejaSurCeSite = 0;
+  let dejaSurCeSite = 0, nbProteges = 0;
   const nbJoursParEmp = {};
   for(const key of keys){
     const [empId, dateStr] = key.split('_');
     const emp = S.employees.find(e=>e.id===empId);
     if(!emp) continue;
+    if(reposVerrouille(empId, dateStr)){ nbProteges++; continue; } // repos protégé par le salarié
     // Pour un remplacement, le site cible choisi s'applique à toute la sélection ; les autres
     // types restent sur le site habituel de chaque employé, comme avant.
     const site = type==='remplacement' ? (targetSite||emp.site) : emp.site;
@@ -3903,9 +3935,11 @@ async function appliquerSelectionType(type, targetSite){
   persist();
   annulerSelection();
   refreshActiveView();
+  const nbMaj = keys.length - nbProteges;
+  const infoProteges = nbProteges ? ` — 🔒 ${nbProteges} repos protégé(s) ignoré(s)` : '';
   toast(dejaSurCeSite
-    ? `✓ ${keys.length} cellule(s) mises à jour (⚠️ ${dejaSurCeSite} déjà sur le site choisi — pas un vrai renfort pour elles)`
-    : `✓ ${keys.length} cellule(s) mises à jour`, dejaSurCeSite?5000:3000);
+    ? `✓ ${nbMaj} cellule(s) mises à jour (⚠️ ${dejaSurCeSite} déjà sur le site choisi — pas un vrai renfort pour elles)${infoProteges}`
+    : `✓ ${nbMaj} cellule(s) mises à jour${infoProteges}`, (dejaSurCeSite||nbProteges)?5000:3000);
 }
 
 function annulerSelection(){
@@ -4192,7 +4226,7 @@ function renderWeek(){
         const evInterneBadge=evInternesJour.length
           ?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;" title="${evInternesJour.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJour[0].type]||'Autre'}</div>`
           :'';
-        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}position:relative;">${cell}${evInterneBadge}</td>`;
+        tb+=`<td style="${isT?'background:#F0F7FF;':isW?'background:#FAFAF8;':''}position:relative;">${cell}${evInterneBadge}${badgeReposVerrouille(emp.id,dStr)}</td>`;
         // Cellule vacances (colonne étroite après chaque jour)
         const evVacJour=getEvenementsDuJour(dStr).filter(e=>{const t=S.eventTypes.find(et=>et.id===e.typeId);return t&&t.isVacances;});
         const vacScoJour=isDateVacances(dStr);
@@ -4369,7 +4403,8 @@ function renderMonthSiteTable(site, ref, today, empsFiltres, readOnly=false){
       if(isHorsContrat(emp,dStr)){
         cell=`<div class="mblock" style="background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 3px,#E5E7EB 3px,#E5E7EB 6px);cursor:not-allowed;" title="Hors contrat"></div>`;
       } else if(type==='off'){
-        cell=`<div class="mblock empty"${readOnly?'':` onclick="openShiftMod('${emp.id}','${fmt(d)}')"`}></div>`;
+        const lockM=reposVerrouille(emp.id,dStr);
+        cell=`<div class="mblock empty"${lockM?' title="Repos protégé par le salarié"':''}${readOnly?'':` onclick="openShiftMod('${emp.id}','${fmt(d)}')"`}>${lockM?'<span style="font-size:7px;line-height:1;">🔒</span>':''}</div>`;
       } else {
         const c=getColor(type,site2);
         const mLbl=cellShortLabel(type,site2);
@@ -4462,16 +4497,100 @@ function renderMonthEmp(ref,today){
     const evInternesJourE=thisM?getEvInternesDuJourPourEmp(emp.id,fmt(cur)):[];
     const evBadgeE=evInternesJourE.length?`<div style="position:absolute;bottom:1px;left:1px;right:1px;font-size:6px;font-weight:700;line-height:1.2;color:#fff;background:#1A1917;border-radius:2px;padding:1px 2px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${evInternesJourE.map(e=>evInterneTooltipTxt(e)).join(' · ')}">${EV_INTERNE_LABELS[evInternesJourE[0].type]||'Autre'}</div>`:'';
     h+=`<div class="cal-day${!thisM?' other':''}${isT?' today-cal':''}" style="position:relative;" onclick="${thisM?`openShiftMod('${emp.id}','${fmt(cur)}')`:''}">
-      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblE}${evBadgeE}</div>`;
+      <div class="cnum">${cur.getDate()}</div>${bar}${typeLblE}${evBadgeE}${thisM?badgeReposVerrouille(emp.id,fmt(cur)):''}</div>`;
     cur=addDays(cur,1);
   }
   document.getElementById('calBody').innerHTML=h;
+}
+
+// ── Repos protégés (Antoine, 2026-10-21) ──
+// Le salarié peut protéger un repos prévu (rendez-vous important…) : le gestionnaire ne peut alors
+// plus le modifier, quel que soit le chemin (case, période, sélection multiple, remplacement,
+// génération/import Excel, échange…). Seul le salarié peut lever la protection. 3 protections
+// actives (jour d'aujourd'hui ou à venir) au maximum par salarié.
+const MAX_REPOS_VERROUILLES = 3;
+function reposVerrouille(empId, dateStr){ return !!S.reposVerrouilles?.[`${empId}_${dateStr}`]; }
+function reposVerrouillesActifs(empId){
+  const today = fmt(new Date());
+  const prefix = empId + '_';
+  return Object.keys(S.reposVerrouilles || {})
+    .filter(k => k.startsWith(prefix) && k.slice(prefix.length) >= today)
+    .map(k => k.slice(prefix.length)).sort();
+}
+function badgeReposVerrouille(empId, dateStr){
+  return reposVerrouille(empId, dateStr)
+    ? `<span title="Repos protégé par le salarié — non modifiable" style="position:absolute;top:1px;right:1px;font-size:9px;line-height:1;pointer-events:none;">🔒</span>` : '';
+}
+// cases : tableau de [empId, dateStr]. Renvoie le message d'erreur (vide si aucune n'est protégée).
+function messageReposProtege(cases){
+  const touchees = cases.filter(([e,d]) => reposVerrouille(e,d));
+  if(!touchees.length) return '';
+  const lib = touchees.slice(0,3).map(([e,d]) => `${(S.employees.find(x=>x.id===e)?.name||'').split(' ')[0]} (${fmtFR(new Date(d+'T12:00'),{day:'numeric',month:'long'})})`).join(', ');
+  return `🔒 Repos protégé par le salarié : ${lib}${touchees.length>3?'…':''} — seul le salarié peut lever la protection.`;
+}
+function bloquerSiReposProtege(cases){
+  const m = messageReposProtege(cases);
+  if(m) toast(m, 5000);
+  return !!m;
+}
+async function protegerRepos(){
+  const emp = S.user; if(!emp) return;
+  const dateStr = document.getElementById('rLockDate').value;
+  if(!dateStr){toast('Sélectionnez une date');return;}
+  if(dateStr < fmt(new Date())){toast('Choisissez un jour à venir');return;}
+  if(reposVerrouille(emp.id, dateStr)){toast('Ce repos est déjà protégé');return;}
+  if((S.planning[`${emp.id}_${dateStr}`]?.type || 'off') !== 'off'){toast('Ce jour n\'est pas un repos dans votre planning');return;}
+  if(reposVerrouillesActifs(emp.id).length >= MAX_REPOS_VERROUILLES){toast(`Maximum ${MAX_REPOS_VERROUILLES} repos protégés en même temps — retirez-en un d'abord`, 4500);return;}
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/repos_verrouilles?on_conflict=employee_id,entry_date`, {
+      method:'POST', headers: supaHeaders({'Prefer':'resolution=ignore-duplicates,return=minimal'}),
+      body: JSON.stringify({employee_id: emp.id, entry_date: dateStr})
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+  } catch(e) {
+    console.warn('protegerRepos error', e);
+    toast('Impossible de protéger ce repos pour le moment — réessayez');
+    return;
+  }
+  S.reposVerrouilles[`${emp.id}_${dateStr}`] = true;
+  document.getElementById('rLockDate').value = '';
+  renderEmpRepos(); renderEmpWeek();
+  if(S.empView==='mois') renderEmpMonth();
+  toast('🔒 Repos protégé — le gestionnaire ne peut plus le modifier');
+}
+async function retirerProtectionRepos(dateStr){
+  const emp = S.user; if(!emp) return;
+  try {
+    const r = await fetch(`${supaBase()}/rest/v1/repos_verrouilles?employee_id=eq.${encodeURIComponent(emp.id)}&entry_date=eq.${dateStr}`, {
+      method:'DELETE', headers: supaHeaders({'Prefer':'return=minimal'})
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+  } catch(e) {
+    console.warn('retirerProtectionRepos error', e);
+    toast('Impossible de retirer la protection pour le moment — réessayez');
+    return;
+  }
+  delete S.reposVerrouilles[`${emp.id}_${dateStr}`];
+  renderEmpRepos(); renderEmpWeek();
+  if(S.empView==='mois') renderEmpMonth();
+  toast('Protection retirée');
+}
+function renderEmpRepos(){
+  const emp = S.user; const el = document.getElementById('empReposList'); if(!emp || !el) return;
+  const dates = reposVerrouillesActifs(emp.id);
+  const compteur = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${dates.length}/${MAX_REPOS_VERROUILLES} repos protégés</div>`;
+  el.innerHTML = compteur + (dates.length
+    ? dates.map(d => `<div class="conge-item"><div style="flex:1;font-weight:600;font-size:12px;">🔒 ${fmtFR(new Date(d+'T12:00'),{weekday:'long',day:'numeric',month:'long'})}</div>
+        <button class="btn btn-ghost btn-sm" onclick="retirerProtectionRepos('${d}')">Retirer</button></div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted);">Aucun repos protégé</div>');
 }
 
 // ── Modal shift ──
 function openShiftMod(empId,dateStr){
   // Verrou anti-erreur
   if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
+  // Repos protégé par le salarié : non modifiable (ni sélectionnable en mode sélection multiple)
+  if(bloquerSiReposProtege([[empId,dateStr]])) return;
   // Mode sélection multiple
   if(selMode){toggleCellSelection(empId,dateStr);return;}
   S.editing={empId,dateStr};
@@ -4582,6 +4701,7 @@ function _enregistrerEffetNotifPlanning(modEntry){
 async function annulerDerniereModifPlanning(){
   if(!_derniereModifPlanning){toast('Rien à annuler');return;}
   _derniereModifPlanning.cellules.forEach(({cle, ancienne})=>{
+    if(reposVerrouille(cle.slice(0,-11), cle.slice(-10))) return; // repos protégé depuis : on n'y touche pas
     if(ancienne) S.planning[cle] = ancienne;
     else delete S.planning[cle];
   });
@@ -4604,6 +4724,7 @@ async function saveShift(){
   if(S.shiftMode==='periode') return saveShiftPeriode();
 
   const {empId,dateStr}=S.editing;
+  if(bloquerSiReposProtege([[empId,dateStr]])) return;
   const emp=S.employees.find(e=>e.id===empId);
   const note=document.getElementById('mNote').value;
   const sendMail=document.getElementById('doEmail').checked;
@@ -4649,7 +4770,12 @@ async function saveShiftPeriode(){
     if(!(exclDim && cur.getDay()===0)) jours.push(fmt(cur));
     cur=addDays(cur,1);
   }
-  if(!jours.length){toast('Aucun jour à appliquer sur cette période');return;}
+  // Les repos protégés par le salarié sont laissés tels quels, le reste de la période est appliqué.
+  const joursProteges=jours.filter(d=>reposVerrouille(empId,d));
+  if(joursProteges.length){
+    joursProteges.forEach(d=>jours.splice(jours.indexOf(d),1));
+  }
+  if(!jours.length){toast(joursProteges.length?'🔒 Tous les jours sont des repos protégés par le salarié':'Aucun jour à appliquer sur cette période',4500);return;}
 
   _capturerAvantEcriturePlanning(jours.map(dStr=>`${empId}_${dStr}`));
   jours.forEach(dStr=>{
@@ -4676,7 +4802,7 @@ async function saveShiftPeriode(){
   const today2=new Date();today2.setHours(0,0,0,0);
   const mon2=addDays(getMon(today2),S.mWO*7);
   checkEffectifAlerts(mon2);
-  toast(`✓ Période mise à jour (${jours.length} jour${jours.length>1?'s':''})`);
+  toast(`✓ Période mise à jour (${jours.length} jour${jours.length>1?'s':''})${joursProteges.length?` — 🔒 ${joursProteges.length} repos protégé${joursProteges.length>1?'s':''} ignoré${joursProteges.length>1?'s':''}`:''}`, joursProteges.length?4500:3000);
 }
 
 // ── Absences ──
@@ -4723,11 +4849,12 @@ let _dernierIdUnique=0;
 // Date.now() seul se répète dans une boucle rapide (même milliseconde) → identifiants dupliqués.
 function idUnique(){ _dernierIdUnique=Math.max(Date.now(), _dernierIdUnique+1); return _dernierIdUnique; }
 function joursAbsencePeriode(emp, debut, fin){
-  if(debut===fin) return [debut];
+  if(debut===fin) return reposVerrouille(emp.id,debut) ? [] : [debut];
   const jours=[];
   let cur=new Date(debut+'T12:00'); const last=new Date(fin+'T12:00');
   while(cur<=last){
     const dStr=fmt(cur);
+    if(reposVerrouille(emp.id,dStr)){ cur=addDays(cur,1); continue; } // repos protégé par le salarié
     const sh=S.planning[`${emp.id}_${dStr}`];
     const nonTravaille = isJourRepos(emp,cur) || (sh && (sh.type==='off' || estTypeAbsence(sh.type)));
     if(!nonTravaille) jours.push(dStr);
@@ -5215,6 +5342,7 @@ async function validerRemp(){
   const abs=S.absences.find(a=>a.id===S.editingAbs);if(!abs)return;
   const rempId=document.getElementById('rempChoisi').value;if(!rempId){toast('Sélectionnez un remplaçant');return;}
   const remp=S.employees.find(e=>e.id===rempId);if(!remp)return;
+  if(bloquerSiReposProtege([[rempId,abs.dateStr]])) return;
   // Si le remplaçant vient d'un autre site, c'est un renfort (comme une affectation manuelle) —
   // il faut le type 'remplacement' pour que le site cible s'affiche sur sa case, et pour qu'il
   // remonte dans les lignes "renfort" du planning. Un collègue du même site reste sur son type habituel.
@@ -5747,7 +5875,7 @@ function analyserGenerationPlanning(){
     // resterait exposée à être écrasée dès qu'un seul jour d'école est défini pour l'employé.
     const typesGenerables = jourEcole ? [...typesGenerablesBase,'formation'] : typesGenerablesBase;
     const estException = existant && !typesGenerables.includes(typeActuel);
-    if(estException){ nbPreserves++; }
+    if(estException || reposVerrouille(empId,dStr)){ nbPreserves++; }
     else if(typeActuel!==nouveauType || (existant?.site||site)!==site){
       changes.push({dateStr:dStr, newType:nouveauType, oldType:typeActuel, note:existant?.note||''});
     }
@@ -5764,7 +5892,9 @@ function analyserGenerationPlanning(){
 function appliquerGenerationPlanning(){
   if(S.params?.verrou){toast('⛔ Planning verrouillé — désactivez le mode anti-erreur dans Paramètres');return;}
   if(!_genPlanningStaging || !_genPlanningStaging.changes.length) return;
-  const {empId, site, changes} = _genPlanningStaging;
+  const {empId, site} = _genPlanningStaging;
+  const changes = _genPlanningStaging.changes.filter(c=>!reposVerrouille(empId,c.dateStr)); // repos protégés exclus
+  if(!changes.length){toast('🔒 Tous les jours concernés sont des repos protégés par le salarié',4500);return;}
   changes.forEach(c=>{ S.planning[`${empId}_${c.dateStr}`] = {type:c.newType, site, note:c.note}; });
   const detGen=`Planning régénéré (${changes.length} jour(s))`;
   S.mods.push({empId, dl:'plusieurs jours', det:detGen, seen:false});
@@ -6917,7 +7047,10 @@ function renderExcelImportPreview(changes, unrecognized, unmatchedCols, assumpti
 
 function confirmExcelImport(){
   if(!_excelImportStaging || !_excelImportStaging.changes.length) return;
-  const {changes} = _excelImportStaging;
+  // Les repos protégés par le salarié ne sont jamais écrasés par un import.
+  const changes = _excelImportStaging.changes.filter(c=>!reposVerrouille(c.empId,c.dateStr));
+  const nbProteges = _excelImportStaging.changes.length - changes.length;
+  if(!changes.length){toast('🔒 Tous les changements concernent des repos protégés par les salariés',4500);return;}
   changes.forEach(c=>{
     S.planning[`${c.empId}_${c.dateStr}`] = {type:c.newType, site:c.newSite, note:c.newNote};
   });
@@ -6933,7 +7066,7 @@ function confirmExcelImport(){
   });
   persist();
   refreshActiveView();
-  toast(`✓ ${changes.length} case(s) de planning mise(s) à jour`);
+  toast(`✓ ${changes.length} case(s) de planning mise(s) à jour${nbProteges?` — 🔒 ${nbProteges} repos protégé(s) ignoré(s)`:''}`, nbProteges?5000:3000);
   document.getElementById('excelImportPreview').innerHTML='';
   document.getElementById('excelImportFile').value='';
   _excelImportStaging = null;
@@ -7861,7 +7994,7 @@ function enregistrerModifConge(){
   const fin = new Date(nouveauFin+'T12:00');
   while(cur<=fin){
     if(JOURS_OUVRES.includes(cur.getDay())){
-      if(emp && isJourRepos(emp, cur)) S.planning[`${req.empId}_${fmt(cur)}`] = {type:'off', site:emp?.site||'', note:''};
+      if(emp && (isJourRepos(emp, cur) || reposVerrouille(req.empId, fmt(cur)))) S.planning[`${req.empId}_${fmt(cur)}`] = {type:'off', site:emp?.site||'', note:''};
       else S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
     }
     cur = addDays(cur,1);
@@ -7941,7 +8074,8 @@ function appliquerValidationConge(req) {
     if (JOURS_OUVRES.includes(cur.getDay())) {
       // Le jour de repos fixe de l'employé reste "repos" : il ne travaille pas ce jour-là de
       // toute façon, donc il ne doit pas être décompté comme un jour de CP consommé.
-      if (emp && isJourRepos(emp, cur)) {
+      // Idem pour un repos protégé par le salarié (jamais modifié par le gestionnaire).
+      if (emp && (isJourRepos(emp, cur) || reposVerrouille(req.empId, fmt(cur)))) {
         S.planning[`${req.empId}_${fmt(cur)}`] = {type:'off', site:emp?.site||'', note:''};
       } else {
         S.planning[`${req.empId}_${fmt(cur)}`] = {type:'conge', site:emp?.site||'', note:'Congé payé'};
@@ -8002,7 +8136,7 @@ async function validerCongeSansSolde(id){
   let cur = new Date(req.dateDebut+'T12:00');
   const fin = new Date(req.dateFin+'T12:00');
   while(cur <= fin){
-    if(JOURS_OUVRES.includes(cur.getDay())){
+    if(JOURS_OUVRES.includes(cur.getDay()) && !reposVerrouille(req.empId, fmt(cur))){
       const emp = S.employees.find(e=>e.id===req.empId);
       S.planning[`${req.empId}_${fmt(cur)}`] = {type:'congeSansSolde', site:emp?.site||'', note:'Congé sans solde'};
     }
@@ -8058,6 +8192,7 @@ async function validerRecup(id){
   const req = S.requests.find(r=>r.id==id); if(!req) return;
   const emp = S.employees.find(e=>e.id===req.empId);
   if(!emp){toast('Employé introuvable');return;}
+  if(bloquerSiReposProtege([[req.empId,req.dateDebut]])) return;
   const solde = emp.heuresSupp ?? 0;
   if(req.heuresDemandees > solde){toast(`Solde insuffisant (${solde}h disponible(s), ${req.heuresDemandees}h demandées)`);return;}
   req.status = 'approved';
@@ -8120,6 +8255,7 @@ async function validerChangementRepos(id){
   // dateDebut=repos à libérer, dateFin=nouveau repos souhaité (voir sendReq, pas de colonne dédiée).
   const verif = verifierChangementRepos(req.empId, req.dateDebut, req.dateFin);
   if(!verif.ok){toast(`⚠️ ${verif.erreur} — la situation a changé depuis la demande`);return;}
+  if(bloquerSiReposProtege([[req.empId,req.dateDebut],[req.empId,req.dateFin]])) return;
   req.status = 'approved';
   S.planning[`${req.empId}_${req.dateDebut}`] = {type:verif.typeActuel, site:verif.site, note:''};
   S.planning[`${req.empId}_${req.dateFin}`] = {type:'off', site:emp.site||'', note:''};
@@ -8194,6 +8330,7 @@ async function validerEchange(id){
   const empA = S.employees.find(e=>e.id===req.empId);
   const empB = S.employees.find(e=>e.id===req.cibleId);
   if(!empA||!empB){toast('Employé introuvable');return;}
+  if(bloquerSiReposProtege([[req.empId,req.dateA],[req.empId,req.dateB],[req.cibleId,req.dateA],[req.cibleId,req.dateB]])) return;
   const shA = S.planning[`${req.empId}_${req.dateA}`] || {type:'off',site:empA.site,note:''};
   const shB = S.planning[`${req.cibleId}_${req.dateB}`] || {type:'off',site:empB.site,note:''};
   // A prend la place de B le dateB (avec le type de B), et devient repos le dateA (B prend sa place).
@@ -8229,6 +8366,7 @@ async function validerEchangeAB(id){
   const empA = S.employees.find(e=>e.id===req.empId);
   const empB = S.employees.find(e=>e.id===req.cibleId);
   if(!empA||!empB){toast('Employé introuvable');return;}
+  if(bloquerSiReposProtege([[req.empId,req.dateA],[req.cibleId,req.dateA]])) return;
   const shA = S.planning[`${req.empId}_${req.dateA}`];
   const shB = S.planning[`${req.cibleId}_${req.dateA}`];
   if(!shA||!shB){toast('Planning introuvable pour ce jour');return;}
