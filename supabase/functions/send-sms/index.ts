@@ -39,7 +39,7 @@ Deno.serve(async (req: Request) => {
     });
   }
   try {
-    const { to, text } = await req.json();
+    const { to, text, test } = await req.json();
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
     if (!recipients.length || !text) {
       return new Response(JSON.stringify({ error: "to et text sont requis" }), {
@@ -53,7 +53,13 @@ Deno.serve(async (req: Request) => {
       `<password>${escapeXml(CAPITOLE_PASSWORD)}</password></authentification>` +
       `<message><text>${escapeXml(text)}</text><sender>${escapeXml(CAPITOLE_SENDER)}</sender><long>yes</long></message>` +
       `<recipients>${gsmTags}</recipients></SMS>`;
-    const capitoleRes = await fetch("https://sms.capitolemobile.com/api/sendsms/xml_v2", {
+    // Mode diagnostic ({"to":["06…"],"text":"x","test":true}) : appelle l'URL de préproduction de
+    // Capitole, qui n'envoie aucun SMS et renvoie en écho l'adresse IP SORTANTE de cette fonction —
+    // celle qu'il faut autoriser dans Capitole Mobile → SMS → Mon API si une liste d'IP est exigée.
+    const url = test
+      ? "https://sms.capitolemobile.com/api/sendsms/xml_test"
+      : "https://sms.capitolemobile.com/api/sendsms/xml_v2";
+    const capitoleRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "XML=" + encodeURIComponent(xml),
