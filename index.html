@@ -2709,7 +2709,11 @@ async function supaReadParams(empRows) {
 async function supaReadAll() {
   if(!_supaUrl || !_supaKey) return null;
   try {
-    const r = await fetch(`${supaBase()}/rest/v1/okla_store?select=section,data`, {
+    // Le blob "planning" d'okla_store (~420 Ko, ancien format) n'est PAS téléchargé à chaque synchro :
+    // il ne sert que de repli si la table planning_entries est illisible (voir plus bas). Le
+    // télécharger systématiquement représentait ~60 % du trafic sortant Supabase (quota gratuit
+    // dépassé — Antoine, 2026-11-16).
+    const r = await fetch(`${supaBase()}/rest/v1/okla_store?select=section,data&section=neq.planning`, {
       headers: supaHeaders()
     });
     if(!r.ok) return null;
@@ -2723,6 +2727,11 @@ async function supaReadAll() {
     if (reposVerrouillesMap) result.repos_verrouilles = reposVerrouillesMap;
     if (empRows) result.employees = empRows;
     if (planningRows) result.planning = planningRows;
+    else {
+      // Repli : table planning_entries indisponible → ancien blob (comportement d'avant).
+      const legacy = await supaRead('planning');
+      if (legacy) result.planning = legacy;
+    }
     if (requestRows) result.requests = requestRows;
     if (absenceRows) result.absences = absenceRows;
     if (eventTypeRows) result.event_types = eventTypeRows;
