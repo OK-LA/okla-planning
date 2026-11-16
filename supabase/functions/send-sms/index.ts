@@ -64,7 +64,9 @@ Deno.serve(async (req: Request) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "XML=" + encodeURIComponent(xml),
     });
-    const resultText = (await capitoleRes.text()).trim();
+    let resultText = (await capitoleRes.text()).trim();
+    // L'URL de test renvoie en écho le XML reçu, identifiants compris : on n'en garde que l'IP.
+    if (test) resultText = (/IP serveur\s*:\s*([\d.:a-fA-F]+)/.exec(resultText)?.[0]) ?? "IP non trouvée";
     const ok = resultText.startsWith("SENDING_OK");
     return new Response(JSON.stringify({ ok, raw: resultText }), {
       status: ok ? 200 : 502,
