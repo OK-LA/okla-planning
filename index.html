@@ -1683,15 +1683,13 @@ function supaHeaders(extra={}) {
 async function envoyerNotifEmail(to, subject, html){
   if(!_supaUrl || !_supaKey) return;
   const recipients = (Array.isArray(to)?to:[to]).filter(Boolean);
-  if(!recipients.length) return false;
+  if(!recipients.length) return;
   try {
-    const r = await fetch(`${supaBase()}/functions/v1/send-notification`, {
+    await fetch(`${supaBase()}/functions/v1/send-notification`, {
       method:'POST', headers: supaHeaders(),
       body: JSON.stringify({to:recipients, subject, html})
     });
-    if(!r.ok) console.warn('envoyerNotifEmail refusé', r.status);
-    return r.ok;
-  } catch(e){ console.warn('envoyerNotifEmail error', e); return false; }
+  } catch(e){ console.warn('envoyerNotifEmail error', e); }
 }
 function emailsGestionnaire(){
   return (S.params?.notifEmails||[]).filter(Boolean);
@@ -1921,26 +1919,20 @@ async function confirmerEnvoiSmsSelection(){
   fetch(`${supaBase()}/rest/v1/planning_recaps?vu=eq.true&created_at=lt.${encodeURIComponent(new Date(Date.now()-60*86400000).toISOString())}`,
     {method:'DELETE', headers: supaHeaders()}).catch(()=>{});
 
-  // 2) SMS + e-mail en doublon (Antoine, 2026-11-16 : le SMS peut tomber en panne) — un de chaque par
-  // salarié selon ce dont il dispose, envoyés en parallèle ; on attend les résultats pour signaler un échec.
+  // 2) SMS (un par salarié ayant un téléphone) — on attend le résultat pour signaler un échec.
   const parEmploye={};
   aEnvoyer.forEach(p=>{ (parEmploye[p.empId]=parEmploye[p.empId]||[]).push(p); });
-  let nbSms=0, nbMail=0, nbSansCanal=0, nbEchecsSms=0, nbEchecsMail=0;
+  let nbSms=0, nbSansTel=0, nbEchecs=0;
   await Promise.all(Object.keys(parEmploye).map(async empId=>{
     const emp=S.employees.find(e=>e.id===empId);
-    if(!emp?.tel && !emp?.email){ nbSansCanal++; return; }
-    const texte=texteSmsModifPlanning(emp, parEmploye[empId], mode);
-    const [okSms, okMail]=await Promise.all([
-      emp.tel ? envoyerNotifSms(emp.tel, texte) : null,
-      emp.email ? envoyerNotifEmail(emp.email, 'OK-LA Planning — votre planning a été modifié', `<p>${texte}</p><p style="color:#666;font-size:12px;">Message automatique OK-LA Planning.</p>`) : null,
-    ]);
-    if(okSms===true) nbSms++; else if(okSms===false) nbEchecsSms++;
-    if(okMail===true) nbMail++; else if(okMail===false) nbEchecsMail++;
+    if(!emp?.tel){ nbSansTel++; return; }
+    const ok=await envoyerNotifSms(emp.tel, texteSmsModifPlanning(emp, parEmploye[empId], mode));
+    if(ok) nbSms++; else nbEchecs++;
   }));
   // 3) Le reste reste en attente.
   await remettreEnFileSms(aReporter);
   const nbSal=Object.keys(parEmploye).length;
-  toast(`✓ ${aEnvoyer.length} modification(s) communiquée(s) à ${nbSal} salarié(s) — ${nbSms} SMS, ${nbMail} e-mail(s)${nbSansCanal?`, ${nbSansCanal} sans téléphone ni e-mail (compte seulement)`:''}${nbEchecsSms?`, ⚠️ ${nbEchecsSms} SMS en échec`:''}${nbEchecsMail?`, ⚠️ ${nbEchecsMail} e-mail(s) en échec`:''}${aReporter.length?` · ${aReporter.length} laissée(s) en attente`:''}`, 7000);
+  toast(`✓ ${aEnvoyer.length} modification(s) communiquée(s) à ${nbSal} salarié(s) — ${nbSms} SMS${nbSansTel?`, ${nbSansTel} sans téléphone (compte seulement)`:''}${nbEchecs?`, ⚠️ ${nbEchecs} SMS en échec`:''}${aReporter.length?` · ${aReporter.length} laissée(s) en attente`:''}`, 6000);
 }
 // Retire définitivement de la file les modifications cochées, SANS prévenir le salarié (test abandonné,
 // modification finalement annulée...) — évite qu'elles s'accumulent à jamais dans la file.
